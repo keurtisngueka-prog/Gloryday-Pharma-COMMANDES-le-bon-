@@ -1,0 +1,6 @@
+{
+  "name": "Gloryday Pharma - Commande Médicale",
+  "description": "Plateforme mobile de commande de consommables et dispositifs médicaux pour cliniques, pharmacies et hôpitaux. Devis estimatifs, bons PDF et transmission WhatsApp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="gpGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d44e8"/>
+      <stop offset="100%" stop-color="#052585"/>
+    </linearGradient>
+    <filter id="subtleGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0d44e8" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <!-- Background with Safe Margin (CleanSquircle) -->
+  <rect width="512" height="512" rx="110" fill="#0f0f12"/>
+  
+  <!-- Subtle inner background circle for safe zone (80% circle) -->
+  <circle cx="256" cy="256" r="190" fill="#161618"/>
+  
+  <!-- Medical Shield / Emblem -->
+  <g filter="url(#subtleGlow)">
+    <rect x="186" y="116" width="140" height="280" rx="36" fill="url(#gpGrad)"/>
+    <rect x="116" y="186" width="280" height="140" rx="36" fill="url(#gpGrad)"/>
+  </g>
+
+  <!-- Clean Inner Cross Accent -->
+  <circle cx="256" cy="256" r="38" fill="#ffffff"/>
+  <path d="M256 238 L256 274 M238 256 L274 256" stroke="#0d44e8" stroke-width="8" stroke-linecap="round"/>
+</svg>
