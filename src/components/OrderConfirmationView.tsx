@@ -111,9 +111,20 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
             <strong className="text-slate-900 block truncate">{order.customer.facilityName}</strong>
           </div>
           <div>
-            <span className="text-slate-400 block text-[10px] uppercase">Contact</span>
+            <span className="text-slate-400 block text-[10px] uppercase">Contact WhatsApp</span>
             <strong className="text-slate-900 block truncate">{order.customer.phone}</strong>
           </div>
+        </div>
+
+        {/* Neighborhood & Delay estimation */}
+        <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+          <span className="text-slate-600 flex items-center gap-1.5">
+            <span className="text-base">📍</span>
+            <span>Destination : <strong className="text-slate-900">{order.deliveryZone || order.customer.neighborhoodName || 'Libreville'}</strong></span>
+          </span>
+          <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold text-[11px] border border-blue-200">
+            ⏱️ {order.deliveryEstimated || 'Délai : ~30 - 45 min'}
+          </span>
         </div>
       </div>
 

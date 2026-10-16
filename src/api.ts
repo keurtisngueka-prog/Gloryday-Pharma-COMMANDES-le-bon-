@@ -12,6 +12,7 @@ import {
   AppRole
 } from './types';
 import { INITIAL_PRODUCTS, INITIAL_PACKS } from './data/initialProducts';
+import { getEstimatedDeliveryText, detectNeighborhoodFromAddress } from './data/librevilleZones';
 
 const TOKEN_KEY = 'gloryday_auth_token';
 const GUEST_ORDERS_KEY = 'gloryday_guest_orders';
@@ -598,20 +599,29 @@ export const api = {
   },
 
   async createOrder(customer: Order['customer'], items: CartItem[]): Promise<Order> {
+    const zoneName = customer.neighborhoodName || 
+      (customer.deliveryAddress ? detectNeighborhoodFromAddress(customer.deliveryAddress)?.name : null) || 
+      'Grand Libreville';
+    const estimatedTime = getEstimatedDeliveryText(customer.neighborhoodId, customer.deliveryAddress);
+
     try {
       const order = await request<Order>('/api/orders', {
         method: 'POST',
         body: JSON.stringify({ customer, items })
       });
+      if (!order.deliveryZone) order.deliveryZone = zoneName;
+      if (!order.deliveryEstimated) order.deliveryEstimated = estimatedTime;
       saveLocalGuestOrder(order);
       return order;
     } catch (err: any) {
       const year = new Date().getFullYear();
       const localCounter = Math.floor(1000 + Math.random() * 9000);
       const fallbackRef = `GP-${year}-P${localCounter}`;
-      const fixedTotal = items
+      const itemsTotal = items
         .filter(it => !it.isQuote)
         .reduce((sum, it) => sum + it.price * it.quantity, 0);
+      const deliveryFee = customer.deliveryFee || 0;
+      const finalTotal = itemsTotal + deliveryFee;
 
       const localOrder: Order = {
         id: `ord-offline-${Date.now()}`,
@@ -627,10 +637,22 @@ export const api = {
           total: it.isQuote ? 0 : it.price * it.quantity,
           isQuote: it.isQuote
         })),
-        estimatedTotal: fixedTotal,
+        estimatedTotal: finalTotal,
         hasQuoteItems: items.some(it => it.isQuote),
         status: 'À confirmer',
-        isPaid: false
+        isPaid: false,
+        deliveryStage: 'preparation',
+        deliveryZone: zoneName,
+        deliveryEstimated: estimatedTime,
+        deliveryFee,
+        courier: {
+          name: 'Alexandre Moundounga (Livreur Médical)',
+          phone: '+24177003004',
+          vehicle: 'Moto Médicale GP-04',
+          matricule: 'LOG-LBV-04',
+          currentZone: 'Dépôt Central Oloumi',
+          estimatedTime
+        }
       };
       saveLocalGuestOrder(localOrder);
       return localOrder;

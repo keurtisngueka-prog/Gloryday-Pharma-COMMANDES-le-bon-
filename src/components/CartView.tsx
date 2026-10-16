@@ -11,10 +11,18 @@ import {
   Truck, 
   FileText,
   AlertTriangle,
-  HelpCircle
+  HelpCircle,
+  Clock,
+  Compass,
+  ShieldCheck
 } from 'lucide-react';
 import { CartItem, CustomerInfo, User } from '../types';
 import { getStoredCustomerInfo, setStoredCustomerInfo } from '../api';
+import { 
+  LIBREVILLE_ZONE_GROUPS, 
+  getNeighborhoodById, 
+  detectNeighborhoodFromAddress 
+} from '../data/librevilleZones';
 
 interface CartViewProps {
   items: CartItem[];
@@ -40,7 +48,9 @@ export const CartView: React.FC<CartViewProps> = ({
   const [facilityName, setFacilityName] = useState('');
   const [contactName, setContactName] = useState('');
   const [phone, setPhone] = useState('');
-  const [deliveryAddress, setDeliveryAddress] = useState('Libreville');
+  const [neighborhoodId, setNeighborhoodId] = useState('centre-ville');
+  const [deliveryAddress, setDeliveryAddress] = useState('Centre-Ville, Libreville');
+  const [addressDetails, setAddressDetails] = useState('');
   const [deliveryMode, setDeliveryMode] = useState<'livraison' | 'retrait'>('livraison');
   const [paymentMethod, setPaymentMethod] = useState<'especes' | 'airtel_money' | 'moov_money' | 'virement'>('especes');
   const [notes, setNotes] = useState('');
@@ -51,7 +61,11 @@ export const CartView: React.FC<CartViewProps> = ({
       if (currentUser.facilityName) setFacilityName(currentUser.facilityName);
       if (currentUser.contactName) setContactName(currentUser.contactName);
       if (currentUser.phone) setPhone(currentUser.phone);
-      if (currentUser.deliveryAddress) setDeliveryAddress(currentUser.deliveryAddress);
+      if (currentUser.deliveryAddress) {
+        setDeliveryAddress(currentUser.deliveryAddress);
+        const detected = detectNeighborhoodFromAddress(currentUser.deliveryAddress);
+        if (detected) setNeighborhoodId(detected.id);
+      }
     } else {
       const saved = getStoredCustomerInfo();
       if (saved) {
@@ -59,20 +73,50 @@ export const CartView: React.FC<CartViewProps> = ({
         if (saved.contactName) setContactName(saved.contactName);
         if (saved.phone) setPhone(saved.phone);
         if (saved.deliveryAddress) setDeliveryAddress(saved.deliveryAddress);
+        if (saved.neighborhoodId) setNeighborhoodId(saved.neighborhoodId);
         if (saved.deliveryMode) setDeliveryMode(saved.deliveryMode);
         if (saved.paymentMethod) setPaymentMethod(saved.paymentMethod);
       } else {
         setFacilityName('');
         setContactName('');
         setPhone('');
-        setDeliveryAddress('Libreville');
+        setNeighborhoodId('centre-ville');
+        setDeliveryAddress('Centre-Ville, Libreville');
       }
     }
   }, [currentUser]);
 
   const fixedItems = items.filter(it => !it.isQuote);
   const quoteItems = items.filter(it => it.isQuote);
-  const estimatedTotal = fixedItems.reduce((acc, it) => acc + it.price * it.quantity, 0);
+  const itemsSubtotal = fixedItems.reduce((acc, it) => acc + it.price * it.quantity, 0);
+
+  const selectedNeighborhood = getNeighborhoodById(neighborhoodId);
+  const deliveryDelayText = deliveryMode === 'retrait' 
+    ? 'Prêt sous 20 à 30 min (Dépôt Central Oloumi)'
+    : (selectedNeighborhood ? selectedNeighborhood.estimatedText : '45 à 60 minutes');
+
+  // Free delivery for orders >= 50,000 FCFA or for pickup
+  const baseDeliveryFee = deliveryMode === 'retrait' ? 0 : (selectedNeighborhood?.baseDeliveryFee || 0);
+  const deliveryFee = itemsSubtotal >= 50000 ? 0 : baseDeliveryFee;
+  const estimatedTotal = itemsSubtotal + deliveryFee;
+
+  const handleNeighborhoodChange = (newId: string) => {
+    setNeighborhoodId(newId);
+    const found = getNeighborhoodById(newId);
+    if (found) {
+      const landmarkSuffix = addressDetails ? ` (${addressDetails})` : '';
+      setDeliveryAddress(`${found.name}, ${found.zone}, Libreville${landmarkSuffix}`);
+    }
+  };
+
+  const handleAddressDetailsChange = (details: string) => {
+    setAddressDetails(details);
+    const found = getNeighborhoodById(neighborhoodId);
+    if (found) {
+      const landmarkSuffix = details.trim() ? ` · Repère : ${details.trim()}` : '';
+      setDeliveryAddress(`${found.name}, Libreville${landmarkSuffix}`);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,19 +125,26 @@ export const CartView: React.FC<CartViewProps> = ({
       setError('Votre panier est vide.');
       return;
     }
-    if (!facilityName.trim() || !phone.trim() || !deliveryAddress.trim()) {
-      setError('Veuillez remplir le nom de l\'établissement, le téléphone WhatsApp et l\'adresse.');
+    if (!facilityName.trim() || !phone.trim()) {
+      setError('Veuillez remplir le nom de l\'établissement et le téléphone WhatsApp.');
       return;
     }
+
+    const fullAddress = deliveryMode === 'retrait'
+      ? 'Retrait sur place : Dépôt Central Gloryday Pharma, Zone Industrielle Oloumi, Libreville'
+      : (deliveryAddress.trim() || `${selectedNeighborhood?.name || 'Libreville'}`);
 
     const customerInfo: CustomerInfo = {
       facilityName: facilityName.trim(),
       contactName: contactName.trim() || facilityName.trim(),
       phone: phone.trim(),
-      deliveryAddress: deliveryAddress.trim(),
+      deliveryAddress: fullAddress,
+      neighborhoodId,
+      neighborhoodName: selectedNeighborhood?.name || 'Libreville',
       notes: notes.trim() || undefined,
       deliveryMode,
-      paymentMethod
+      paymentMethod,
+      deliveryFee
     };
 
     setStoredCustomerInfo(customerInfo);
@@ -327,20 +378,6 @@ export const CartView: React.FC<CartViewProps> = ({
 
             <div>
               <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                Adresse de livraison *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Ville, quartier, repère (ex: Libreville, Glass...)"
-                value={deliveryAddress}
-                onChange={(e) => setDeliveryAddress(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#0d44e8]"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
                 Mode de réception
               </label>
               <div className="grid grid-cols-2 gap-2 text-xs">
@@ -354,7 +391,7 @@ export const CartView: React.FC<CartViewProps> = ({
                   }`}
                 >
                   <Truck className="w-3.5 h-3.5" />
-                  Livraison
+                  Livraison sur site
                 </button>
                 <button
                   type="button"
@@ -370,6 +407,91 @@ export const CartView: React.FC<CartViewProps> = ({
                 </button>
               </div>
             </div>
+
+            {deliveryMode === 'livraison' ? (
+              <div className="space-y-3 p-3.5 rounded-2xl bg-slate-50/80 border border-slate-200">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-800 uppercase flex items-center gap-1">
+                      <MapPin className="w-3.5 h-3.5 text-[#0d44e8]" />
+                      <span>Quartier de Libreville & Environs *</span>
+                    </label>
+                    <span className="text-[10px] text-blue-700 font-semibold bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                      Calcul automatique du délai
+                    </span>
+                  </div>
+                  <select
+                    value={neighborhoodId}
+                    onChange={(e) => handleNeighborhoodChange(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white text-slate-900 focus:ring-2 focus:ring-[#0d44e8]"
+                  >
+                    {LIBREVILLE_ZONE_GROUPS.map((group) => (
+                      <optgroup key={group.zoneName} label={`${group.zoneName} (~${group.averageDelay})`}>
+                        {group.neighborhoods.map((n) => (
+                          <option key={n.id} value={n.id}>
+                            {n.name} · ~{n.estimatedMinutes}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Real-time Delivery Delay Card */}
+                {selectedNeighborhood && (
+                  <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-200/80 space-y-1.5 text-xs text-blue-950">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold flex items-center gap-1.5 text-[#0d44e8]">
+                        <Clock className="w-4 h-4 text-[#0d44e8] shrink-0" />
+                        <span>Délai estimé : <strong>{selectedNeighborhood.estimatedText}</strong></span>
+                      </span>
+                      <span className="text-[10px] uppercase font-bold text-blue-800 bg-white/80 px-2 py-0.5 rounded-md border border-blue-200">
+                        {selectedNeighborhood.zone}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-600 flex items-start gap-1.5 pt-0.5">
+                      <Compass className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                      <span>Repère conseillé : <em className="text-slate-800 not-italic font-medium">{selectedNeighborhood.landmarkExample}</em></span>
+                    </div>
+                    <div className="text-[11px] text-emerald-800 flex items-center gap-1 pt-0.5 font-medium">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>
+                        {itemsSubtotal >= 50000 
+                          ? 'Livraison offerte (commande > 50 000 FCFA)' 
+                          : `Frais standard : ${baseDeliveryFee > 0 ? baseDeliveryFee.toLocaleString('fr-FR') + ' FCFA' : 'Inclus'}`}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                    Précision d'adresse & Repère médical *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: Face Clinique Chambrier, 1er étage, Service Bloc..."
+                    value={addressDetails}
+                    onChange={(e) => handleAddressDetailsChange(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white focus:ring-2 focus:ring-[#0d44e8]"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200 text-xs text-amber-900 space-y-1">
+                <div className="font-bold flex items-center gap-1.5 text-amber-950">
+                  <Building2 className="w-4 h-4 text-amber-700" />
+                  <span>Retrait au Dépôt Central Gloryday Pharma</span>
+                </div>
+                <p className="text-[11px] text-amber-800">
+                  Zone Industrielle Oloumi, Libreville · Prêt sous <strong>20 à 30 minutes</strong> après confirmation.
+                </p>
+                <p className="text-[10px] text-emerald-700 font-bold">
+                  ✓ Aucun frais de livraison appliqué.
+                </p>
+              </div>
+            )}
 
             <div>
               <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
@@ -412,6 +534,20 @@ export const CartView: React.FC<CartViewProps> = ({
                   <span className="font-bold">{quoteItems.length} à chiffrer</span>
                 </div>
               )}
+              <div className="flex justify-between text-slate-600 text-[11px]">
+                <span>
+                  {deliveryMode === 'livraison' 
+                    ? `Frais d'acheminement (${selectedNeighborhood?.name || 'Libreville'})` 
+                    : 'Retrait Dépôt Oloumi'}
+                </span>
+                <span className="font-semibold">
+                  {deliveryMode === 'retrait' 
+                    ? 'Offert' 
+                    : deliveryFee === 0 
+                      ? <span className="text-emerald-700 font-bold">Offert (&gt; 50 000 F)</span> 
+                      : `${deliveryFee.toLocaleString('fr-FR')} FCFA`}
+                </span>
+              </div>
               <div className="flex justify-between text-slate-500 italic text-[11px]">
                 <span>TVA</span>
                 <span>Non soumis</span>

@@ -76,12 +76,15 @@ export interface CustomerInfo {
   contactName: string;
   phone: string;
   deliveryAddress: string;
+  neighborhoodId?: string;
+  neighborhoodName?: string;
   notes?: string;
   deliveryMode: 'livraison' | 'retrait';
   paymentMethod: 'especes' | 'airtel_money' | 'moov_money' | 'virement';
   coordinates?: Coordinates;
   googleMapsUrl?: string;
   city?: string;
+  deliveryFee?: number;
 }
 
 export interface OrderItem {
@@ -123,6 +126,8 @@ export interface Order {
   courier?: CourierInfo;
   deliveryZone?: string;
   deliveryEstimated?: string;
+  deliveryFee?: number;
+  lastWhatsAppNotifiedStage?: string;
 }
 
 export interface User {

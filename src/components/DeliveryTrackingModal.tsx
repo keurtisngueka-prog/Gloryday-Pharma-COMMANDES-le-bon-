@@ -15,9 +15,13 @@ import {
   ChevronRight,
   ExternalLink,
   Copy,
-  Check
+  Check,
+  Send,
+  Eye,
+  ChevronDown
 } from 'lucide-react';
 import { Order, DeliveryStage } from '../types';
+import { generateWhatsAppMessageForStage, generateCourierMissionWhatsApp } from '../utils/whatsappNotifications';
 
 interface DeliveryTrackingModalProps {
   isOpen: boolean;
@@ -35,6 +39,8 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
   isAdmin = false
 }) => {
   const [copiedPhone, setCopiedPhone] = useState(false);
+  const [copiedMsg, setCopiedMsg] = useState(false);
+  const [showMsgPreview, setShowMsgPreview] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
 
   if (!isOpen || !order) return null;
@@ -323,6 +329,80 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
             </div>
           </div>
 
+          {/* Automated WhatsApp Notifications Section (By Delivery Stage) */}
+          <div className="p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200/90 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black text-emerald-950 uppercase tracking-wider flex items-center gap-1.5">
+                <MessageCircle className="w-4 h-4 text-emerald-600" />
+                Notification WhatsApp Automatique ({stages[currentStageIndex]?.label})
+              </span>
+              <span className="text-[10px] text-emerald-800 font-bold bg-white/80 px-2 py-0.5 rounded-full border border-emerald-200">
+                Génération en 1-clic
+              </span>
+            </div>
+
+            <p className="text-[11px] text-emerald-900 leading-relaxed">
+              Un message médical préformaté pour l'étape <strong>« {stages[currentStageIndex]?.label} »</strong> est prêt à être expédié au responsable de <strong>{order.customer.facilityName}</strong> ({order.customer.phone}).
+            </p>
+
+            {/* Action buttons */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <a
+                href={generateWhatsAppMessageForStage(order, currentStage).directUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer text-center"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Notifier le Client sur WhatsApp</span>
+              </a>
+
+              <a
+                href={generateCourierMissionWhatsApp(order).directUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer text-center"
+              >
+                <Truck className="w-3.5 h-3.5 text-blue-400" />
+                <span>Ordre de Mission Coursier</span>
+              </a>
+            </div>
+
+            {/* Toggle Preview & Copy */}
+            <div className="pt-1 flex items-center justify-between text-xs border-t border-emerald-200/60">
+              <button
+                type="button"
+                onClick={() => setShowMsgPreview(!showMsgPreview)}
+                className="text-[11px] font-bold text-emerald-800 hover:text-emerald-950 flex items-center gap-1 cursor-pointer"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>{showMsgPreview ? 'Masquer l’aperçu du message' : 'Aperçu du message WhatsApp'}</span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${showMsgPreview ? 'rotate-180' : ''}`} />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const payload = generateWhatsAppMessageForStage(order, currentStage);
+                  navigator.clipboard.writeText(payload.messageText);
+                  setCopiedMsg(true);
+                  setTimeout(() => setCopiedMsg(false), 2000);
+                }}
+                className="text-[11px] font-bold text-emerald-800 hover:text-emerald-950 flex items-center gap-1 cursor-pointer"
+              >
+                {copiedMsg ? <Check className="w-3.5 h-3.5 text-emerald-700" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedMsg ? 'Texte copié !' : 'Copier le texte'}</span>
+              </button>
+            </div>
+
+            {/* Expandable Preview */}
+            {showMsgPreview && (
+              <div className="p-3 rounded-xl bg-white border border-emerald-200 text-[11px] font-mono text-slate-800 whitespace-pre-wrap leading-relaxed shadow-inner">
+                {generateWhatsAppMessageForStage(order, currentStage).messageText}
+              </div>
+            )}
+          </div>
+
           {/* Staff / Logistics Controls (Cycle stages to test or update) */}
           {isAdmin && onUpdateStage && (
             <div className="p-4 rounded-2xl bg-purple-50/70 border border-purple-200 space-y-3">
@@ -332,7 +412,7 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                   Contrôle Logistique (Staff Only)
                 </span>
                 <span className="text-[11px] text-purple-700 font-medium">
-                  Changer l'état en un clic
+                  Changer l'étape & déclencher la notif
                 </span>
               </div>
 
@@ -345,7 +425,7 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                     onClick={() => handleStageChange(st.key)}
                     className={`py-2 px-2 rounded-xl text-center transition-all cursor-pointer ${
                       currentStage === st.key
-                        ? 'bg-purple-700 text-white shadow-xs font-black'
+                        ? 'bg-purple-700 text-white shadow-xs font-black ring-2 ring-purple-400'
                         : 'bg-white hover:bg-purple-100 text-purple-950 border border-purple-200'
                     }`}
                   >

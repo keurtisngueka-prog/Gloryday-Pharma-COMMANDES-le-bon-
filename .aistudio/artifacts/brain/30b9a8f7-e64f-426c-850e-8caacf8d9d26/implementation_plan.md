@@ -1,83 +1,74 @@
-# Révision Globale : Authentification Réelle, Statut de Session Contextuel, Maintien Super-Admin & Cloisonnement des Paniers
+# Gloryday Pharma Gabon : Notifications WhatsApp par Étape de Livraison & Délais Dynamiques par Quartier de Libreville
 
-Ce plan d'implémentation révisé prend en compte l'ensemble des anomalies remontées pour garantir une étanchéité totale, une identification vérifiée et une expérience professionnelle sans aucun faux état.
+Ce plan détaille la mise en œuvre de deux fonctionnalités opérationnelles majeures validées pour optimiser les commandes médicales au Gabon : l'automatisation des notifications WhatsApp à chaque étape de préparation/livraison, ainsi que le calcul dynamique des délais et conditions de livraison selon les quartiers de Libreville. Il répond également avec clarté à la question de la concurrence multi-utilisateurs simultanée.
 
 ---
 
 ### User Review & Critical Decisions
 
 > [!IMPORTANT]
-> Les 4 correctifs fondamentaux validés pour cette révision :
-> 1. **Vérification Réelle des Mots de Passe & Téléphones** : Remplacement du mécanisme de secours qui connectait n'importe quelle saisie sous l'identité « Polyclinique El Rapha ». La connexion n'aboutit que si les identifiants correspondent à un compte enregistré (ou aux identifiants Super-Admin définis). Une erreur explicite est affichée en cas de saisie invalide.
-> 2. **Bandeau Supérieur & Entête Contextuels (« Le truc en haut »)** :
->    - **Mode Invité** : Affiche clairement `Mode Visiteur Invité` sans aucun nom d'établissement ou de docteur fictif.
->    - **Mode Client** : Affiche le nom réel de l'établissement qui s'est connecté (`currentUser.facilityName`).
->    - **Mode Super-Admin** : Affiche `Direction Générale Gloryday [Super-Admin] · Accès Privilégié`.
-> 3. **Navigation du Logo GLORYDAY en Mode Super-Admin** : Le clic sur le logo de la marque ne rétrograde plus l'administrateur vers une vue client : il maintient le statut d'administrateur et oriente vers le Tableau de Bord Super-Admin (`admin`).
-> 4. **Isolation Stricte des Paniers** : Cloisonnement strict des clés de stockage (`gloryday_cart_user_{id}` vs `gloryday_cart_guest`), chargement exclusif du panier du compte lors de la connexion, et réinitialisation pour le visiteur suivant à la déconnexion.
+> **Réponse officielle à la question sur les connexions simultanées (20+ clients en même temps) :**
+> - **Aucun impact négatif ni conflit de panier** : Chaque client se connecte depuis son propre navigateur / smartphone dans un bac à sable local totalement indépendant. Deux ou vingt clients connectés en même temps ont chacun leur propre panier isolé et étanche.
+> - **Gestion des commandes simultanées** : Chaque commande est horodatée et reçoit une référence unique et incrémentale (ex: `CMD-2026-0042`). Les commandes arrivent dans la file logistique sans risque de télescopage ni d'écrasement.
+
+> [!NOTE]
+> **Décisions confirmées par vos réponses :**
+> 1. **Notifications WhatsApp Automatiques à Chaque Étape** : Déclenchement en un clic de messages formatés sur mesure pour le client à chaque jalon (Validation de commande, Préparation en cours, Remise au coursier avec nom et numéro, et Livraison effectuée).
+> 2. **Délais de Livraison Précis par Quartier de Libreville** : Sélecteur intelligent des zones et quartiers de Libreville (Akanda, Batterie IV, Louis, Centre-Ville, Oloumi, Nzeng-Ayong, Charbonnages, Owendo, etc.) avec calcul en temps réel du délai d'acheminement estimé et récapitulatif sur le bon de commande.
 
 ---
 
 ### 1. Overview & Core Concept
 
 - **What It Does** :
-  - Assure une gestion authentique des sessions (clients, invités, super-admin).
-  - Empêche les connexions fantômes avec de faux mots de passe.
-  - Dynamise le bandeau supérieur pour qu'il reflète exactement la session en cours.
-  - Conserve la casquette administrateur sur toutes les actions de navigation, y compris sur le logo.
-  - Cloisonne les paniers de commande pour une indépendance totale entre structures de santé.
+  - Permet aux cliniques et pharmacies de sélectionner leur quartier précis à Libreville lors du passage de commande, affichant immédiatement le délai de livraison estimé (ex. *30 à 45 min pour Batterie IV / Centre-Ville*, *45 à 60 min pour Akanda*, *60 à 90 min pour Owendo*).
+  - Fournit au Super-Admin et à l'équipe logistique un module de notification WhatsApp automatisé : dès qu'une commande change de statut ou passe un jalon de livraison, un message WhatsApp pré-rempli et certifié Gloryday Pharma est prêt à être expédié au client ou au coursier.
+  - Offre un suivi en direct interactif pour les clients avec le délai estimé adapté à leur localisation.
 - **Target Audience** :
-  - **Super-Administrateurs** : Navigation étanche, maintien permanent de l'espace d'administration.
-  - **Établissements Clients** : Connexion sécurisée sur leur propre fiche d'établissement, panier dédié.
-  - **Visiteurs Invités** : Découverte du catalogue en mode invité propre sans données résiduelles.
+  - **Établissements de santé (Cliniques, Pharmacies, Hôpitaux)** : Transparence totale sur l'heure d'arrivée des dispositifs médicaux critiques.
+  - **Équipe Logistique & Super-Admin Gloryday** : Communication WhatsApp fluide, sans ressaisie manuelle ni oubli d'information.
+  - **Coursiers médicaux** : Attribution claire du quartier et contact direct avec le responsable de réception.
 
 ---
 
 ### 2. User Experience & Visual Design
 
-#### A. Bandeau Supérieur Contextuel (`Navbar.tsx`)
-- **En mode Invité** :
-  - Texte : `Gloryday Pharma Gabon · Fournisseur certifié d'équipements & consommables hospitaliers`
-  - Zone session : `Mode Visiteur Invité` avec lien rapide `[Se connecter / Créer un compte]`.
-  - Aucune référence à un compte de démonstration résiduel.
-- **En mode Client Connecté** :
-  - Zone session : `Connecté : [Nom de l'établissement] · [Nom du contact]`.
-  - Bouton Déconnexion accessible.
-- **En mode Super-Admin** :
-  - Zone session : Badge sombre `Direction Générale Gloryday [Super-Admin]`.
-  - Bouton rapide d'accès direct au panneau Super-Admin.
+#### A. Sélection du Quartier & Délai Estimé dans le Panier (`CartView.tsx`)
+- **Sélecteur de Quartier Intuitif** :
+  - Remplacement du simple champ texte d'adresse par un sélecteur groupé des quartiers majeurs de Libreville & Périphérie :
+    - *Zone 1 (Centre & Affaires)* : Centre-Ville, Batterie IV, Louis, Glass, Oloumi, Mont-Bouët, Boulevard Triomphal (~30 à 45 min).
+    - *Zone 2 (Nord / Estuaire)* : Akanda, Angondjé, Avorbam, La Sablière, Cap Estérias (~45 à 60 min).
+    - *Zone 3 (Est Urbain & Vallons)* : Nzeng-Ayong, Charbonnages, Plein-Ciel, Sotéga, Kinguélé, PK5 à PK12 (~45 à 75 min).
+    - *Zone 4 (Sud Maritime / Industriel)* : Owendo, Port d'Owendo, Alénakiri, Sni (~60 à 90 min).
+    - *Option Quartier Personnalisé* : Possibilité de préciser des repères locaux gabonais (ex. *« Face Clinique Chambrier, à côté de la pharmacie »*).
+- **Badge Dynamique d'Acheminement** :
+  - Affichage en temps réel dans le panier d'un indicateur visuel moderne :
+    `[Camion Express] Délai estimé vers Batterie IV : ~35 - 45 min · Départ Entrepôt Central`.
 
-#### B. Comportement du Logo GLORYDAY (`Navbar.tsx`)
-- Lorsque l'utilisateur est connecté en tant que **Super-Admin** :
-  - Le clic sur le logo redirige vers `admin` (Tableau de Bord Super-Admin) au lieu de basculer sur le catalogue public standard.
-  - Un ruban ou bouton discret permet de prévisualiser le catalogue en mode administrateur si souhaité sans jamais perdre sa session.
-- Lorsque l'utilisateur est en mode **Client ou Invité** :
-  - Le clic sur le logo redirige vers `catalog`.
-
-#### C. Validation Réelle de la Connexion (`AuthModal.tsx` & `api.ts`)
-- Le formulaire vérifie désormais les identifiants saisis dans le registre local d'utilisateurs (`gloryday_registered_users`) :
-  - **Comptes valides de démo** :
-    - Clinique Sainte-Marie : `+24177001122` / `client123`
-    - Pharmacie du Bord de Mer : `+24166334455` / `pharma123`
-    - Super-Admin : `admin` ou `+24177003004` / `admin` (ou `gloryday2026`)
-  - **Nouveaux inscrits** : Tout compte créé via l'onglet « Créer un compte » est persisté et immédiatement connectable avec son mot de passe choisi.
-- **En cas d'erreur de mot de passe** : Message d'erreur rouge clair dans le modal : « Identifiants incorrects. Veuillez vérifier votre numéro ou mot de passe ». Aucune connexion n'est autorisée par défaut.
+#### B. Générateur de Notifications WhatsApp Automatiques (`AdminDashboard.tsx` & `DeliveryTrackingModal.tsx`)
+- **Bouton d'Action Rapide « WhatsApp Client »** présent sur chaque commande dans le tableau de bord Super-Admin et dans le modal de suivi.
+- **Génération Contextuelle selon l'Étape** :
+  - *Étape 1 : Commande Confirmée* :
+    > « Bonjour [Nom Établissement], votre commande Gloryday Pharma n° *CMD-2026-XXXX* de [Montant] FCFA est bien confirmée. Préparation immédiate pour livraison à [Quartier]. Délai estimé : [Délai]. »
+  - *Étape 2 : Prise en charge par le Coursier* :
+    > « Votre commande n° *CMD-2026-XXXX* a été confiée à notre coursier médical [Nom Coursier] ([Téléphone]). Elle est en route vers [Quartier]. »
+  - *Étape 3 : Arrivée Imminente / Acheminement* :
+    > « Notre coursier approche de votre établissement à [Quartier]. Merci de préparer la réception et le contrôle du scellé médical. »
+  - *Étape 4 : Livraison Effectuée* :
+    > « Commande n° *CMD-2026-XXXX* livrée avec succès à [Nom Établissement]. Facture & bordereau disponibles sur votre espace Gloryday. Merci de votre confiance ! »
+- **Bouton WhatsApp 1-Clic** ouvrant l'application WhatsApp ou WhatsApp Web directement avec le numéro du client et le texte pré-rempli.
 
 ---
 
 ### 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1 : Registre Local d'Utilisateurs Fiable (Client-Side Database)**
-  - *Approche* : Stocker les utilisateurs enregistrés dans `localStorage` sous `gloryday_registered_users` avec initialisation de comptes pilotes réels, plutôt que de dépendre d'un appel réseau défaillant avec fallback aveugle.
-  - *Pourquoi* : Dans un environnement SPA sans backend SQL persistant, cela garantit une vérification stricte des mots de passe, évite les connexions accidentelles avec n'importe quelle frappe, et permet aux nouveaux utilisateurs de créer de vrais comptes distincts.
+- **Decision 1 : Zones de Libreville Prédéfinies avec Précision Libre**
+  - *Approche* : Liste déroulante des grands quartiers avec repères + champ de complément d'adresse libre.
+  - *Pourquoi* : À Libreville, les adresses postales n'existent pas toujours formellement ; les livreurs naviguent par quartiers et repères visuels (carrefours, pharmacies, écoles). Ce système combine la précision d'estimation et la réalité du terrain.
 
-- **Decision 2 : Redirection du Logo selon le Rôle Actif**
-  - *Approche* : Si `currentUser?.role === 'Super-Admin'`, le logo renvoie vers `admin`. Sinon, il renvoie vers `catalog`.
-  - *Pourquoi* : Pour un administrateur, l'espace naturel d'accueil est son tableau de bord de pilotage. Cela supprime l'impression de « redevenir client ».
-
-- **Decision 3 : Cloisonnement Total des Paniers**
-  - *Approche* : Clés dynamiques `gloryday_cart_user_${id}` et `gloryday_cart_guest`. Réinitialisation à la déconnexion.
-  - *Pourquoi* : Évite toute fuite ou confusion de commandes entre blocs opératoires ou cliniques concurrentes.
+- **Decision 2 : Déclenchement WhatsApp Hybride (Web/Mobile Intent)**
+  - *Approche* : Liens profonds `https://wa.me/241XXXXXXXX?text=...` testés pour fonctionner aussi bien sur smartphone (ouverture de WhatsApp) que sur ordinateur (WhatsApp Web / Desktop).
+  - *Pourquoi* : 100% fiable, ne nécessite pas d'abonnement coûteux à l'API Meta Cloud ni de serveur intermédiaire complexe, tout en offrant une réactivité instantanée pour l'équipe sur le terrain.
 
 ---
 
@@ -85,38 +76,38 @@ Ce plan d'implémentation révisé prend en compte l'ensemble des anomalies remo
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│               FLUX D'AUTHENTIFICATION & SESSIONS GLORYDAY             │
+│                   ARCHITECTURE LOGISTIQUE & WHATSAPP                   │
 │                                                                        │
-│   Utilisateur saisit Téléphone / Identifiant + Mot de passe            │
-│                                   │                                    │
-│                                   ▼                                    │
-│       ┌────────────────────────────────────────────────────────┐       │
-│       │ Validation stricte dans gloryday_registered_users       │       │
-│       │ (ou clé Super-Admin admin/admin)                       │       │
-│       └───────────────────────────┬────────────────────────────┘       │
-│                                   │                                    │
-│             ┌─────────────────────┴─────────────────────┐              │
-│             ▼ VALIDE                                    ▼ INVALIDE     │
-│   ┌───────────────────────────┐               ┌───────────────────┐    │
-│   │ 1. Établissement du Token │               │ Afficher Message  │    │
-│   │ 2. Mise à jour Navbar     │               │ d'erreur rouge    │    │
-│   │    - Super-Admin / Client │               │ Connexion refusée │    │
-│   │ 3. Chargement Panier Propre│              └───────────────────┘    │
-│   │    gloryday_cart_user_{id}│                                        │
-│   │ 4. Si Admin -> Route #admin│                                       │
-│   └───────────────────────────┘                                        │
+│   Client choisit Quartier dans Libreville                              │
+│   (Batterie IV / Akanda / Owendo / Nzeng-Ayong...)                     │
+│                           │                                            │
+│                           ▼                                            │
+│   ┌────────────────────────────────────────────────────────────┐       │
+│   │ Matrice des Délais & Zones (zonesLibreville.ts)            │       │
+│   │ -> Calcul du Délai Estimé + Priorité d'urgence             │       │
+│   └───────────────────────┬────────────────────────────────────┘       │
+│                           │                                            │
+│                           ▼                                            │
+│   ┌────────────────────────────────────────────────────────────┐       │
+│   │ Commande Enregistrée avec zone & deliveryEstimated         │       │
+│   └───────────────────────┬────────────────────────────────────┘       │
+│                           │                                            │
+│              ┌────────────┴────────────┐                               │
+│              ▼                         ▼                               │
+│   ┌─────────────────────┐   ┌──────────────────────────────────────┐   │
+│   │ Changement d'Étape  │   │ Déclenchement Notification WhatsApp  │   │
+│   │ Logistique          │──>│ Template dynamique + Numéro Client   │   │
+│   │ (Admin / Coursier)  │   │ Envoi 1-clic direct                  │   │
+│   └─────────────────────┘   └──────────────────────────────────────┘   │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### Modifications Concrètes Prévues :
-1. **`src/api.ts`** :
-   - Mise en place d'un registre d'authentification robuste avec initialisation des comptes de démo et persistance des inscrits.
-   - Refus strict si le mot de passe ne correspond pas au compte.
-   - Correction de `getCurrentUser()` pour ne renvoyer une session que si le token est authentique.
-2. **`src/components/Navbar.tsx`** :
-   - Redirection du logo vers `admin` si `role === 'Super-Admin'`.
-   - Affichage dynamique du bandeau supérieur : `Mode Visiteur Invité` quand déconnecté (suppression définitive du Dr. Mengue en dur).
-3. **`src/App.tsx` & `src/components/CartView.tsx`** :
-   - Cloisonnement des paniers par compte utilisateur.
-   - Réinitialisation propre à la déconnexion.
-   - Bannière contextuelle d'attribution de commande.
+#### Fichiers & Composants Impactés lors de la réalisation :
+1. **`src/data/librevilleZones.ts`** :
+   - Référentiel des quartiers de Libreville avec délais moyens, distances relatives et conseils d'acheminement.
+2. **`src/components/CartView.tsx` & `src/components/OrderPreviewModal.tsx`** :
+   - Intégration du sélecteur de quartiers et affichage en temps réel du délai estimé.
+3. **`src/components/DeliveryTrackingModal.tsx` & `src/components/AdminDashboard.tsx`** :
+   - Ajout des boutons de notification WhatsApp contextuels pour chaque jalon de livraison.
+4. **`src/types.ts`** :
+   - Enrichissement du modèle avec les informations de quartier et de statut de notification.

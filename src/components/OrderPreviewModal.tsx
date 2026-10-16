@@ -72,9 +72,14 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
             </div>
             <div>
               <span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">Livraison & Règlement</span>
-              <p className="text-slate-800">{customer.deliveryAddress}</p>
-              <p className="text-slate-600">Mode : <strong>{customer.deliveryMode === 'livraison' ? 'Livraison sur site' : 'Retrait au dépôt'}</strong></p>
-              <p className="text-slate-600">Paiement : <strong>{customer.paymentMethod.replace('_', ' ').toUpperCase()}</strong></p>
+              <p className="text-slate-800 font-medium">{customer.deliveryAddress}</p>
+              <div className="mt-1 flex items-center gap-1.5 text-blue-700 font-bold text-[11px]">
+                <span>⏱️ {customer.deliveryMode === 'retrait' ? 'Prêt sous 20 à 30 min (Dépôt Oloumi)' : `Délai estimé : ${customer.neighborhoodName ? `${customer.neighborhoodName}` : 'Grand Libreville'}`}</span>
+              </div>
+              <p className="text-slate-600 text-[11px] mt-0.5">
+                Mode : <strong>{customer.deliveryMode === 'livraison' ? 'Livraison sur site' : 'Retrait au dépôt'}</strong> · 
+                Paiement : <strong>{customer.paymentMethod.replace('_', ' ').toUpperCase()}</strong>
+              </p>
             </div>
           </div>
 
