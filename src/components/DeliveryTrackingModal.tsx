@@ -325,6 +325,17 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                 <strong className="text-slate-900">{order.customer.facilityName}</strong>
                 <div className="text-slate-500 text-[11px]">{order.customer.deliveryAddress}</div>
                 <div className="text-slate-500 text-[11px]">Contact réception : {order.customer.contactName} ({order.customer.phone})</div>
+                <div className="mt-1 pt-1 border-t border-slate-100 flex items-center gap-1.5 flex-wrap">
+                  {order.isPaid ? (
+                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      ✓ Déjà Réglé ({order.mobilePayment?.provider === 'airtel_money' ? 'Airtel Money' : order.mobilePayment?.provider === 'moov_money' ? 'Moov Money' : order.customer.paymentMethod.toUpperCase()}) {order.mobilePayment?.transactionReference ? `· Réf ${order.mobilePayment.transactionReference}` : ''}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                      ⚠️ Encaisser {order.estimatedTotal.toLocaleString('fr-FR')} FCFA ({order.customer.paymentMethod === 'airtel_money' ? 'Airtel 077 00 30 04' : order.customer.paymentMethod === 'moov_money' ? 'Moov 066 24 03 99' : 'Espèces'})
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           </div>

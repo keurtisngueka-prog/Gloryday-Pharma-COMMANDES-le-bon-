@@ -14,9 +14,11 @@ import {
   Activity,
   Stethoscope,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  TrendingDown
 } from 'lucide-react';
 import { Product, ProductVariant } from '../types';
+import { calculateItemVolumePrice } from '../utils/volumeDiscount';
 
 interface ProductCardProps {
   product: Product;
@@ -164,9 +166,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         <div className="p-3 pt-1 flex-1 flex flex-col justify-between">
           <div>
             {/* Category text (NO PILL - quiet metadata) */}
-            <span className="text-[11px] text-[#6a6a6b] font-medium block truncate leading-none mb-1">
-              {product.subcategory || product.category}
-            </span>
+            <div className="flex items-center justify-between gap-1 mb-1">
+              <span className="text-[11px] text-[#6a6a6b] font-medium truncate leading-none">
+                {product.subcategory || product.category}
+              </span>
+              {!isQuote && !isOutOfStock && (
+                <span className="text-[9px] font-bold text-[#0d44e8] bg-blue-50/90 px-1.5 py-0.5 rounded border border-blue-200/80 whitespace-nowrap">
+                  -5% dès 5
+                </span>
+              )}
+            </div>
 
             {/* Product Title */}
             <h3 className="text-xs sm:text-sm font-bold text-[#161618] line-clamp-2 leading-snug group-hover:text-[#0d44e8] transition-colors">
@@ -398,30 +407,69 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 </div>
               </div>
 
+              {/* Volume Discount Schedule */}
+              {!isQuote && !isOutOfStock && (
+                <div className="p-3.5 bg-blue-50/70 border border-blue-100 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between text-xs font-bold text-[#0d44e8]">
+                    <span className="flex items-center gap-1.5">
+                      <TrendingDown className="w-3.5 h-3.5" />
+                      Tarifs dégressifs gros volume clinique :
+                    </span>
+                    <span className="text-[10px] text-blue-600 font-medium">Auto</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5 text-center text-[11px]">
+                    <div className={`p-1.5 rounded-lg transition-all ${quantity >= 5 && quantity < 10 ? 'bg-white shadow-xs border border-blue-300 font-bold text-[#0d44e8]' : 'bg-white/60 text-slate-600'}`}>
+                      <div className="text-[10px] text-slate-500">5-9 unités</div>
+                      <div className="font-extrabold text-emerald-600">-5%</div>
+                    </div>
+                    <div className={`p-1.5 rounded-lg transition-all ${quantity >= 10 && quantity < 20 ? 'bg-white shadow-xs border border-blue-300 font-bold text-[#0d44e8]' : 'bg-white/60 text-slate-600'}`}>
+                      <div className="text-[10px] text-slate-500">10-19 unités</div>
+                      <div className="font-extrabold text-emerald-600">-10%</div>
+                    </div>
+                    <div className={`p-1.5 rounded-lg transition-all ${quantity >= 20 ? 'bg-white shadow-xs border border-blue-300 font-bold text-[#0d44e8]' : 'bg-white/60 text-slate-600'}`}>
+                      <div className="text-[10px] text-slate-500">20+ unités</div>
+                      <div className="font-extrabold text-emerald-600">-15%</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Quantity Stepper */}
               {!isOutOfStock && (
-                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200">
-                  <span className="text-xs font-bold text-slate-700">Quantité désirée :</span>
-                  <div className="flex items-center bg-white border border-slate-300 rounded-lg p-0.5">
-                    <button
-                      type="button"
-                      onClick={decrementQty}
-                      disabled={quantity <= 1}
-                      className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-100 rounded disabled:opacity-30 cursor-pointer"
-                    >
-                      <Minus className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="w-10 text-center font-bold text-xs tabular-nums text-slate-900">
-                      {quantity}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={incrementQty}
-                      className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-100 rounded cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <span className="text-xs font-bold text-slate-700">Quantité désirée :</span>
+                    <div className="flex items-center bg-white border border-slate-300 rounded-lg p-0.5">
+                      <button
+                        type="button"
+                        onClick={decrementQty}
+                        disabled={quantity <= 1}
+                        className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-100 rounded disabled:opacity-30 cursor-pointer"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="w-10 text-center font-bold text-xs tabular-nums text-slate-900">
+                        {quantity}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={incrementQty}
+                        className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-100 rounded cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
+
+                  {!isQuote && (() => {
+                    const calc = calculateItemVolumePrice(selectedVariant.price, quantity, false);
+                    return calc.savings > 0 ? (
+                      <p className="text-[11px] font-semibold text-emerald-600 flex items-center justify-end gap-1">
+                        <TrendingDown className="w-3 h-3" />
+                        Remise volume : -{calc.savings.toLocaleString('fr-FR')} FCFA ({calc.discountPercent}%)
+                      </p>
+                    ) : null;
+                  })()}
                 </div>
               )}
             </div>
@@ -466,7 +514,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                   <>
                     <Plus className="w-4 h-4" />
                     <span>
-                      Ajouter · {isQuote ? 'Sur devis' : `${(selectedVariant.price * quantity).toLocaleString('fr-FR')} F`}
+                      Ajouter · {isQuote ? 'Sur devis' : (() => {
+                        const calc = calculateItemVolumePrice(selectedVariant.price, quantity, false);
+                        return `${calc.totalWithDiscount.toLocaleString('fr-FR')} F`;
+                      })()}
                     </span>
                   </>
                 )}

@@ -10,9 +10,11 @@ import {
   Layers,
   FileText,
   ShieldCheck,
-  LogOut
+  LogOut,
+  WifiOff
 } from 'lucide-react';
 import { User as UserType, AppNotification } from '../types';
+import { useOnlineStatus } from '../utils/pwa';
 
 interface NavbarProps {
   activeTab: string;
@@ -25,6 +27,8 @@ interface NavbarProps {
   notifications: AppNotification[];
   onOpenNotifications: () => void;
   onToggleSidebar: () => void;
+  onOpenDraftsModal?: () => void;
+  draftsCount?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -37,8 +41,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
   notifications,
   onOpenNotifications,
-  onToggleSidebar
+  onToggleSidebar,
+  onOpenDraftsModal,
+  draftsCount = 0
 }) => {
+  const isOnline = useOnlineStatus();
   const unreadCount = notifications.filter(n => !n.read).length;
   const role = currentUser?.role || 'client';
 
@@ -53,6 +60,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
             <span className="text-slate-500">·</span>
             <span>Fournisseur certifié d'équipements & consommables hospitaliers</span>
+            {!isOnline && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-400/30 animate-pulse">
+                <WifiOff className="w-2.5 h-2.5" />
+                <span>Hors-ligne</span>
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-4">
             <a 
@@ -215,6 +228,24 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Right Zone: Notifications, Cart, Profile */}
           <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Drafts Manager Button */}
+            {onOpenDraftsModal && (
+              <button
+                type="button"
+                onClick={onOpenDraftsModal}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 sm:py-2 rounded-xl text-xs font-bold transition-all cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200/80 shadow-2xs"
+                title="Gestionnaire de brouillons et commandes hors-ligne"
+              >
+                <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#0d44e8]" />
+                <span className="hidden sm:inline">Brouillons</span>
+                {draftsCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-[#0d44e8] text-white">
+                    {draftsCount}
+                  </span>
+                )}
+              </button>
+            )}
+
             {/* Desktop Cart Button */}
             <button
               type="button"

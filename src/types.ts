@@ -11,6 +11,17 @@ export type FacilityType =
 
 export type OrderStatus = 'À confirmer' | 'Confirmée' | 'En préparation' | 'Livrée' | 'Annulée';
 
+export interface ProductSpecifications {
+  gauge?: string;
+  sterility?: 'Stérile' | 'Non stérile' | 'Usage unique';
+  latexFree?: boolean;
+  shelfLife?: string;
+  material?: string;
+  packaging?: string;
+  storage?: string;
+  recommendedUse?: string;
+}
+
 export interface ProductVariant {
   label: string;
   price: number; // 0 means "Sur devis"
@@ -23,6 +34,8 @@ export interface Product {
   name: string;
   category: string;
   subcategory?: string;
+  specialty?: string;
+  specifications?: ProductSpecifications;
   variants: ProductVariant[];
   status: 'disponible' | 'rupture';
   image?: string;
@@ -62,11 +75,27 @@ export interface CartItem {
   price: number; // 0 = sur devis
   quantity: number;
   isQuote: boolean;
+  discountPercent?: number;
+  savings?: number;
 }
 
 export interface Coordinates {
   lat: number;
   lng: number;
+}
+
+export interface MobilePaymentDetails {
+  provider: 'airtel_money' | 'moov_money';
+  merchantPhone: string;
+  transactionReference?: string;
+  senderPhone?: string;
+  isPrePaid?: boolean;
+  validatedAt?: string;
+  screenshotUrl?: string;
+  status?: 'pending' | 'submitted' | 'verified' | 'failed';
+  amount?: number;
+  ussdDialCode?: string;
+  operatorNotes?: string;
 }
 
 export interface CustomerInfo {
@@ -81,6 +110,7 @@ export interface CustomerInfo {
   notes?: string;
   deliveryMode: 'livraison' | 'retrait';
   paymentMethod: 'especes' | 'airtel_money' | 'moov_money' | 'virement';
+  mobilePayment?: MobilePaymentDetails;
   coordinates?: Coordinates;
   googleMapsUrl?: string;
   city?: string;
@@ -95,6 +125,8 @@ export interface OrderItem {
   quantity: number;
   total: number;
   isQuote: boolean;
+  discountPercent?: number;
+  savings?: number;
 }
 
 export type DeliveryStage = 'preparation' | 'picked_up' | 'in_transit' | 'delivered';
@@ -106,6 +138,20 @@ export interface CourierInfo {
   matricule: string;
   currentZone?: string;
   estimatedTime?: string;
+}
+
+export interface OrderDraft {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  items: CartItem[];
+  customerInfo: Partial<CustomerInfo>;
+  notes?: string;
+  status: 'offline_saved' | 'ready_to_sync' | 'synced';
+  totalAmount: number;
+  itemsCount: number;
+  autoSaved?: boolean;
 }
 
 export interface Order {
@@ -122,6 +168,7 @@ export interface Order {
   isPaid: boolean;
   pdfUrl?: string;
   assignedCommercialId?: string;
+  mobilePayment?: MobilePaymentDetails;
   deliveryStage?: DeliveryStage;
   courier?: CourierInfo;
   deliveryZone?: string;

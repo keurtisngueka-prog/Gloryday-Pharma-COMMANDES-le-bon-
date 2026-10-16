@@ -531,6 +531,19 @@ export const CONSUMABLE_SUBCATEGORIES = [
   'Chirurgie et examen'
 ] as const;
 
+export const MEDICAL_SPECIALTIES = [
+  { id: 'all', label: 'Toutes spécialités' },
+  { id: 'chirurgie', label: 'Bloc & Chirurgie' },
+  { id: 'perfusion', label: 'Perfusion & Injection' },
+  { id: 'pansements', label: 'Plaies & Pansements' },
+  { id: 'maternite', label: 'Maternité & Pédiatrie' },
+  { id: 'urgence', label: 'Urgence & Réanimation' },
+  { id: 'hygiene', label: 'Hygiène & Protection' },
+  { id: 'laboratoire', label: 'Diagnostic & Labo' }
+] as const;
+
+export type MedicalSpecialtyId = typeof MEDICAL_SPECIALTIES[number]['id'];
+
 export const SEARCH_SYNONYMS: Record<string, string[]> = {
   'seringe': ['seringue', 'aiguille', 'injection'],
   'seringues': ['seringue', 'aiguille'],

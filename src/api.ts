@@ -13,6 +13,7 @@ import {
 } from './types';
 import { INITIAL_PRODUCTS, INITIAL_PACKS } from './data/initialProducts';
 import { getEstimatedDeliveryText, detectNeighborhoodFromAddress } from './data/librevilleZones';
+import { calculateCartVolumeSummary, calculateItemVolumePrice } from './utils/volumeDiscount';
 
 const TOKEN_KEY = 'gloryday_auth_token';
 const GUEST_ORDERS_KEY = 'gloryday_guest_orders';
@@ -611,36 +612,45 @@ export const api = {
       });
       if (!order.deliveryZone) order.deliveryZone = zoneName;
       if (!order.deliveryEstimated) order.deliveryEstimated = estimatedTime;
+      if (customer.mobilePayment && !order.mobilePayment) {
+        order.mobilePayment = customer.mobilePayment;
+      }
       saveLocalGuestOrder(order);
       return order;
     } catch (err: any) {
       const year = new Date().getFullYear();
       const localCounter = Math.floor(1000 + Math.random() * 9000);
       const fallbackRef = `GP-${year}-P${localCounter}`;
-      const itemsTotal = items
-        .filter(it => !it.isQuote)
-        .reduce((sum, it) => sum + it.price * it.quantity, 0);
+      const volumeSummary = calculateCartVolumeSummary(items);
       const deliveryFee = customer.deliveryFee || 0;
-      const finalTotal = itemsTotal + deliveryFee;
+      const finalTotal = volumeSummary.netTotal + deliveryFee;
+
+      const isMobilePrePaid = !!(customer.mobilePayment?.isPrePaid && customer.mobilePayment?.transactionReference);
 
       const localOrder: Order = {
         id: `ord-offline-${Date.now()}`,
         reference: fallbackRef,
         createdAt: new Date().toISOString(),
         customer,
-        items: items.map(it => ({
-          productId: it.productId,
-          productName: it.productName,
-          variant: it.variant,
-          price: it.price,
-          quantity: it.quantity,
-          total: it.isQuote ? 0 : it.price * it.quantity,
-          isQuote: it.isQuote
-        })),
+        items: items.map(it => {
+          const calc = calculateItemVolumePrice(it.price, it.quantity, it.isQuote);
+          return {
+            productId: it.productId,
+            productName: it.productName,
+            variant: it.variant,
+            price: calc.discountedUnitPrice,
+            quantity: it.quantity,
+            total: it.isQuote ? 0 : calc.totalWithDiscount,
+            isQuote: it.isQuote,
+            discountPercent: calc.discountPercent,
+            savings: calc.savings
+          };
+        }),
         estimatedTotal: finalTotal,
         hasQuoteItems: items.some(it => it.isQuote),
         status: 'À confirmer',
-        isPaid: false,
+        isPaid: isMobilePrePaid,
+        mobilePayment: customer.mobilePayment,
         deliveryStage: 'preparation',
         deliveryZone: zoneName,
         deliveryEstimated: estimatedTime,
@@ -726,10 +736,49 @@ export const api = {
   },
 
   async updateOrderPayment(orderId: string, isPaid: boolean): Promise<Order> {
-    return request<Order>(`/api/orders/${orderId}/payment`, {
-      method: 'PATCH',
-      body: JSON.stringify({ isPaid })
-    });
+    try {
+      return await request<Order>(`/api/orders/${orderId}/payment`, {
+        method: 'PATCH',
+        body: JSON.stringify({ isPaid })
+      });
+    } catch {
+      const orders = getLocalGuestOrders();
+      const idx = orders.findIndex(o => o.id === orderId || o.reference === orderId);
+      if (idx > -1) {
+        orders[idx].isPaid = isPaid;
+        if (orders[idx].mobilePayment) {
+          orders[idx].mobilePayment.status = isPaid ? 'verified' : 'pending';
+          if (isPaid && !orders[idx].mobilePayment.validatedAt) {
+            orders[idx].mobilePayment.validatedAt = new Date().toISOString();
+          }
+        }
+        localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(orders));
+        return orders[idx];
+      }
+      throw new Error('Commande non trouvée');
+    }
+  },
+
+  async updateOrderMobilePayment(orderId: string, mobilePayment: import('./types').MobilePaymentDetails): Promise<Order> {
+    try {
+      return await request<Order>(`/api/orders/${orderId}/mobile-payment`, {
+        method: 'PATCH',
+        body: JSON.stringify({ mobilePayment })
+      });
+    } catch {
+      const orders = getLocalGuestOrders();
+      const idx = orders.findIndex(o => o.id === orderId || o.reference === orderId);
+      if (idx > -1) {
+        orders[idx].mobilePayment = mobilePayment;
+        orders[idx].customer.mobilePayment = mobilePayment;
+        if (mobilePayment.isPrePaid || mobilePayment.status === 'verified') {
+          orders[idx].isPaid = true;
+        }
+        localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(orders));
+        return orders[idx];
+      }
+      throw new Error('Commande non trouvée');
+    }
   },
 
   async getAdminStats(): Promise<AdminStats> {

@@ -1,6 +1,7 @@
 import React from 'react';
 import { FileText, ArrowLeft, CheckCircle2, Building2, MapPin, Phone } from 'lucide-react';
 import { CartItem, CustomerInfo } from '../types';
+import { calculateCartVolumeSummary, calculateItemVolumePrice } from '../utils/volumeDiscount';
 
 interface OrderPreviewModalProps {
   items: CartItem[];
@@ -17,9 +18,10 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
   onBackToEdit,
   isSubmitting
 }) => {
-  const fixedItems = items.filter(it => !it.isQuote);
   const quoteItems = items.filter(it => it.isQuote);
-  const total = fixedItems.reduce((acc, it) => acc + it.price * it.quantity, 0);
+  const volumeSummary = calculateCartVolumeSummary(items);
+  const deliveryFee = customer.deliveryFee || 0;
+  const grandTotal = volumeSummary.netTotal + deliveryFee;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
@@ -80,6 +82,23 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                 Mode : <strong>{customer.deliveryMode === 'livraison' ? 'Livraison sur site' : 'Retrait au dépôt'}</strong> · 
                 Paiement : <strong>{customer.paymentMethod.replace('_', ' ').toUpperCase()}</strong>
               </p>
+              {customer.mobilePayment && (customer.paymentMethod === 'airtel_money' || customer.paymentMethod === 'moov_money') && (
+                <div className="mt-1.5 p-2 rounded-lg bg-white border border-slate-200 text-[10px] space-y-0.5">
+                  <div className="flex items-center justify-between font-bold text-slate-800">
+                    <span>{customer.mobilePayment.provider === 'airtel_money' ? 'Airtel Money Gabon' : 'Moov Money Gabon'}</span>
+                    <span className={customer.mobilePayment.isPrePaid ? 'text-emerald-700 font-bold' : 'text-blue-700'}>
+                      {customer.mobilePayment.isPrePaid ? '✓ Pré-payé' : 'À la réception'}
+                    </span>
+                  </div>
+                  {customer.mobilePayment.transactionReference ? (
+                    <div className="font-mono text-slate-700 truncate">
+                      ID Transaction : <strong className="text-slate-900">{customer.mobilePayment.transactionReference}</strong>
+                    </div>
+                  ) : (
+                    <div className="text-amber-700 italic">Référence SMS transmissible après confirmation</div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -95,25 +114,35 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {items.map((item, idx) => (
-                  <tr key={idx} className={idx % 2 === 1 ? 'bg-slate-50/40' : 'bg-white'}>
-                    <td className="py-2.5 px-3">
-                      <span className="font-bold text-slate-900 block">{item.productName}</span>
-                      {item.variant && item.variant !== 'Standard' && (
-                        <span className="text-[11px] text-slate-500">{item.variant}</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-3 text-center font-bold text-slate-900">
-                      {item.quantity}
-                    </td>
-                    <td className="py-2.5 px-3 text-right text-slate-600">
-                      {item.isQuote ? 'Sur devis' : item.price.toLocaleString('fr-FR')}
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-bold text-slate-900">
-                      {item.isQuote ? 'Sur devis' : (item.price * item.quantity).toLocaleString('fr-FR')}
-                    </td>
-                  </tr>
-                ))}
+                {items.map((item, idx) => {
+                  const itemCalc = calculateItemVolumePrice(item.price, item.quantity, item.isQuote);
+                  return (
+                    <tr key={idx} className={idx % 2 === 1 ? 'bg-slate-50/40' : 'bg-white'}>
+                      <td className="py-2.5 px-3">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-slate-900 block">{item.productName}</span>
+                          {itemCalc.discountPercent > 0 && (
+                            <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
+                              -{itemCalc.discountPercent}%
+                            </span>
+                          )}
+                        </div>
+                        {item.variant && item.variant !== 'Standard' && (
+                          <span className="text-[11px] text-slate-500">{item.variant}</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-center font-bold text-slate-900">
+                        {item.quantity}
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-slate-600">
+                        {item.isQuote ? 'Sur devis' : itemCalc.discountedUnitPrice.toLocaleString('fr-FR')}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-slate-900">
+                        {item.isQuote ? 'Sur devis' : itemCalc.totalWithDiscount.toLocaleString('fr-FR')}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -123,11 +152,16 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
             <div className="text-xs text-slate-500 space-y-0.5">
               <p>• Prix en FCFA hors taxes — Non soumis à la TVA (Sans TVA)</p>
               <p>• Validité de l'offre : 15 jours</p>
+              {volumeSummary.totalSavings > 0 && (
+                <p className="text-emerald-700 font-bold">
+                  ✨ Remise volume appliquée : -{volumeSummary.totalSavings.toLocaleString('fr-FR')} FCFA
+                </p>
+              )}
             </div>
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-right w-full sm:w-auto min-w-[200px]">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">Total estimé</span>
+              <span className="text-[10px] font-bold uppercase text-slate-400 block">Total net estimé</span>
               <span className="text-xl font-black text-slate-900 tabular-nums">
-                {total.toLocaleString('fr-FR')} FCFA
+                {grandTotal.toLocaleString('fr-FR')} FCFA
               </span>
             </div>
           </div>

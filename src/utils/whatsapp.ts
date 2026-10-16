@@ -16,22 +16,45 @@ export function formatOrderWhatsAppMessage(order: Order, pdfLink?: string): stri
   lines.push('📞 *Téléphone :* ' + order.customer.phone);
   lines.push('📍 *Adresse :* ' + order.customer.deliveryAddress);
   lines.push('🚚 *Mode réception :* ' + (order.customer.deliveryMode === 'livraison' ? 'Livraison sur site' : 'Retrait au dépôt'));
-  lines.push('💳 *Paiement prévu :* ' + order.customer.paymentMethod.replace('_', ' ').toUpperCase());
+  lines.push('💳 *Mode de règlement :* ' + order.customer.paymentMethod.replace('_', ' ').toUpperCase());
+
+  const mp = order.mobilePayment || order.customer.mobilePayment;
+  if (mp && (order.customer.paymentMethod === 'airtel_money' || order.customer.paymentMethod === 'moov_money')) {
+    const operatorName = mp.provider === 'airtel_money' ? 'Airtel Money Gabon (*150#)' : 'Moov Money Gabon (*555#)';
+    lines.push(`📱 *Opérateur Mobile :* ${operatorName}`);
+    lines.push(`🏢 *Compte Marchand :* ${mp.merchantPhone || (mp.provider === 'airtel_money' ? '077 00 30 04' : '066 24 03 99')}`);
+    if (mp.transactionReference) {
+      lines.push(`🔑 *Réf. Transaction SMS :* ${mp.transactionReference} (À vérifier)`);
+    }
+    if (mp.senderPhone) {
+      lines.push(`👤 *N° Payeur / Émetteur :* ${mp.senderPhone}`);
+    }
+    const isPaid = order.isPaid || mp.isPrePaid || mp.status === 'verified';
+    lines.push(`📊 *Statut Règlement Mobile :* ${isPaid ? '✅ DÉJÀ EFFECTUÉ / PRÉ-PAYÉ' : '⏳ PRÉVU À LA LIVRAISON'}`);
+  }
 
   if (order.customer.notes) {
     lines.push('📝 *Remarques :* ' + order.customer.notes);
   }
   lines.push('');
   lines.push('📦 *DÉTAIL DES ARTICLES :*');
+  let totalSavings = 0;
   order.items.forEach((item, index) => {
     const variantStr = item.variant && item.variant !== 'Standard' ? ` (${item.variant})` : '';
+    if (item.savings && item.savings > 0) {
+      totalSavings += item.savings;
+    }
     if (item.isQuote) {
       lines.push(`${index + 1}. ${item.quantity}x ${item.productName}${variantStr} → *SUR DEVIS*`);
     } else {
-      lines.push(`${index + 1}. ${item.quantity}x ${item.productName}${variantStr} : ${item.total.toLocaleString('fr-FR')} FCFA`);
+      const discountTag = item.discountPercent ? ` (-${item.discountPercent}% vol.)` : '';
+      lines.push(`${index + 1}. ${item.quantity}x ${item.productName}${variantStr}${discountTag} : ${item.total.toLocaleString('fr-FR')} FCFA`);
     }
   });
   lines.push('');
+  if (totalSavings > 0) {
+    lines.push(`✨ *Économie Volume Clinique :* -${totalSavings.toLocaleString('fr-FR')} FCFA`);
+  }
   lines.push(`💰 *TOTAL ESTIMÉ :* ${order.estimatedTotal.toLocaleString('fr-FR')} FCFA (Sans TVA)`);
   if (order.hasQuoteItems) {
     lines.push('⚠️ _Note : Cette commande comprend des articles sur devis à chiffrer._');

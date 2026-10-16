@@ -9,7 +9,8 @@ import {
   AlertCircle,
   Filter,
   CheckCircle2,
-  FileText
+  FileText,
+  Stethoscope
 } from 'lucide-react';
 import { 
   Product, 
@@ -29,7 +30,8 @@ import {
 import { api, setStoredToken, getStoredCustomerInfo } from './api';
 import { matchesProductSearch } from './utils/search';
 import { generateOrderPdf } from './utils/pdfGenerator';
-import { CATEGORIES, CONSUMABLE_SUBCATEGORIES } from './data/initialProducts';
+import { CATEGORIES, CONSUMABLE_SUBCATEGORIES, MEDICAL_SPECIALTIES } from './data/initialProducts';
+import { getProductSpecialty } from './utils/specialties';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -37,6 +39,7 @@ import { MobileBottomNav } from './components/MobileBottomNav';
 import { AppSidebar } from './components/AppSidebar';
 import { AuthModal } from './components/AuthModal';
 import { ProductCard } from './components/ProductCard';
+import { ProductDetailModal } from './components/ProductDetailModal';
 import { PacksSection } from './components/PacksSection';
 import { CartView } from './components/CartView';
 import { BulkOrderView } from './components/BulkOrderView';
@@ -200,12 +203,14 @@ export default function App() {
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedSpecialty, setSelectedSpecialty] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('Tous les articles');
   const [selectedSubcategory, setSelectedSubcategory] = useState<string>('Toutes les sous-catégories');
   const [onlySelected, setOnlySelected] = useState(false);
   const [onlyPromotions, setOnlyPromotions] = useState(false);
   const [sortBy, setSortBy] = useState<'default' | 'price-asc' | 'price-desc' | 'name-asc'>('default');
   const [priceRange, setPriceRange] = useState<'all' | 'promotions' | 'under10k' | '10k-50k' | 'over50k' | 'quote'>('all');
+  const [inspectedProduct, setInspectedProduct] = useState<Product | null>(null);
 
   // Notifications (Initialized with automated event notifications)
   const [notifications, setNotifications] = useState<AppNotification[]>(() => [
@@ -661,6 +666,9 @@ export default function App() {
     if (searchQuery.trim()) {
       result = result.filter(p => matchesProductSearch(p, searchQuery));
     }
+    if (selectedSpecialty !== 'all') {
+      result = result.filter(p => getProductSpecialty(p) === selectedSpecialty);
+    }
     if (selectedCategory !== 'Tous les articles') {
       result = result.filter(p => p.category === selectedCategory);
     }
@@ -695,7 +703,7 @@ export default function App() {
       result = [...result].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
     }
     return result;
-  }, [products, searchQuery, selectedCategory, selectedSubcategory, onlySelected, onlyPromotions, priceRange, sortBy, cartItems]);
+  }, [products, searchQuery, selectedSpecialty, selectedCategory, selectedSubcategory, onlySelected, onlyPromotions, priceRange, sortBy, cartItems]);
 
   return (
     <div className="min-h-screen flex flex-col bg-white text-slate-900 font-['Plus_Jakarta_Sans',sans-serif]">
@@ -960,6 +968,41 @@ export default function App() {
                         <X className="w-4 h-4" />
                       </button>
                     )}
+                  </div>
+
+                  {/* Medical Specialty Selector for Clinics and Hospitals */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 font-semibold px-0.5">
+                      <span className="flex items-center gap-1.5 text-slate-700">
+                        <Stethoscope className="w-3.5 h-3.5 text-[#0d44e8]" />
+                        Spécialités & Services Hospitaliers :
+                      </span>
+                      {selectedSpecialty !== 'all' && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSpecialty('all')}
+                          className="text-[#0d44e8] font-bold hover:underline cursor-pointer"
+                        >
+                          Toutes les spécialités
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                      {MEDICAL_SPECIALTIES.map((spec) => (
+                        <button
+                          key={spec.id}
+                          type="button"
+                          onClick={() => setSelectedSpecialty(spec.id)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                            selectedSpecialty === spec.id
+                              ? 'bg-[#0d44e8] text-white shadow-xs font-bold'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          {spec.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Horizontal Categories Carousel (No Pill Cliché) */}
