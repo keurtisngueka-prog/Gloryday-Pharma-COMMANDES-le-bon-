@@ -17,13 +17,15 @@ interface MobilePaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   order: Order;
-  onPaymentConfirmed?: (transactionId: string, operator: 'airtel_money' | 'moov_money') => Promise<void>;
+  allOrders?: Order[];
+  onPaymentConfirmed?: (transactionId: string, operator: 'airtel_money' | 'moov_money', status?: 'verified' | 'failed') => Promise<void>;
 }
 
 export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
   isOpen,
   onClose,
   order,
+  allOrders,
   onPaymentConfirmed
 }) => {
   const [operator, setOperator] = useState<'airtel_money' | 'moov_money'>('airtel_money');
@@ -56,6 +58,16 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
     }
   };
 
+  const [paymentStatusChoice, setPaymentStatusChoice] = useState<'verified' | 'failed'>('verified');
+
+  // Check for duplicate transaction references
+  const duplicateOrder = transactionRef.trim() && allOrders
+    ? allOrders.find(
+        o => o.id !== order.id && 
+        o.mobilePayment?.transactionReference?.toLowerCase() === transactionRef.trim().toLowerCase()
+      )
+    : null;
+
   const handleValidatePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!transactionRef.trim()) {
@@ -63,17 +75,24 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
       return;
     }
 
+    if (duplicateOrder) {
+      const confirmDup = window.confirm(
+        `ALERTE SÉCURITÉ : La référence ${transactionRef.trim()} a DÉJÀ été utilisée sur la commande ${duplicateOrder.reference} (${duplicateOrder.customer.facilityName}).\n\nSouhaitez-vous continuer malgré le risque de doublon / fraude ?`
+      );
+      if (!confirmDup) return;
+    }
+
     try {
       setIsSubmitting(true);
       setError(null);
       if (onPaymentConfirmed) {
-        await onPaymentConfirmed(transactionRef.trim(), operator);
+        await onPaymentConfirmed(transactionRef.trim(), operator, paymentStatusChoice);
       }
       setSuccess(true);
       setTimeout(() => {
         onClose();
         setSuccess(false);
-      }, 2500);
+      }, 2000);
     } catch (err: any) {
       setError(err.message || 'Erreur lors de la validation du paiement.');
     } finally {
@@ -197,6 +216,18 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
 
           {/* Transaction Confirmation Form */}
           <form onSubmit={handleValidatePayment} className="space-y-3 pt-1">
+            {duplicateOrder && (
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs space-y-1">
+                <div className="flex items-center gap-2 font-bold text-amber-800">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>DOUBLON DÉTECTÉ : Référence déjà existante</span>
+                </div>
+                <p className="text-[11px] text-amber-700">
+                  Cette référence est déjà liée à la commande <strong>{duplicateOrder.reference}</strong> ({duplicateOrder.customer.facilityName}).
+                </p>
+              </div>
+            )}
+
             {error && (
               <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
@@ -206,7 +237,7 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
             {success && (
               <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                <span>Paiement enregistré et validé avec succès !</span>
+                <span>Rapprochement enregistré avec succès !</span>
               </div>
             )}
 
@@ -220,8 +251,41 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
                 placeholder="Ex: MP260408.1422.B04523 ou REF-12345"
                 value={transactionRef}
                 onChange={(e) => setTransactionRef(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono text-xs focus:ring-2 focus:ring-[#0d44e8]"
+                className={`w-full px-3 py-2 rounded-xl border font-mono text-xs focus:ring-2 focus:ring-[#0d44e8] ${
+                  duplicateOrder ? 'border-amber-400 bg-amber-50/30' : 'border-slate-300'
+                }`}
               />
+            </div>
+
+            {/* Status selection : verified vs failed */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                Résultat du rapprochement bancaire / opérateur :
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaymentStatusChoice('verified')}
+                  className={`py-1.5 px-3 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                    paymentStatusChoice === 'verified'
+                      ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
+                      : 'border-slate-200 bg-slate-50 text-slate-600'
+                  }`}
+                >
+                  ✓ Conforme (Verified)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentStatusChoice('failed')}
+                  className={`py-1.5 px-3 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                    paymentStatusChoice === 'failed'
+                      ? 'bg-rose-600 border-rose-600 text-white shadow-xs'
+                      : 'border-slate-200 bg-slate-50 text-slate-600'
+                  }`}
+                >
+                  ✗ Rejeté (Failed)
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-2 pt-1">

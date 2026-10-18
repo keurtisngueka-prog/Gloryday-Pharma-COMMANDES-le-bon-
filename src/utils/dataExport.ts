@@ -283,6 +283,96 @@ CREATE TABLE IF NOT EXISTS order_items (
     total BIGINT NOT NULL
 );
 
+-- 7. TABLE DU PERSONNEL & STAFF INTERNE
+CREATE TABLE IF NOT EXISTS staff (
+    id VARCHAR(64) PRIMARY KEY,
+    phone VARCHAR(32) NOT NULL UNIQUE,
+    full_name VARCHAR(255) NOT NULL,
+    role VARCHAR(32) NOT NULL, -- Super-Admin, Commercial, Gestionnaire Catalogue, Logistique
+    email VARCHAR(255),
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 8. TABLE DES PACKS CLINIQUES & DOTATIONS
+CREATE TABLE IF NOT EXISTS packs (
+    id VARCHAR(64) PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    price BIGINT NOT NULL,
+    image_url TEXT,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 9. TABLE DES DEVIS COMMERCIAUX
+CREATE TABLE IF NOT EXISTS commercial_quotes (
+    id VARCHAR(64) PRIMARY KEY,
+    reference VARCHAR(32) NOT NULL UNIQUE,
+    customer_id VARCHAR(64) REFERENCES clients(id),
+    commercial_id VARCHAR(64) REFERENCES staff(id),
+    subtotal BIGINT NOT NULL,
+    discount_amount BIGINT DEFAULT 0,
+    final_total BIGINT NOT NULL,
+    status VARCHAR(32) DEFAULT 'Brouillon',
+    valid_until DATE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 10. TABLE DES PAIEMENTS ÉCHELONNÉS & MOBILES
+CREATE TABLE IF NOT EXISTS payment_installments (
+    id VARCHAR(64) PRIMARY KEY,
+    order_id VARCHAR(64) REFERENCES orders(id) ON DELETE CASCADE,
+    type VARCHAR(32) NOT NULL, -- acompte, solde, unique
+    amount BIGINT NOT NULL,
+    payment_method VARCHAR(32) NOT NULL, -- airtel_money, moov_money, especes, virement
+    transaction_reference VARCHAR(64),
+    status VARCHAR(32) DEFAULT 'valide',
+    paid_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 11. TABLE DES MESSAGES DIRECTS & DIFFUSION
+CREATE TABLE IF NOT EXISTS direct_messages (
+    id VARCHAR(64) PRIMARY KEY,
+    sender_id VARCHAR(64) NOT NULL,
+    sender_name VARCHAR(255) NOT NULL,
+    recipient_id VARCHAR(64),
+    recipient_facility_name VARCHAR(255),
+    recipient_phone VARCHAR(32),
+    subject VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    channel VARCHAR(32) DEFAULT 'both',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 12. TABLE DES LOTS MÉDICAUX & PÉREMPTIONS
+CREATE TABLE IF NOT EXISTS stock_batches (
+    id VARCHAR(64) PRIMARY KEY,
+    product_id VARCHAR(64) REFERENCES products(id) ON DELETE CASCADE,
+    lot_number VARCHAR(64) NOT NULL,
+    expiry_date DATE NOT NULL,
+    quantity INT NOT NULL,
+    purchase_price BIGINT NOT NULL,
+    supplier_name VARCHAR(255),
+    received_date DATE DEFAULT CURRENT_DATE
+);
+
+-- 13. TABLE DU JOURNAL D'AUDIT IMMUABLE
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id VARCHAR(64) PRIMARY KEY,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    user_id VARCHAR(64) NOT NULL,
+    user_name VARCHAR(255) NOT NULL,
+    user_role VARCHAR(32) NOT NULL,
+    action_type VARCHAR(64) NOT NULL,
+    target_entity VARCHAR(128) NOT NULL,
+    target_id VARCHAR(64) NOT NULL,
+    device_info TEXT,
+    details TEXT NOT NULL,
+    previous_state TEXT,
+    new_state TEXT
+);
+
 -- =====================================================================
 -- INSERTION DES PRODUITS MÉDICAUX ACTUELS (${products.length} articles)
 -- =====================================================================
@@ -337,4 +427,57 @@ export function downloadSupabaseSQL(products: Product[], clients: any[], orders:
   const sql = generateSupabaseSQLString(products, clients, orders);
   triggerDownload(sql, `schema.sql`, 'text/plain;charset=utf-8');
 }
+
+// 6. RESTORE / IMPORT BACKUP JSON
+export function restoreBackupJSON(jsonStr: string): {
+  success: boolean;
+  message: string;
+  data?: {
+    products?: Product[];
+    orders?: Order[];
+    clients?: any[];
+    packs?: Pack[];
+  };
+} {
+  try {
+    const payload = JSON.parse(jsonStr);
+    if (!payload || typeof payload !== 'object') {
+      return { success: false, message: 'Fichier JSON invalide ou corrompu.' };
+    }
+
+    const products = Array.isArray(payload.products) ? payload.products : undefined;
+    const orders = Array.isArray(payload.orders) ? payload.orders : undefined;
+    const clients = Array.isArray(payload.clients) ? payload.clients : undefined;
+    const packs = Array.isArray(payload.packs) ? payload.packs : undefined;
+
+    if (!products && !orders && !clients) {
+      return { success: false, message: 'Le fichier ne contient ni catalogue, ni commandes, ni clients.' };
+    }
+
+    if (products) {
+      localStorage.setItem('gloryday_products_v2', JSON.stringify(products));
+      localStorage.setItem('gloryday_products', JSON.stringify(products));
+    }
+    if (orders) {
+      localStorage.setItem('gloryday_orders_v2', JSON.stringify(orders));
+      localStorage.setItem('gloryday_orders', JSON.stringify(orders));
+    }
+    if (clients) {
+      localStorage.setItem('gloryday_clients_v2', JSON.stringify(clients));
+      localStorage.setItem('gloryday_clients', JSON.stringify(clients));
+    }
+    if (packs) {
+      localStorage.setItem('gloryday_packs_v1', JSON.stringify(packs));
+    }
+
+    return {
+      success: true,
+      message: `Restauration réussie : ${products?.length || 0} produits, ${orders?.length || 0} commandes, ${clients?.length || 0} clients restaurés.`,
+      data: { products, orders, clients, packs }
+    };
+  } catch (err: any) {
+    return { success: false, message: `Erreur lors de la lecture du fichier : ${err.message}` };
+  }
+}
+
 

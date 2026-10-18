@@ -33,6 +33,23 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [isPromotion, setIsPromotion] = useState(initialProduct?.isPromotion || false);
   const [discountPercentage, setDiscountPercentage] = useState(initialProduct?.discountPercentage || 0);
   const [originalPrice, setOriginalPrice] = useState(initialProduct?.originalPrice || 0);
+  const [quantityAvailable, setQuantityAvailable] = useState<number>(
+    typeof initialProduct?.quantityAvailable === 'number'
+      ? initialProduct.quantityAvailable
+      : typeof initialProduct?.stockQuantity === 'number'
+        ? initialProduct.stockQuantity
+        : 50
+  );
+  const [alertThreshold, setAlertThreshold] = useState<number>(
+    typeof initialProduct?.alertThreshold === 'number'
+      ? initialProduct.alertThreshold
+      : typeof initialProduct?.lowStockAlertThreshold === 'number'
+        ? initialProduct.lowStockAlertThreshold
+        : 10
+  );
+  const [purchasePrice, setPurchasePrice] = useState<number>(
+    initialProduct?.purchasePrice || 0
+  );
   const [variants, setVariants] = useState<ProductVariant[]>(
     initialProduct?.variants && initialProduct.variants.length > 0
       ? initialProduct.variants
@@ -81,7 +98,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         thumbnailUrl: imageUrl || undefined,
         isPromotion,
         discountPercentage: isPromotion ? Number(discountPercentage) || 0 : undefined,
-        originalPrice: isPromotion ? Number(originalPrice) || 0 : undefined
+        originalPrice: isPromotion ? Number(originalPrice) || 0 : undefined,
+        quantityAvailable: Number(quantityAvailable) || 0,
+        stockQuantity: Number(quantityAvailable) || 0,
+        alertThreshold: Number(alertThreshold) || 10,
+        lowStockAlertThreshold: Number(alertThreshold) || 10,
+        purchasePrice: Number(purchasePrice) || 0
       };
 
       let result: Product;
@@ -269,6 +291,61 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Stock Réel, Quantité Disponible, Seuil d'Alerte & Prix d'Achat */}
+          <div className="p-3.5 rounded-xl bg-emerald-50/40 border border-emerald-200/80 space-y-3">
+            <span className="font-bold text-xs text-emerald-950 uppercase block">
+              Stock Réel, Seuil d'Alerte & Marge B2B
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                  Quantité disponible *
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  placeholder="ex: 50"
+                  value={quantityAvailable}
+                  onChange={(e) => setQuantityAvailable(parseInt(e.target.value, 10) || 0)}
+                  className="w-full p-2 rounded-lg border border-slate-300 font-mono text-xs bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                  Seuil d'alerte rupture *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  placeholder="ex: 10"
+                  value={alertThreshold}
+                  onChange={(e) => setAlertThreshold(parseInt(e.target.value, 10) || 10)}
+                  className="w-full p-2 rounded-lg border border-slate-300 font-mono text-xs bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                  Prix d'achat unitaire (FCFA)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="ex: 4500"
+                  value={purchasePrice || ''}
+                  onChange={(e) => setPurchasePrice(parseInt(e.target.value, 10) || 0)}
+                  className="w-full p-2 rounded-lg border border-slate-300 font-mono text-xs bg-white"
+                />
+              </div>
+            </div>
+            <p className="text-[10px] text-slate-500">
+              Lorsque le stock disponible descend en dessous du seuil d'alerte, un indicateur d'urgence s'affiche dans le back-office.
+            </p>
           </div>
 
           {/* Variants */}

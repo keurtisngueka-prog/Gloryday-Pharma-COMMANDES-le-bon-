@@ -14,6 +14,7 @@ import {
 import { INITIAL_PRODUCTS, INITIAL_PACKS } from './data/initialProducts';
 import { getEstimatedDeliveryText, detectNeighborhoodFromAddress } from './data/librevilleZones';
 import { calculateCartVolumeSummary, calculateItemVolumePrice } from './utils/volumeDiscount';
+import { getStockBatches } from './utils/stockStorage';
 
 const TOKEN_KEY = 'gloryday_auth_token';
 const GUEST_ORDERS_KEY = 'gloryday_guest_orders';
@@ -279,12 +280,46 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   return response.json();
 }
 
+function enrichProductStock(p: Product): Product {
+  const batches = getStockBatches(p.id);
+  const totalBatchesQty = batches.reduce((acc, b) => acc + (b.quantity || 0), 0);
+  
+  const qty = typeof p.quantityAvailable === 'number'
+    ? p.quantityAvailable
+    : typeof p.stockQuantity === 'number'
+      ? p.stockQuantity
+      : totalBatchesQty > 0 ? totalBatchesQty : 75;
+
+  const threshold = typeof p.alertThreshold === 'number'
+    ? p.alertThreshold
+    : typeof p.lowStockAlertThreshold === 'number'
+      ? p.lowStockAlertThreshold
+      : 15;
+
+  const basePrice = p.variants && p.variants[0] ? p.variants[0].price : 5000;
+  const purchase = typeof p.purchasePrice === 'number' && p.purchasePrice > 0
+    ? p.purchasePrice
+    : Math.round(basePrice * 0.65);
+
+  return {
+    ...p,
+    quantityAvailable: qty,
+    stockQuantity: qty,
+    alertThreshold: threshold,
+    lowStockAlertThreshold: threshold,
+    purchasePrice: purchase,
+    batches: batches,
+    batchHistory: batches
+  };
+}
+
 export const api = {
   async getProducts(): Promise<Product[]> {
     try {
-      return await request<Product[]>('/api/products');
+      const prods = await request<Product[]>('/api/products');
+      return prods.map(enrichProductStock);
     } catch (err) {
-      return INITIAL_PRODUCTS;
+      return INITIAL_PRODUCTS.map(enrichProductStock);
     }
   },
 

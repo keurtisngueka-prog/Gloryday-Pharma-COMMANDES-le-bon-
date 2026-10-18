@@ -1,6 +1,6 @@
 {
-  "summary": "Plan d'implémentation pour l'intégration complète de toutes les nouveautés détectées (graphique d'évolution des ventes Recharts, modal de paiement mobile Airtel/Moov Money, scripts de migration SQL RLS) tout en conservant intactes les statistiques clients, la fidélité et la sauvegarde automatique du panier.",
-  "updatedAt": "2026-10-18T05:23:12.043109544Z",
+  "summary": "Plan d'implémentation de la refonte Enterprise pour Gloryday Pharma Gabon : Journal d'audit immuable, gestion B2B des clients et plafonds indicatifs, gestion du stock réel avec lots et péremptions, réconciliation financière Airtel/Moov et paiements échelonnés, paramétrage dynamique sans code, pilotage analytique complet, communication ciblée et sauvegarde/restauration.",
+  "updatedAt": "2026-10-18T06:06:55.093465988Z",
   "requestFeedback": true,
   "userFacing": true
 }

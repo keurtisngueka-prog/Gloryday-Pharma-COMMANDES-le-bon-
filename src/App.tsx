@@ -32,6 +32,8 @@ import { matchesProductSearch } from './utils/search';
 import { generateOrderPdf } from './utils/pdfGenerator';
 import { CATEGORIES, CONSUMABLE_SUBCATEGORIES, MEDICAL_SPECIALTIES } from './data/initialProducts';
 import { getProductSpecialty } from './utils/specialties';
+import { logAuditEvent } from './utils/auditLogger';
+import { deductStockForOrder } from './utils/stockStorage';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -635,6 +637,27 @@ export default function App() {
       setIsPreviewModalOpen(false);
       setConfirmedOrder(newOrder);
 
+      // Décrémentation automatique du stock réel et des lots (FEFO)
+      deductStockForOrder(
+        newOrder.items,
+        products,
+        (updatedP) => {
+          setProducts(prev => prev.map(p => p.id === updatedP.id ? updatedP : p));
+        },
+        currentUser
+      );
+
+      // Enregistrement d'audit immuable
+      logAuditEvent(
+        currentUser,
+        'statut_commande',
+        'Commande Médicale',
+        newOrder.reference,
+        `Création commande ${newOrder.reference} (${newOrder.estimatedTotal.toLocaleString('fr-FR')} FCFA) pour ${pendingCustomerInfo.facilityName}`,
+        undefined,
+        'À confirmer'
+      );
+
       // Automated notifications dispatch (Client confirmation & Staff alert)
       const clientConfirmationNotif: AppNotification = {
         id: `notif-${Date.now()}-client`,
@@ -682,11 +705,23 @@ export default function App() {
 
   // Admin Actions
   const handleAdminUpdateStatus = async (orderId: string, status: OrderStatus, reason?: string) => {
+    const prevOrder = orders.find(o => o.id === orderId);
     await api.updateOrderStatus(orderId, status, reason);
     const updated = await api.getOrders();
     setOrders(updated);
     const stats = await api.getAdminStats();
     setAdminStats(stats);
+
+    // Enregistrement d'audit immuable
+    logAuditEvent(
+      currentUser,
+      'statut_commande',
+      'Statut Commande',
+      prevOrder?.reference || orderId,
+      `Passage du statut à « ${status} »${reason ? ` (Motif: ${reason})` : ''}`,
+      prevOrder?.status,
+      status
+    );
 
     // Automated client notification on order status change
     const targetOrder = updated.find(o => o.id === orderId);
@@ -705,9 +740,57 @@ export default function App() {
   };
 
   const handleAdminUpdatePayment = async (orderId: string, isPaid: boolean) => {
+    const prevOrder = orders.find(o => o.id === orderId);
     await api.updateOrderPayment(orderId, isPaid);
     const updated = await api.getOrders();
     setOrders(updated);
+
+    logAuditEvent(
+      currentUser,
+      'validation_paiement',
+      'Règlement Commande',
+      prevOrder?.reference || orderId,
+      `Statut de règlement marqué comme ${isPaid ? 'PAYÉE' : 'NON PAYÉE'}`,
+      prevOrder?.isPaid ? 'Payée' : 'Non payée',
+      isPaid ? 'Payée' : 'Non payée'
+    );
+  };
+
+  const handleAdminUpdateOrder = (updatedOrder: Order) => {
+    setOrders(prev => {
+      const next = prev.map(o => o.id === updatedOrder.id ? updatedOrder : o);
+      try {
+        localStorage.setItem('gloryday_orders_v2', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleAdminUpdateClient = (updatedClient: User) => {
+    setClients(prev => {
+      const next = prev.map(c => c.id === updatedClient.id ? updatedClient : c);
+      try {
+        localStorage.setItem('gloryday_clients_v2', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleAdminDeleteClientData = (clientId: string) => {
+    setClients(prev => {
+      const next = prev.filter(c => c.id !== clientId);
+      try {
+        localStorage.setItem('gloryday_clients_v2', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    logAuditEvent(
+      currentUser,
+      'export_donnees',
+      'Données Client B2B',
+      clientId,
+      `Suppression / Droit à l'oubli appliqué pour le compte client ${clientId}`
+    );
   };
 
   const handleAdminCreatePack = async (packData: Omit<Pack, 'id'>) => {
@@ -735,8 +818,16 @@ export default function App() {
   };
 
   const handleAdminDeleteProduct = async (productId: string) => {
+    const prod = products.find(p => p.id === productId);
     await api.deleteProduct(productId);
     setProducts(prev => prev.filter(p => p.id !== productId));
+    logAuditEvent(
+      currentUser,
+      'suppression_produit',
+      'Catalogue Médical',
+      productId,
+      `Suppression du produit ${prod?.name || productId}`
+    );
   };
 
   const handleAdminProductSaved = (savedProduct: Product) => {
@@ -750,6 +841,13 @@ export default function App() {
         return [savedProduct, ...prev];
       }
     });
+    logAuditEvent(
+      currentUser,
+      'creation_produit',
+      'Catalogue Médical',
+      savedProduct.id,
+      `Enregistrement du produit ${savedProduct.name} (Stock: ${savedProduct.stockQuantity || 'N/A'})`
+    );
   };
 
   // Cart counts
@@ -1014,6 +1112,9 @@ export default function App() {
                     setActiveDeliveryOrder(order);
                     setIsDeliveryModalOpen(true);
                   }}
+                  onUpdateOrder={handleAdminUpdateOrder}
+                  onUpdateClient={handleAdminUpdateClient}
+                  onDeleteClientData={handleAdminDeleteClientData}
                 />
               ) : (
                 <RestrictedAccessView

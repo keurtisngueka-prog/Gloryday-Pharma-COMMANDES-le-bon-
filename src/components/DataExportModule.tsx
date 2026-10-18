@@ -18,6 +18,7 @@ import {
   HelpCircle,
   Eye,
   FileText,
+  Upload,
   X
 } from 'lucide-react';
 import { Product, Order, User, Pack, AppNotification } from '../types';
@@ -27,7 +28,8 @@ import {
   downloadOrdersCSV, 
   downloadClientsCSV, 
   downloadSupabaseSQL,
-  generateSupabaseSQLString
+  generateSupabaseSQLString,
+  restoreBackupJSON
 } from '../utils/dataExport';
 
 interface DataExportModuleProps {
@@ -36,6 +38,7 @@ interface DataExportModuleProps {
   clients: any[];
   packs: Pack[];
   notifications: AppNotification[];
+  onDataRestored?: () => void;
 }
 
 export const DataExportModule: React.FC<DataExportModuleProps> = ({
@@ -43,7 +46,8 @@ export const DataExportModule: React.FC<DataExportModuleProps> = ({
   orders,
   clients,
   packs,
-  notifications
+  notifications,
+  onDataRestored
 }) => {
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
@@ -171,6 +175,37 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
               <Download className="w-3.5 h-3.5" />
               <span>Télécharger JSON ({products.length} articles)</span>
             </button>
+
+            {/* Restore file input */}
+            <div className="mt-2.5 pt-2 border-t border-slate-100">
+              <label className="w-full py-1.5 px-3 rounded-xl border border-dashed border-blue-400 bg-blue-50/50 hover:bg-blue-50 text-[#0d44e8] font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
+                <Upload className="w-3 h-3" />
+                <span>Restaurer / Importer Sauvegarde</span>
+                <input
+                  type="file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                      const content = event.target?.result as string;
+                      if (!content) return;
+                      const res = restoreBackupJSON(content);
+                      if (res.success) {
+                        alert(res.message);
+                        if (onDataRestored) onDataRestored();
+                        else window.location.reload();
+                      } else {
+                        alert(res.message);
+                      }
+                    };
+                    reader.readAsText(file);
+                  }}
+                />
+              </label>
+            </div>
           </div>
 
           {/* Card 2: Products CSV */}
