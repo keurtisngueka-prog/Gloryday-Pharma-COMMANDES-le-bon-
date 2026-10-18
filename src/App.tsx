@@ -375,7 +375,7 @@ export default function App() {
       api.getClients().then(setClients).catch(() => {});
     } else {
       setActiveTab('dashboard');
-      api.getOrders(user.phone).then(setOrders).catch(() => {});
+      api.getOrders().then(setOrders).catch(() => {});
     }
   };
 
@@ -399,39 +399,6 @@ export default function App() {
     api.getOrders().then(setOrders).catch(() => {});
   };
 
-  const handleDemoSwitchRole = async (targetRole: AppRole) => {
-    try {
-      if (currentUser) {
-        try {
-          localStorage.setItem(getCartStorageKey(currentUser), JSON.stringify(cartItems));
-        } catch {}
-      }
-
-      if (targetRole === 'client') {
-        const res = await api.login('+24177001122', 'client123');
-        setCurrentUser(res.user);
-        setCartItems(loadCartForUser(res.user));
-        loadInitialData();
-        setActiveTab('catalog');
-      } else {
-        const res = await api.adminLogin('gloryday-admin-2026', targetRole);
-        setCurrentUser(res.user);
-        setCartItems(loadCartForUser(res.user));
-        api.getClients().then(setClients).catch(console.warn);
-        api.getQuotes().then(setQuotes).catch(console.warn);
-        api.getAdminStats().then(setAdminStats).catch(console.warn);
-        if (targetRole === 'Super-Admin') {
-          setActiveTab('admin');
-        } else if (targetRole === 'Commercial') {
-          setActiveTab('commercial-quotes');
-        } else {
-          setActiveTab('catalog');
-        }
-      }
-    } catch (e) {
-      console.error('Error switching role', e);
-    }
-  };
 
   // Cart Operations
   const handleAddToCart = (product: Product, variant: ProductVariant, quantity: number) => {
@@ -627,7 +594,7 @@ export default function App() {
     if (!pendingCustomerInfo || cartItems.length === 0) return;
     try {
       setIsSubmittingOrder(true);
-      const newOrder = await api.createOrder(pendingCustomerInfo, cartItems);
+      const newOrder = await api.createOrder(pendingCustomerInfo, cartItems, currentUser);
       const { dataUrl } = await generateOrderPdf(newOrder);
       setConfirmedPdfDataUrl(dataUrl);
       api.uploadOrderPdf(newOrder.reference, dataUrl).then(url => {
@@ -922,7 +889,6 @@ export default function App() {
         cartCount={cartCount}
         onLogout={handleLogout}
         onOpenAuth={() => setIsAuthModalOpen(true)}
-        onSwitchRole={handleDemoSwitchRole}
         onOpenCreateProduct={() => setIsGlobalProductModalOpen(true)}
         onLogoClick={handleLogoClick}
       />

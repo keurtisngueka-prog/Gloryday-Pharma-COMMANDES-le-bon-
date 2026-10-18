@@ -167,6 +167,9 @@ export interface Order {
   reference: string; // GP-2026-00001
   createdAt: string;
   userId?: string;
+  structureId?: string;
+  authorName?: string;
+  authorJobTitle?: JobTitle;
   customer: CustomerInfo;
   items: OrderItem[];
   estimatedTotal: number;
@@ -199,6 +202,22 @@ export interface Order {
 export type ClientAccountStatus = 'actif' | 'en_attente' | 'suspendu' | 'bloque';
 export type PaymentTerms = 'comptant' | '30_jours' | '60_jours' | 'acompte_solde';
 
+export type JobTitle = 'directeur' | 'charge_commandes' | 'docteur';
+export type DirectorApprovalStatus = 'none' | 'pending' | 'approved' | 'rejected';
+
+export interface HealthcareStructure {
+  id: string;
+  name: string;
+  type: FacilityType;
+  maxAccounts: number;
+  directorUserId?: string;
+  directorName?: string;
+  directorPhone?: string;
+  createdAt: string;
+  city?: string;
+  deliveryAddress?: string;
+}
+
 export interface User {
   id: string;
   phone: string;
@@ -208,6 +227,9 @@ export interface User {
   facilityTypeOther?: string;
   role: AppRole;
   createdAt: string;
+  structureId?: string;
+  jobTitle?: JobTitle;
+  directorApprovalStatus?: DirectorApprovalStatus;
   assignedToCommercialId?: string;
   assignedToCommercialName?: string;
   coordinates?: Coordinates;

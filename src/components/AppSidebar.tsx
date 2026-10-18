@@ -32,7 +32,6 @@ interface AppSidebarProps {
   cartCount: number;
   onLogout: () => void;
   onOpenAuth: () => void;
-  onSwitchRole?: (role: AppRole) => void;
   onOpenCreateProduct?: () => void;
   onLogoClick?: () => void;
 }
@@ -46,7 +45,6 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   cartCount,
   onLogout,
   onOpenAuth,
-  onSwitchRole,
   onOpenCreateProduct,
   onLogoClick
 }) => {
@@ -329,72 +327,29 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
             </div>
           )}
 
-          {/* 5. Role Switcher for Staff (STRICTLY HIDDEN FROM CLIENTS - ONLY VISIBLE WHEN AUTHENTICATED STAFF) */}
-          {currentUser && role !== 'client' && onSwitchRole && (
-            <div className="p-4 pt-1 space-y-2 border-t border-purple-200 bg-purple-50/50">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-purple-900 px-1 block">
-                Basculer de rôle Staff (Session Active)
-              </span>
-
-              <div className="grid grid-cols-2 gap-1.5 text-[11px] font-bold">
-                <button
-                  type="button"
-                  onClick={() => { onSwitchRole('Super-Admin'); onClose(); }}
-                  className={`p-2 rounded-lg text-left transition-colors flex items-center justify-between cursor-pointer ${
-                    role === 'Super-Admin' ? 'bg-purple-700 text-white shadow-xs' : 'bg-white hover:bg-purple-100 text-purple-900 border border-purple-200'
-                  }`}
-                >
-                  <span>Super-Admin</span>
-                  {role === 'Super-Admin' && <CheckCircle2 className="w-3 h-3" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => { onSwitchRole('Commercial'); onClose(); }}
-                  className={`p-2 rounded-lg text-left transition-colors flex items-center justify-between cursor-pointer ${
-                    role === 'Commercial' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white hover:bg-blue-100 text-blue-900 border border-blue-200'
-                  }`}
-                >
-                  <span>Commercial</span>
-                  {role === 'Commercial' && <CheckCircle2 className="w-3 h-3" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => { onSwitchRole('Gestionnaire Catalogue'); onClose(); }}
-                  className={`p-2 rounded-lg text-left transition-colors flex items-center justify-between cursor-pointer ${
-                    role === 'Gestionnaire Catalogue' ? 'bg-amber-600 text-white shadow-xs' : 'bg-white hover:bg-amber-100 text-amber-900 border border-amber-200'
-                  }`}
-                >
-                  <span>Catalogue/Stock</span>
-                  {role === 'Gestionnaire Catalogue' && <CheckCircle2 className="w-3 h-3" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => { onSwitchRole('Logistique'); onClose(); }}
-                  className={`p-2 rounded-lg text-left transition-colors flex items-center justify-between cursor-pointer ${
-                    role === 'Logistique' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-200'
-                  }`}
-                >
-                  <span>Logistique</span>
-                  {role === 'Logistique' && <CheckCircle2 className="w-3 h-3" />}
-                </button>
+          {/* 5. Verified Staff Session Badge (Strictly locked to backend credentials) */}
+          {currentUser && role !== 'client' && (
+            <div className="p-4 pt-2 space-y-2 border-t border-slate-200 bg-slate-50/70">
+              <div className="flex items-center gap-2 p-2 rounded-xl bg-white border border-slate-200 text-xs shadow-2xs">
+                <ShieldCheck className="w-4 h-4 text-purple-700 shrink-0" />
+                <div className="overflow-hidden">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                    Session Collaborateur
+                  </span>
+                  <span className="font-bold text-slate-900 truncate block">
+                    {currentUser.contactName || currentUser.facilityName}
+                  </span>
+                  <span className="inline-block mt-0.5 px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800">
+                    {role}
+                  </span>
+                </div>
               </div>
-
-              <button
-                type="button"
-                onClick={() => { onSwitchRole('client'); onClose(); }}
-                className="w-full mt-2 py-1.5 px-3 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <span>Revenir à la vue Client</span>
-              </button>
 
               {onOpenCreateProduct && (role === 'Super-Admin' || role === 'Gestionnaire Catalogue') && (
                 <button
                   type="button"
                   onClick={() => { onOpenCreateProduct(); onClose(); }}
-                  className="w-full mt-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                  className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
                 >
                   <PlusCircle className="w-4 h-4" />
                   <span>+ Créer un Nouveau Produit</span>

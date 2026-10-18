@@ -20,9 +20,18 @@ import {
   ArrowRight,
   Plus,
   BarChart3,
-  Check
+  Check,
+  Users,
+  Eye,
+  Layers,
+  User as UserIcon,
+  Briefcase,
+  Filter,
+  Info
 } from 'lucide-react';
-import { Order, OrderStatus, User, CartItem } from '../types';
+import { Order, OrderStatus, User, CartItem, HealthcareStructure } from '../types';
+import { normalizePhone } from '../api';
+import { getStructureById, getStructureMembers, canAddAccountToStructure } from '../utils/structureStorage';
 
 interface ClientDashboardProps {
   orders: Order[];
@@ -35,6 +44,8 @@ interface ClientDashboardProps {
   onAddToCartItem?: (item: CartItem) => void;
 }
 
+export type ExpensePeriod = 'today' | 'week' | 'month' | 'all';
+
 export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   orders,
   currentUser,
@@ -45,73 +56,104 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   onTrackDelivery,
   onAddToCartItem
 }) => {
-  const nonCancelledOrders = orders.filter(o => o.status !== 'Annulée');
-  const totalSpent = nonCancelledOrders.reduce((sum, o) => sum + o.estimatedTotal, 0);
-  const pendingOrders = orders.filter(o => o.status === 'À confirmer' || o.status === 'Confirmée' || o.status === 'En préparation');
-  const latestOrder = orders.length > 0 ? orders[0] : null;
+  // Director verification
+  const isDirector = currentUser?.jobTitle === 'directeur';
+  const isApprovedDirector = isDirector && currentUser?.directorApprovalStatus === 'approved';
+  const isPendingDirector = isDirector && currentUser?.directorApprovalStatus === 'pending';
 
-  // Track item IDs that were recently added to cart from the top articles list
+  // Structure information
+  const currentStructure = useMemo<HealthcareStructure | undefined>(() => {
+    if (!currentUser?.structureId) return undefined;
+    return getStructureById(currentUser.structureId);
+  }, [currentUser]);
+
+  const structureMembers = useMemo<User[]>(() => {
+    if (!currentUser?.structureId) return [];
+    return getStructureMembers(currentUser.structureId);
+  }, [currentUser]);
+
+  // View Scope: Personal (individual purchases) vs Structure (consolidated director view)
+  const [scope, setScope] = useState<'personal' | 'structure'>(() => {
+    return isApprovedDirector ? 'structure' : 'personal';
+  });
+
+  // Expense Period Filter: Jour / Semaine / Mois / Tout
+  const [expensePeriod, setExpensePeriod] = useState<ExpensePeriod>('month');
+
+  // Track recently added item in quick reorder
   const [recentlyAddedId, setRecentlyAddedId] = useState<string | null>(null);
 
-  // Advanced Client Statistics & Loyalty Intelligence
-  const stats = useMemo(() => {
-    const validOrders = orders.filter(o => o.status !== 'Annulée');
-    const deliveredOrders = validOrders.filter(o => o.status === 'Livrée');
-    const deliveredSpent = deliveredOrders.reduce((sum, o) => sum + o.estimatedTotal, 0);
+  // 1. Strictly isolated Personal Orders (ses propres achats)
+  const personalOrders = useMemo(() => {
+    if (!currentUser) return orders;
+    const cleanUserPhone = normalizePhone(currentUser.phone);
+    return orders.filter(o => {
+      if (o.userId && o.userId === currentUser.id) return true;
+      if (o.customer?.phone && normalizePhone(o.customer.phone) === cleanUserPhone) return true;
+      return false;
+    });
+  }, [orders, currentUser]);
 
-    // Chronological analysis for ordering frequency
-    const sortedChrono = [...validOrders].sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
+  // 2. Consolidated Structure Orders (all colleagues in the healthcare structure)
+  const structureOrders = useMemo(() => {
+    if (!currentUser) return orders;
+    return orders.filter(o => {
+      if (currentUser.structureId && o.structureId === currentUser.structureId) return true;
+      if (currentUser.facilityName && o.customer?.facilityName?.trim().toLowerCase() === currentUser.facilityName.trim().toLowerCase()) return true;
+      return false;
+    });
+  }, [orders, currentUser]);
 
-    let avgFrequencyDays: number | null = null;
-    let daysSinceLastOrder: number | null = null;
-    let nextReorderInDays: number | null = null;
+  // Active orders based on scope (strictly personal if not an approved director)
+  const activeOrders = useMemo(() => {
+    if (!currentUser) return orders;
+    if (!isApprovedDirector || scope === 'personal') {
+      return personalOrders;
+    }
+    return structureOrders;
+  }, [currentUser, isApprovedDirector, scope, personalOrders, structureOrders, orders]);
 
-    if (sortedChrono.length >= 2) {
-      const intervals: number[] = [];
-      for (let i = 1; i < sortedChrono.length; i++) {
-        const diffMs = new Date(sortedChrono[i].createdAt).getTime() - new Date(sortedChrono[i - 1].createdAt).getTime();
-        const diffDays = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)));
-        intervals.push(diffDays);
+  // 3. Period-filtered orders for expenses analysis (jour, semaine, mois)
+  const periodFilteredOrders = useMemo(() => {
+    const valid = activeOrders.filter(o => o.status !== 'Annulée');
+    if (expensePeriod === 'all') return valid;
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+    return valid.filter(o => {
+      const orderTime = new Date(o.createdAt).getTime();
+      if (expensePeriod === 'today') {
+        return orderTime >= startOfToday;
       }
-      avgFrequencyDays = Math.max(1, Math.round(intervals.reduce((a, b) => a + b, 0) / intervals.length));
-      const lastOrderTime = new Date(sortedChrono[sortedChrono.length - 1].createdAt).getTime();
-      daysSinceLastOrder = Math.max(0, Math.round((Date.now() - lastOrderTime) / (1000 * 60 * 60 * 24)));
-      nextReorderInDays = Math.max(0, avgFrequencyDays - daysSinceLastOrder);
-    } else if (sortedChrono.length === 1) {
-      const lastOrderTime = new Date(sortedChrono[0].createdAt).getTime();
-      daysSinceLastOrder = Math.max(0, Math.round((Date.now() - lastOrderTime) / (1000 * 60 * 60 * 24)));
-    }
+      if (expensePeriod === 'week') {
+        return orderTime >= sevenDaysAgo;
+      }
+      if (expensePeriod === 'month') {
+        return orderTime >= thirtyDaysAgo;
+      }
+      return true;
+    });
+  }, [activeOrders, expensePeriod]);
 
-    // Loyalty Tier calculation based on accumulated orders and spend
-    let tier: 'Bronze' | 'Argent' | 'Or' = 'Bronze';
-    let tierTitle = 'Établissement Adhérent';
-    let tierColor = 'text-amber-800 bg-amber-50 border-amber-200';
-    let tierPrivilege = 'Tarifs de gros directs Libreville & devis sous 2h';
-    let nextTierName = 'Partenaire Médical Privilège (Argent)';
-    let nextTierThreshold = 150000;
-    let progressPercent = Math.min(100, Math.round((totalSpent / 150000) * 100));
+  // Period expenses stats calculation
+  const periodStats = useMemo(() => {
+    const totalSpent = periodFilteredOrders.reduce((sum, o) => sum + o.estimatedTotal, 0);
+    const count = periodFilteredOrders.length;
+    const avgBasket = count > 0 ? Math.round(totalSpent / count) : 0;
+    return { totalSpent, count, avgBasket };
+  }, [periodFilteredOrders]);
 
-    if (totalSpent >= 500000 || validOrders.length >= 6) {
-      tier = 'Or';
-      tierTitle = 'Grand Compte Hospitalier VIP';
-      tierColor = 'text-purple-900 bg-purple-50 border-purple-200';
-      tierPrivilege = 'Livraison express prioritaire Libreville (45 min) & ligne directe Direction';
-      nextTierName = 'Palier Maximal atteint';
-      nextTierThreshold = 500000;
-      progressPercent = 100;
-    } else if (totalSpent >= 150000 || validOrders.length >= 3) {
-      tier = 'Argent';
-      tierTitle = 'Partenaire Médical Privilège';
-      tierColor = 'text-[#0d44e8] bg-blue-50 border-blue-200';
-      tierPrivilege = 'Franco de port prioritaire dès 50 000 FCFA & remises campagnes';
-      nextTierName = 'Grand Compte Hospitalier VIP (Or)';
-      nextTierThreshold = 500000;
-      progressPercent = Math.min(100, Math.round(((totalSpent - 150000) / (500000 - 150000)) * 100));
-    }
+  // General KPIs from active orders
+  const nonCancelledOrders = activeOrders.filter(o => o.status !== 'Annulée');
+  const totalSpent = nonCancelledOrders.reduce((sum, o) => sum + o.estimatedTotal, 0);
+  const pendingOrders = activeOrders.filter(o => o.status === 'À confirmer' || o.status === 'Confirmée' || o.status === 'En préparation');
+  const latestOrder = activeOrders.length > 0 ? activeOrders[0] : null;
 
-    // Top ordered articles aggregation
+  // 4. Products ordered the most (Top articles récurrents)
+  const topItems = useMemo(() => {
     const itemsMap = new Map<string, {
       productId: string;
       productName: string;
@@ -124,7 +166,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       totalSpent: number;
     }>();
 
-    validOrders.forEach(o => {
+    nonCancelledOrders.forEach(o => {
       o.items.forEach(it => {
         const key = `${it.productId}__${it.variant}`;
         const existing = itemsMap.get(key);
@@ -148,51 +190,43 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       });
     });
 
-    const topItems = Array.from(itemsMap.values())
+    return Array.from(itemsMap.values())
       .sort((a, b) => b.totalQty - a.totalQty)
       .slice(0, 5);
+  }, [nonCancelledOrders]);
 
-    // Category distribution
-    const categoryMap = new Map<string, number>();
-    validOrders.forEach(o => {
-      o.items.forEach(it => {
-        const cat = it.category || 'Consommables médicaux';
-        categoryMap.set(cat, (categoryMap.get(cat) || 0) + it.total);
+  // Structure breakdown by collaborator (for approved director in structure view)
+  const collaboratorStats = useMemo(() => {
+    if (!isApprovedDirector || structureMembers.length === 0) return [];
+    
+    return structureMembers.map(member => {
+      const memberCleanPhone = normalizePhone(member.phone);
+      const memberOrders = structureOrders.filter(o => {
+        if (o.userId && o.userId === member.id) return true;
+        if (o.customer?.phone && normalizePhone(o.customer.phone) === memberCleanPhone) return true;
+        return false;
       });
-    });
 
-    const categoriesList = Array.from(categoryMap.entries()).map(([cat, amount]) => ({
-      name: cat,
-      amount,
-      percentage: totalSpent > 0 ? Math.round((amount / totalSpent) * 100) : 0
-    })).sort((a, b) => b.amount - a.amount);
+      const validOrders = memberOrders.filter(o => o.status !== 'Annulée');
+      const spent = validOrders.reduce((sum, o) => sum + o.estimatedTotal, 0);
+      const lastOrder = memberOrders[0];
 
-    return {
-      totalSpent,
-      deliveredSpent,
-      validOrdersCount: validOrders.length,
-      deliveredOrdersCount: deliveredOrders.length,
-      avgFrequencyDays,
-      daysSinceLastOrder,
-      nextReorderInDays,
-      tier,
-      tierTitle,
-      tierColor,
-      tierPrivilege,
-      nextTierName,
-      nextTierThreshold,
-      progressPercent,
-      topItems,
-      categoriesList
-    };
-  }, [orders, totalSpent]);
+      return {
+        member,
+        ordersCount: memberOrders.length,
+        totalSpent: spent,
+        lastOrderDate: lastOrder ? lastOrder.createdAt : undefined
+      };
+    }).sort((a, b) => b.totalSpent - a.totalSpent);
+  }, [isApprovedDirector, structureMembers, structureOrders]);
 
+  // Quick reorder handler
   const handleQuickAddToCart = (item: {
     productId: string;
     productName: string;
     variant: string;
-    category?: string;
     price: number;
+    category?: string;
     isQuote: boolean;
   }) => {
     if (onAddToCartItem) {
@@ -228,14 +262,14 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
 
   return (
     <div className="max-w-4xl mx-auto pb-24 space-y-5 px-2 sm:px-0">
-      {/* Client Profile Header */}
+      {/* 1. Header Profil & Établissement */}
       <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl bg-[#eef3ff] text-[#0d44e8] font-bold text-xl flex items-center justify-center shrink-0">
             {currentUser ? currentUser.facilityName.charAt(0).toUpperCase() : <Building2 className="w-6 h-6" />}
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-base sm:text-lg font-bold text-slate-900">
                 {currentUser ? currentUser.facilityName : 'Espace Client & Commandes'}
               </h1>
@@ -244,8 +278,22 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                   {currentUser.facilityType}
                 </span>
               )}
+              {currentUser?.jobTitle && (
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                  currentUser.jobTitle === 'directeur'
+                    ? isApprovedDirector
+                      ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                      : 'bg-amber-100 text-amber-800'
+                    : 'bg-blue-50 text-[#0d44e8]'
+                }`}>
+                  {currentUser.jobTitle === 'directeur' ? 'Directeur' : currentUser.jobTitle === 'docteur' ? 'Docteur' : 'Chargé de commandes'}
+                  {currentUser.jobTitle === 'directeur' && !isApprovedDirector && ' (En attente)'}
+                </span>
+              )}
             </div>
+
             <p className="text-xs text-[#6a6a6b] mt-0.5">
+              {currentUser?.contactName ? `${currentUser.contactName} · ` : ''}
               {currentUser?.phone ? `WhatsApp : ${currentUser.phone}` : 'Historique local de vos commandes'}
             </p>
           </div>
@@ -281,326 +329,388 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         </div>
       </div>
 
-      {/* Primary KPI Cards */}
+      {/* 2. Banner Notification si Directeur en attente de validation */}
+      {isPendingDirector && (
+        <div className="p-3.5 rounded-2xl bg-amber-50/90 border border-amber-200 text-amber-900 text-xs flex items-start gap-2.5">
+          <Info className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <div className="font-bold text-amber-950">Accès Direction en attente de vérification</div>
+            <p className="text-[11px] text-amber-800 leading-relaxed">
+              Vous visualisez actuellement vos propres achats personnels. Dès validation par l'administrateur Gloryday, le bouton de vue consolidée s'activera pour superviser l'ensemble des commandes de votre structure ({currentUser.facilityName}).
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Scope Selector pour Directeur Validé (Vue Personnelle vs Vue Consolidée Établissement) */}
+      {isApprovedDirector && (
+        <div className="bg-white p-3 sm:p-4 rounded-2xl border border-purple-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-purple-50/40 via-white to-blue-50/30">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-purple-700 shrink-0" />
+            <div>
+              <div className="text-xs font-black text-slate-900 flex items-center gap-2">
+                <span>Espace Direction Validé</span>
+                <span className="text-[10px] px-2 py-0.2 rounded-full font-bold bg-purple-100 text-purple-800">
+                  {currentStructure?.name || currentUser?.facilityName}
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-500">
+                Capacité structure : {structureMembers.length} / {currentStructure?.maxAccounts || 3} comptes rattachés
+              </div>
+            </div>
+          </div>
+
+          {/* Segmented Switcher */}
+          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl self-start sm:self-auto text-xs">
+            <button
+              type="button"
+              onClick={() => setScope('personal')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                scope === 'personal'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <UserIcon className="w-3.5 h-3.5" />
+              <span>Mes Achats ({personalOrders.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setScope('structure')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                scope === 'structure'
+                  ? 'bg-purple-700 text-white shadow-xs'
+                  : 'text-slate-500 hover:text-purple-700'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Toute la Structure ({structureOrders.length})</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 4. Primary KPI Summary Cards */}
       <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-2xs">
-          <span className="text-[10px] text-[#6a6a6b] uppercase font-bold block mb-1">Commandes</span>
-          <span className="text-lg sm:text-xl font-black text-slate-900">{orders.length}</span>
+          <span className="text-[10px] text-[#6a6a6b] uppercase font-bold block mb-1">
+            {scope === 'structure' && isApprovedDirector ? 'Commandes Structure' : 'Mes Commandes'}
+          </span>
+          <span className="text-lg sm:text-xl font-black text-slate-900 tabular-nums">
+            {activeOrders.length}
+          </span>
         </div>
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-2xs">
           <span className="text-[10px] text-[#6a6a6b] uppercase font-bold block mb-1">En cours</span>
-          <span className="text-lg sm:text-xl font-black text-[#0d44e8]">{pendingOrders.length}</span>
+          <span className="text-lg sm:text-xl font-black text-[#0d44e8] tabular-nums">
+            {pendingOrders.length}
+          </span>
         </div>
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-2xs">
-          <span className="text-[10px] text-[#6a6a6b] uppercase font-bold block mb-1">Dépenses (sans TVA)</span>
+          <span className="text-[10px] text-[#6a6a6b] uppercase font-bold block mb-1">
+            {scope === 'structure' && isApprovedDirector ? 'Achats Consolidés' : 'Mes Dépenses'}
+          </span>
           <span className="text-base sm:text-xl font-black text-slate-900 tabular-nums">
             {totalSpent.toLocaleString('fr-FR')} <span className="text-[11px] font-bold text-slate-500">FCFA</span>
           </span>
         </div>
       </div>
 
-      {/* SECTION: MES STATISTIQUES & FIDÉLITÉ (INTEGRATED CLIENT ANALYTICS) */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs p-4 sm:p-6 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#0d44e8] flex items-center justify-center font-bold">
-              <BarChart3 className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm sm:text-base font-black text-slate-900 tracking-tight flex items-center gap-2">
-                <span>Mes Statistiques & Fidélité</span>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${stats.tierColor}`}>
-                  {stats.tier}
-                </span>
-              </h2>
-              <p className="text-xs text-[#6a6a6b]">
-                Analyse de votre volume d'achats, fréquence de réapprovisionnement et palmarès
-              </p>
-            </div>
-          </div>
-          <div className="text-xs text-slate-500 flex items-center gap-1.5 self-start sm:self-auto">
-            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            <span className="font-semibold text-slate-700">{stats.tierTitle}</span>
-          </div>
-        </div>
-
-        {/* 3 Analytics Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-          {/* Card 1: Fidélité & Avantages Partenaire */}
-          <div className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/80 flex flex-col justify-between space-y-3">
-            <div>
-              <div className="flex items-center justify-between text-xs mb-1.5">
-                <span className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1">
-                  <Award className="w-3.5 h-3.5 text-[#0d44e8]" />
-                  Statut Partenaire
-                </span>
-                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${stats.tierColor}`}>
-                  {stats.tier}
-                </span>
-              </div>
-              <p className="text-xs font-bold text-slate-900 leading-tight">
-                {stats.tierTitle}
-              </p>
-              <p className="text-[11px] text-slate-600 mt-1 leading-snug">
-                {stats.tierPrivilege}
-              </p>
-            </div>
-
-            <div className="pt-2 border-t border-slate-200/60">
-              <div className="flex justify-between items-center text-[10px] font-semibold text-slate-500 mb-1">
-                <span>Progression fidélité</span>
-                <span>{stats.progressPercent}%</span>
-              </div>
-              <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                <div 
-                  className="bg-[#0d44e8] h-full rounded-full transition-all duration-500"
-                  style={{ width: `${stats.progressPercent}%` }}
-                />
-              </div>
-              {stats.tier !== 'Or' ? (
-                <span className="text-[10px] text-slate-500 mt-1 block">
-                  Prochain palier : <strong>{stats.nextTierName}</strong> à {stats.nextTierThreshold.toLocaleString('fr-FR')} FCFA
-                </span>
-              ) : (
-                <span className="text-[10px] text-emerald-700 font-bold mt-1 block flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Privilèges VIP maximaux activés
-                </span>
-              )}
-            </div>
+      {/* 5. SECTION: FILTRE DE PÉRIODE POUR LES DÉPENSES (JOUR / SEMAINE / MOIS) */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs p-4 sm:p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <h2 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-[#0d44e8]" />
+              <span>Suivi des Dépenses & Filtre de Période</span>
+            </h2>
+            <p className="text-[11px] text-[#6a6a6b]">
+              Analysez vos flux financiers par jour, par semaine ou par mois
+            </p>
           </div>
 
-          {/* Card 2: Fréquence de Commande & Réassort */}
-          <div className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/80 flex flex-col justify-between space-y-3">
-            <div>
-              <span className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1 mb-1.5">
-                <Repeat className="w-3.5 h-3.5 text-[#0d44e8]" />
-                Rythme de commande
-              </span>
-              {stats.avgFrequencyDays !== null ? (
-                <div>
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="text-xl font-black text-slate-900">
-                      ~ {stats.avgFrequencyDays} jours
-                    </span>
-                    <span className="text-[11px] text-slate-500 font-medium">d'intervalle</span>
-                  </div>
-                  <p className="text-[11px] text-slate-600 mt-1">
-                    Basé sur l'historique de vos {stats.validOrdersCount} commandes médicales.
-                  </p>
-                </div>
-              ) : stats.validOrdersCount === 1 ? (
-                <div>
-                  <span className="text-sm font-bold text-slate-900 block">
-                    Première commande récente
-                  </span>
-                  <p className="text-[11px] text-slate-600 mt-1">
-                    Passée il y a {stats.daysSinceLastOrder || 0} jour(s). Le calcul de fréquence s'affinera dès votre second réassort.
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <span className="text-sm font-bold text-slate-900 block">
-                    Pas encore de commande
-                  </span>
-                  <p className="text-[11px] text-slate-600 mt-1">
-                    Passez votre première commande pour initialiser le calcul de votre rythme d'approvisionnement.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Smart Restock Recommendation Badge */}
-            {stats.avgFrequencyDays !== null && stats.daysSinceLastOrder !== null && (
-              <div className="pt-2 border-t border-slate-200/60">
-                {stats.daysSinceLastOrder > stats.avgFrequencyDays ? (
-                  <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px] flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                    <span>
-                      <strong>Réassort conseillé :</strong> dernier achat il y a {stats.daysSinceLastOrder} j (rythme habituel dépassé).
-                    </span>
-                  </div>
-                ) : (
-                  <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] flex items-center gap-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    <span>
-                      <strong>Stocks à jour :</strong> prochain réassort estimé dans {stats.nextReorderInDays} jour(s).
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Card 3: Volume Dépensé & Répartition Catégories */}
-          <div className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/80 flex flex-col justify-between space-y-3">
-            <div>
-              <span className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1 mb-1.5">
-                <TrendingUp className="w-3.5 h-3.5 text-[#0d44e8]" />
-                Volume Global Investi
-              </span>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-xl font-black text-slate-900 tabular-nums">
-                  {stats.totalSpent.toLocaleString('fr-FR')}
-                </span>
-                <span className="text-xs font-bold text-[#0d44e8]">FCFA</span>
-              </div>
-              <p className="text-[11px] text-slate-600 mt-1">
-                Dont <strong>{stats.deliveredSpent.toLocaleString('fr-FR')} FCFA</strong> en commandes livrées et réglées.
-              </p>
-            </div>
-
-            {/* Category percentage bars */}
-            <div className="pt-2 border-t border-slate-200/60 space-y-1.5">
-              <span className="text-[10px] font-bold text-slate-500 block uppercase">
-                Répartition des besoins
-              </span>
-              {stats.categoriesList.length > 0 ? (
-                <div className="space-y-1">
-                  {stats.categoriesList.slice(0, 2).map((cat) => (
-                    <div key={cat.name} className="text-[10px]">
-                      <div className="flex justify-between text-slate-700 font-medium">
-                        <span className="truncate max-w-[140px]">{cat.name}</span>
-                        <span>{cat.percentage}%</span>
-                      </div>
-                      <div className="w-full bg-slate-200 h-1 rounded-full overflow-hidden mt-0.5">
-                        <div 
-                          className="bg-slate-700 h-full rounded-full"
-                          style={{ width: `${cat.percentage}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <span className="text-[10px] text-slate-400 italic">
-                  Aucune catégorie enregistrée.
-                </span>
-              )}
-            </div>
+          {/* Period Filter Buttons */}
+          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl text-xs self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setExpensePeriod('today')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                expensePeriod === 'today' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Aujourd'hui
+            </button>
+            <button
+              type="button"
+              onClick={() => setExpensePeriod('week')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                expensePeriod === 'week' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Semaine (7j)
+            </button>
+            <button
+              type="button"
+              onClick={() => setExpensePeriod('month')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                expensePeriod === 'month' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Ce mois-ci
+            </button>
+            <button
+              type="button"
+              onClick={() => setExpensePeriod('all')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                expensePeriod === 'all' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Tout
+            </button>
           </div>
         </div>
 
-        {/* Top 5 Ordered Articles (Palmarès de Consommation avec Réapprovisionnement en 1 Clic) */}
-        <div className="pt-2">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
-                <Package className="w-4 h-4 text-[#0d44e8]" />
-                <span>Articles les plus commandés par votre établissement</span>
-              </h3>
-              <p className="text-[11px] text-[#6a6a6b]">
-                Réapprovisionnez vos références clés en un seul clic sans parcourir le catalogue
-              </p>
+        {/* Period Expenses Metric Display */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+            <span className="text-[10px] uppercase font-bold text-slate-500 block mb-1">
+              Dépenses {expensePeriod === 'today' ? 'du jour' : expensePeriod === 'week' ? 'cette semaine' : expensePeriod === 'month' ? 'du mois' : 'globales'}
+            </span>
+            <div className="flex items-baseline gap-1">
+              <span className="text-xl sm:text-2xl font-black text-slate-900 tabular-nums">
+                {periodStats.totalSpent.toLocaleString('fr-FR')}
+              </span>
+              <span className="text-xs font-bold text-[#0d44e8]">FCFA</span>
             </div>
-            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-              Top {stats.topItems.length}
+            <span className="text-[10px] text-slate-400 mt-1 block">
+              Montant net hors transport
             </span>
           </div>
 
-          {stats.topItems.length === 0 ? (
-            <div className="p-6 rounded-xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-500">
-              Aucun article commandé pour le moment. Votre palmarès s'affichera ici dès vos premiers achats.
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+            <span className="text-[10px] uppercase font-bold text-slate-500 block mb-1">
+              Commandes sur la période
+            </span>
+            <div className="flex items-baseline gap-1">
+              <span className="text-xl sm:text-2xl font-black text-slate-900 tabular-nums">
+                {periodStats.count}
+              </span>
+              <span className="text-xs font-medium text-slate-500">achat(s)</span>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-2.5">
-              {stats.topItems.map((item, idx) => {
-                const itemKey = `${item.productId}__${item.variant}`;
-                const isJustAdded = recentlyAddedId === itemKey;
+            <span className="text-[10px] text-slate-400 mt-1 block">
+              {scope === 'structure' ? 'Tous collaborateurs confondus' : 'Vos achats individuels'}
+            </span>
+          </div>
 
-                return (
-                  <div 
-                    key={itemKey}
-                    className="p-3 sm:p-3.5 rounded-xl border border-slate-200/90 bg-white hover:border-blue-300 hover:shadow-xs transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      {/* Rank Badge */}
-                      <span className={`w-7 h-7 rounded-lg text-xs font-black flex items-center justify-center shrink-0 ${
-                        idx === 0 
-                          ? 'bg-amber-100 text-amber-800 border border-amber-300' 
-                          : idx === 1 
-                            ? 'bg-slate-200 text-slate-800' 
-                            : idx === 2 
-                              ? 'bg-amber-50 text-amber-700' 
-                              : 'bg-slate-100 text-slate-600'
-                      }`}>
-                        #{idx + 1}
-                      </span>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-bold text-xs text-slate-900 truncate">
-                            {item.productName}
-                          </h4>
-                          {item.category && (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-600">
-                              {item.category}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
-                          <span className="font-medium text-slate-700">{item.variant}</span>
-                          <span>·</span>
-                          <span className="font-semibold text-slate-900">
-                            {item.isQuote ? 'Sur Devis' : `${item.price.toLocaleString('fr-FR')} FCFA`}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Stats & Quick Reorder Button */}
-                    <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
-                      <div className="text-left sm:text-right">
-                        <span className="text-xs font-black text-slate-900 block tabular-nums">
-                          {item.totalQty} {item.totalQty > 1 ? 'unités / btes' : 'unité'}
-                        </span>
-                        <span className="text-[10px] text-slate-500">
-                          {item.orderCount} commande(s) · {item.totalSpent.toLocaleString('fr-FR')} F
-                        </span>
-                      </div>
-
-                      {onAddToCartItem && (
-                        <button
-                          type="button"
-                          onClick={() => handleQuickAddToCart(item)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
-                            isJustAdded
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-blue-50 text-[#0d44e8] hover:bg-[#0d44e8] hover:text-white border border-blue-200'
-                          }`}
-                          title="Ajouter au panier pour réapprovisionnement direct"
-                        >
-                          {isJustAdded ? (
-                            <>
-                              <Check className="w-3.5 h-3.5" />
-                              <span>Ajouté !</span>
-                            </>
-                          ) : (
-                            <>
-                              <Plus className="w-3.5 h-3.5" />
-                              <span>Réapprovisionner</span>
-                            </>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+            <span className="text-[10px] uppercase font-bold text-slate-500 block mb-1">
+              Panier moyen estimé
+            </span>
+            <div className="flex items-baseline gap-1">
+              <span className="text-xl sm:text-2xl font-black text-slate-900 tabular-nums">
+                {periodStats.avgBasket.toLocaleString('fr-FR')}
+              </span>
+              <span className="text-xs font-bold text-slate-500">FCFA</span>
             </div>
-          )}
+            <span className="text-[10px] text-slate-400 mt-1 block">
+              Par commande passée
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Latest Order Tracking */}
+      {/* 6. SECTION DIRECTEUR : COLLABORATEURS DE LA STRUCTURE & DÉPENSES PAR MEMBRE */}
+      {isApprovedDirector && scope === 'structure' && (
+        <div className="bg-white rounded-2xl border border-purple-200/90 shadow-2xs p-4 sm:p-5 space-y-3">
+          <div className="flex items-center justify-between border-b border-purple-100 pb-2.5">
+            <div>
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Users className="w-4 h-4 text-purple-700" />
+                <span>Membres & Dépenses par Collaborateur ({structureMembers.length}/{currentStructure?.maxAccounts || 3})</span>
+              </h3>
+              <p className="text-[11px] text-[#6a6a6b]">
+                Ventilation des commandes passées par vos chargés de commandes et médecins
+              </p>
+            </div>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-800">
+              Plafond : {currentStructure?.maxAccounts || 3} comptes max
+            </span>
+          </div>
+
+          {collaboratorStats.length === 0 ? (
+            <div className="p-4 text-center text-xs text-slate-400 bg-slate-50 rounded-xl">
+              Aucun autre collaborateur rattaché à cette structure pour le moment.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden">
+              {collaboratorStats.map(({ member, ordersCount, totalSpent, lastOrderDate }) => (
+                <div key={member.id} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-purple-50/20 text-xs">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-800 font-bold flex items-center justify-center text-xs">
+                      {member.contactName ? member.contactName.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                        <span>{member.contactName || member.facilityName}</span>
+                        <span className={`text-[9px] px-1.5 py-0.2 rounded font-semibold ${
+                          member.jobTitle === 'directeur' 
+                            ? 'bg-purple-100 text-purple-800' 
+                            : member.jobTitle === 'docteur' 
+                              ? 'bg-blue-100 text-[#0d44e8]' 
+                              : 'bg-slate-100 text-slate-700'
+                        }`}>
+                          {member.jobTitle === 'directeur' ? 'Directeur' : member.jobTitle === 'docteur' ? 'Docteur' : 'Chargé commandes'}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        {member.phone} {lastOrderDate ? `· Dernière commande le ${new Date(lastOrderDate).toLocaleDateString('fr-FR')}` : '· Aucune commande'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-left sm:text-right font-mono">
+                    <span className="font-bold text-slate-900 block tabular-nums">
+                      {totalSpent.toLocaleString('fr-FR')} FCFA
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      {ordersCount} commande(s)
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 7. SECTION : PRODUITS LES PLUS COMMANDÉS (TOP ARTICLES) */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs p-4 sm:p-5 space-y-3">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+          <div>
+            <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
+              <Package className="w-4 h-4 text-[#0d44e8]" />
+              <span>
+                {scope === 'structure' && isApprovedDirector
+                  ? 'Produits les plus commandés par la structure'
+                  : 'Produits que vous commandez le plus'}
+              </span>
+            </h3>
+            <p className="text-[11px] text-[#6a6a6b]">
+              Réapprovisionnez vos références clés en un seul clic sans parcourir le catalogue
+            </p>
+          </div>
+          <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+            Top {topItems.length}
+          </span>
+        </div>
+
+        {topItems.length === 0 ? (
+          <div className="p-6 rounded-xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-500">
+            Aucun article commandé pour le moment. Votre palmarès s'affichera ici dès vos premiers achats.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-2.5">
+            {topItems.map((item, idx) => {
+              const itemKey = `${item.productId}__${item.variant}`;
+              const isJustAdded = recentlyAddedId === itemKey;
+
+              return (
+                <div 
+                  key={itemKey}
+                  className="p-3 rounded-xl border border-slate-200/90 bg-white hover:border-blue-300 hover:shadow-2xs transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className={`w-7 h-7 rounded-lg text-xs font-black flex items-center justify-center shrink-0 ${
+                      idx === 0 
+                        ? 'bg-amber-100 text-amber-800 border border-amber-300' 
+                        : idx === 1 
+                          ? 'bg-slate-200 text-slate-800' 
+                          : idx === 2 
+                            ? 'bg-amber-50 text-amber-700' 
+                            : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      #{idx + 1}
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="font-bold text-xs text-slate-900 truncate">
+                          {item.productName}
+                        </h4>
+                        {item.category && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-600">
+                            {item.category}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                        <span className="font-medium text-slate-700">{item.variant}</span>
+                        <span>·</span>
+                        <span className="font-semibold text-slate-900">
+                          {item.isQuote ? 'Sur Devis' : `${item.price.toLocaleString('fr-FR')} FCFA`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                    <div className="text-left sm:text-right">
+                      <span className="text-xs font-black text-slate-900 block tabular-nums">
+                        {item.totalQty} {item.totalQty > 1 ? 'unités / btes' : 'unité'}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        {item.orderCount} commande(s) · {item.totalSpent.toLocaleString('fr-FR')} F
+                      </span>
+                    </div>
+
+                    {onAddToCartItem && (
+                      <button
+                        type="button"
+                        onClick={() => handleQuickAddToCart(item)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
+                          isJustAdded
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-blue-50 text-[#0d44e8] hover:bg-[#0d44e8] hover:text-white border border-blue-200'
+                        }`}
+                        title="Ajouter au panier pour réapprovisionnement direct"
+                      >
+                        {isJustAdded ? (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Ajouté !</span>
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Commander</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 8. DERNIÈRE COMMANDE EN COURS (TRACKING LIVRAISON) */}
       {latestOrder && (
         <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-2xs">
           <div className="flex items-center justify-between mb-4">
             <div>
               <span className="text-[10px] font-bold uppercase tracking-wider text-[#0d44e8] block">
-                Dernière commande en cours
+                Dernière commande passée
               </span>
               <h3 className="font-bold text-sm sm:text-base text-slate-900 mt-0.5">
                 {latestOrder.reference} · {new Date(latestOrder.createdAt).toLocaleDateString('fr-FR')}
+                {latestOrder.authorName && (
+                  <span className="text-xs text-slate-500 font-normal ml-2">
+                    (Par {latestOrder.authorName})
+                  </span>
+                )}
               </h3>
             </div>
             <div className="flex items-center gap-2">
@@ -665,24 +775,33 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         </div>
       )}
 
-      {/* Orders List */}
+      {/* 9. LISTE HISTORIQUE DES COMMANDES (AVEC IDENTIFICATION DU COLLABORATEUR EN VUE STRUCTURE) */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="font-bold text-sm text-slate-900">
-            Historique des commandes ({orders.length})
+          <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+            <span>
+              {scope === 'structure' && isApprovedDirector
+                ? `Historique des achats de la structure (${activeOrders.length})`
+                : `Vos commandes personnelles (${activeOrders.length})`}
+            </span>
           </h3>
+          {scope === 'structure' && isApprovedDirector && (
+            <span className="text-[11px] font-semibold text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full">
+              Vue Consolidée Direction
+            </span>
+          )}
         </div>
 
-        {orders.length === 0 ? (
+        {activeOrders.length === 0 ? (
           <div className="p-8 text-center text-slate-400 text-xs">
-            Aucune commande enregistrée. Vos achats apparaîtront ici.
+            Aucune commande enregistrée pour le moment. Vos achats apparaîtront ici.
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {orders.map((order) => (
+            {activeOrders.map((order) => (
               <div key={order.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50 transition-colors">
                 <div>
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <span className="font-mono font-bold text-xs text-[#0d44e8]">
                       {order.reference}
                     </span>
@@ -692,6 +811,12 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                     {order.isPaid && (
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
                         Payée
+                      </span>
+                    )}
+                    {scope === 'structure' && (order.authorName || order.customer?.contactName) && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-800 border border-purple-100">
+                        Acheteur : {order.authorName || order.customer.contactName}
+                        {order.authorJobTitle && ` (${order.authorJobTitle === 'directeur' ? 'Dir.' : order.authorJobTitle === 'docteur' ? 'Dr.' : 'Chargé'})`}
                       </span>
                     )}
                   </div>

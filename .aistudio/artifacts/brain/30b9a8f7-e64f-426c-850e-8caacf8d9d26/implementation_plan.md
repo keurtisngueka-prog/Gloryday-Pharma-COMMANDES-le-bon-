@@ -1,108 +1,160 @@
-# Gloryday Pharma Enterprise : Refonte Intégrale Back-Office & Opérations
+# Espace Client & Comptes de Structure Multi-Utilisateurs
 
-Ce plan détaille le déploiement unifié du centre d'administration et des opérations de **Gloryday Pharma Gabon**, couvrant l'audit de traçabilité, la gestion B2B des comptes clients, le stock réel avec lots et péremptions, les flux financiers (acompte/solde, rapprochement mobile money), le paramétrage sans code et le pilotage analytique.
-
----
+Refonte de l'espace client Gloryday Pharma pour intégrer l'organisation en structures de santé (cliniques, polycliniques, hôpitaux, labos, pharmacies), la gestion des postes (chargé de commandes, docteur, directeur) et le tableau de bord consolidé de direction avec plafonnement modulable du nombre de comptes.
 
 ### User Review & Critical Decisions
 
 > [!IMPORTANT]
-> Les deux arbitrages clés validés lors de la phase de cadrage régissent l'architecture de cette refonte :
-> 1. **Architecture Unifiée** : Déploiement global au sein d'un centre d'administration modulaire intégré, offrant une navigation fluide par sous-modules tout en maintenant les accès par rôle (`Super-Admin`, `Commercial`, `Gestionnaire Catalogue`, `Logistique`).
-> 2. **Politique des Plafonds & Stocks** : Application en **mode indicatif avec journalisation d'audit** (non bloquant). Les alertes de dépassement d'encours ou de stock faible s'affichent clairement pour alerter les équipes sans paralyser les livraisons d'urgence des cliniques et hôpitaux.
+> Les arbitrages fonctionnels suivants ont été validés lors de la phase de cadrage et guident l'architecture du module :
 
-- **Décision Confirmée 1** : Centre de contrôle unifié avec onglets spécialisés (KPIs, Commandes & Finances, Stocks & Lots, Clients B2B, Packs & Offres, Paramètres Généraux, Audit Log, Sauvegardes).
-- **Décision Confirmée 2** : Mode indicatif pour les seuils et plafonds de crédit avec inscription automatique de tout dépassement dans le journal d'audit immuable.
+- **Plafond modulable de comptes par structure (Confirmé)** : Quota de base fixé à 3 comptes pour les structures de proximité (cabinets médicaux, pharmacies, laboratoires, cliniques) et modulable à 5-10 comptes pour les grands hôpitaux et polycliniques, avec contrôle strict pour éviter tout débordement.
+- **Rattachement hybride à l'inscription (Confirmé)** : L'utilisateur peut soit sélectionner une structure existante dans une liste déroulante dynamique pour s'y rattacher (recherche prédictive), soit déclarer une nouvelle structure si elle n'existe pas encore.
+- **Périmètre d'action du Directeur validé (Confirmé)** : Consultation exhaustive des achats et statistiques de tous les collaborateurs de l'établissement ET capacité directe de passer des commandes et réassorts pour le compte de la structure.
+- **Sécurité et validation administrative** : Un client déclarant le poste de « Directeur » reste au statut standard jusqu'à validation explicite par un administrateur Gloryday via le panneau Super-Admin.
 
 ---
 
 ### 1. Overview & Core Concept
 
-- **Ce que fait le système** : Transforme Gloryday Pharma en une plateforme de distribution pharmaceutique B2B de grade entreprise. Les opérateurs gèrent la traçabilité des dispositifs médicaux (lots, péremptions, mouvements d'entrée/sortie), la santé financière des comptes (crédit accordé, acomptes, double vérification Airtel/Moov), l'affectation des coursiers et l'audit continu de chaque action.
-- **Utilisateurs cibles** : Direction pharmaceutique (`Super-Admin`), commerciaux terrain (`Commercial`), gestionnaires de stocks (`Gestionnaire Catalogue`) et répartiteurs logistiques (`Logistique`).
-- **Valeur ajoutée** : Conformité réglementaire sur les dispositifs médicaux, élimination des fraudes sur les références Mobile Money, automatisation des relances et autonomie totale de gestion sans modification de code source.
+- **Problème résolu** : Actuellement, un compte client correspond à un utilisateur isolé sans vision d'équipe ni hiérarchie. Dans les structures de santé gabonaises, le personnel soignant ou les acheteurs passent des commandes sur le terrain, tandis que la direction médicale ou financière a besoin d'arbitrer les budgets et de suivre les dépenses globales sans avoir à partager un identifiant unique.
+- **Utilisateurs cibles** :
+  - **Collaborateur (Docteur / Chargé de commandes)** : passe ses commandes en autonomie, suit ses propres livraisons et ses dépenses périodiques.
+  - **Directeur de structure** : supervise l'ensemble des achats réalisés par tous les comptes rattachés à sa clinique/hôpital, analyse les dépenses globales et commande directement.
+  - **Administrateur Gloryday (Super-Admin)** : valide les demandes d'accès direction, gère les quotas de comptes et s'assure de l'authenticité des établissements rattachés.
+- **Bénéfice clé** : Gouvernance d'achat hospitalière claire, fin du partage dangereux de mot de passe entre collègues et respect de la conformité comptable.
 
 ---
 
 ### 2. User Experience & Visual Design
 
-#### Navigation & Hiérarchie du Centre d'Administration
-L'interface adopte une structure SaaS haute densité (densité de données optimisée, typographie claire, chiffres tabulaires `tabular-nums`, zero-pill discipline) articulée autour d'un ruban d'onglets ergonomique :
+#### A. Parcours Inscription & Connexion (`AuthModal`)
+1. **Écran Inscription Dédié** :
+   - Champs personnels : Nom complet du contact, numéro de téléphone portable gabonais (+241), mot de passe sécurisé.
+   - Sélection du **Type de Structure** : Clinique, Polyclinique, Hôpital, Laboratoire, Pharmacie, Cabinet médical.
+   - Rattachement d'établissement : Option *« Rejoindre un établissement existant »* (liste déroulante avec filtre instantané) ou *« Enregistrer un nouvel établissement »*.
+   - Définition de la **Fonction / Poste** :
+     - *Chargé de commandes* : accès immédiat au catalogue et à son panier personnel.
+     - *Docteur* : accès immédiat aux commandes de son service.
+     - *Directeur* : bannière d'information indiquant : *« Votre compte est créé. L'accès direction consolidé sera activé après vérification par l'équipe Gloryday »*.
+   - Vérification du quota : si la structure a déjà atteint son nombre maximal de comptes (ex: 3 pour une clinique), l'inscription bloque poliment avec un message invitant à contacter l'administrateur de l'établissement.
 
-1. **Tableau de Bord & Pilotage** : 6 cartes KPIs enrichies, graphique d'évolution sur 14 jours et 6 mois, répartition par statut, marge brute estimée, chiffre d'affaires par commercial, par zone géographique et par catégorie, analyse des produits dormants (>45 jours sans mouvement).
-2. **Commandes & Rapprochement Financier** : Table haute densité avec recherche multi-critères (référence, établissement, commercial, zone, statut, mode de paiement), pagination, actions groupées, gestion des paiements échelonnés (acompte + solde), vérificateur anti-doublon des références Airtel/Moov Money, bordereau de livraison avec signature/photo et sélection rapide dans l'annuaire des coursiers.
-3. **Stocks Réels, Lots & Approvisionnements** : Inventaire quantitatif avec décrémentation automatique, seuils d'alerte configurables, fiches de lots avec dates de péremption, enregistrement des mouvements (Entrée, Sortie, Perte/Casse, Inventaire), gestion des fournisseurs et bons de réapprovisionnement, historique des prix d'achat/vente et import/export CSV.
-4. **Comptes Clients & Encours B2B** : Statuts des comptes (Actif, En attente de validation, Suspendu, Bloqué), plafond de crédit indicatif avec jauge d'encours, balance âgée des créances, historique d'achats complet, fusion des comptes doublons et relances directes.
-5. **Gestion des Packs & Compositions** : Écran dédié pour concevoir, activer/désactiver, chiffrer et illustrer les packs de dotation clinique (ex: Pack Césarienne, Pack Réanimation).
-6. **Journal d'Audit Immuable** : Flux chronologique inaltérable recensant chaque mutation (auteur, rôle, horodatage, adresse IP/appareil, action, valeur avant/après), avec filtres par catégorie d'action et recherche textuelle.
-7. **Paramètres Sans Code** : Configuration en direct des zones de livraison et frais, remises par volume, codes promotionnels, numéros marchands Airtel/Moov, horaires d'ouverture, mentions légales et en-tête des devis/factures PDF.
-8. **Sauvegarde, Restauration & Conformité** : Export instantané JSON/SQL complet, restauration par téléversement de fichier, suppression/anonymisation des données clients (droit à l'oubli).
+#### B. Tableau de Bord Client Individuel (`ClientDashboard`)
+Chaque collaborateur ou docteur connecté dispose d'une vue strictement personnelle :
+- **KPIs personnels** : Total des achats validés, commandes en cours de livraison, articles commandés.
+- **Filtre de période pour les dépenses** : Sélecteur segmenté (*Aujourd'hui* / *Cette semaine* / *Ce mois-ci* / *Tout l'historique*) avec affichage du montant en FCFA formaté en chiffres tabulaires (`tabular-nums font-mono`).
+- **Section « Produits les plus commandés »** : Liste ordonnée par volume avec bouton de réapprovisionnement en 1 clic vers le panier.
+- **Historique des commandes personnelles** : Tableau avec référence, date, statut de livraison, montant et téléchargement du PDF officiel.
+
+#### C. Tableau de Bord Direction Consolidé (`StructureDashboard`)
+Accessible uniquement aux comptes ayant le statut `directeur_valide` :
+- **Bannière d'en-tête Institutionnelle** : Nom de la structure, badge officiel de validation, adresse, type d'établissement et jauge des comptes actifs (ex: *« 3/3 comptes enregistrés »*).
+- **Toggle de vue** : Commutateur fluide entre *« Vue Personnelle (Mes achats) »* et *« Vue Consolidée (Toute la structure) »*.
+- **Ventilation des dépenses par collaborateur** : Tableau synthétique montrant le montant engagé par chaque membre (ex: Dr. Ondo, M. Bongo Chargé des stocks) sur la période choisie.
+- **Graphique et filtres temporels globaux** : Dépenses consolidées par jour, semaine et mois.
+- **Action de commande directe** : Le directeur peut basculer sur le catalogue pour commander au nom de la structure.
+
+#### D. Console Administrateur Gloryday (`AdminDashboard` > Onglet Structures)
+- Liste des demandes d'accès Direction en attente : affichage du nom, téléphone, justificatif ou structure déclarée.
+- Boutons d'action : **Valider l'accès Direction** (notification automatique envoyée au client) ou **Refuser / Requalifier en compte standard**.
+- Gestionnaire de quotas par établissement : possibilité pour le Super-Admin d'augmenter le quota d'un grand hôpital (ex: de 3 à 5 ou 10 comptes).
 
 ---
 
 ### 3. Key Product Decisions & Trade-Offs
 
-- **Journal d'Audit Inaltérable** : Stockage local et synchronisé avec structure sécurisée (ID unique, hash d'horodatage, empreinte d'appareil). Les entrées d'audit ne disposent d'aucun mécanisme de suppression ou modification depuis l'interface utilisateur.
-- **Rapprochement Airtel / Moov avec Détection de Doublons** : Contrôle automatique de l'unicité de la référence de transaction saisie par les clients pour prévenir les tentatives de réutilisation d'un même reçu de paiement.
-- **Gestion des Lots & Péremptions Indicatives** : Chaque référence produit dispose d'une collection de lots (`lotNumber`, `expiryDate`, `quantityAvailable`). En commande, le lot le plus proche de la péremption (FEFO - First Expired, First Out) est suggéré automatiquement.
-- **Annuaire des Coursiers Centralisé** : Remplace la saisie manuelle répétitive par une liste de coursiers référencés (nom, téléphone, véhicule, matricule) avec assignation en 1 clic.
+- **Décision 1 : Modèle de données unifié `Structure` et liaison `User`**
+  - *Choix retenu* : Création d'une entité explicite `HealthcareStructure` distincte de `User`, reliée par `structureId`.
+  - *Pourquoi* : Permet d'isoler l'adresse, le quota de comptes, le type d'établissement et le directeur titulaire au niveau de l'établissement, indépendamment des départs ou arrivées de personnel.
+  - *Alternative écartée* : Stocker uniquement une chaîne `facilityName` sur chaque utilisateur. Cela entraînait des fautes de frappe et empêchait l'agrégation statistique fiable.
+
+- **Décision 2 : Sécurité « Zéro élévation automatique »**
+  - *Choix retenu* : Deux champs distincts sur l'utilisateur : `jobTitle` (déclaration de l'utilisateur : 'directeur' | 'charge_commandes' | 'docteur') et `directorApprovalStatus` ('none' | 'pending' | 'approved' | 'rejected').
+  - *Pourquoi* : Même si un pirate s'inscrit en cochant « Directeur », il ne voit aucune donnée globale tant que le flag `directorApprovalStatus === 'approved'` n'a pas été posé côté serveur / admin.
+
+- **Décision 3 : Quotas dynamiques par type d'établissement**
+  - *Choix retenu* : Règle métier automatique :
+    - Cabinet médical / Pharmacie / Laboratoire / Clinique : limite par défaut de **3 comptes**.
+    - Polyclinique : limite par défaut de **5 comptes**.
+    - Hôpital / CHU : limite par défaut de **10 comptes** (avec possibilité de personnalisation par l'admin).
+  - *Pourquoi* : Répond fidèlement au besoin de terrain tout en évitant les abus et la prolifération de comptes fantômes.
 
 ---
 
-### 4. Technical Architecture & System Diagram
+### 4. Technical Architecture & Data Strategy
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            GLORYDAY ENTERPRISE CORE                         │
-└──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │
-     ┌─────────────────────────────────┼─────────────────────────────────┐
-     ▼                                 ▼                                 ▼
-┌───────────────────────────┐ ┌───────────────────────────┐ ┌───────────────────────────┐
-│     MODULE COMMERCIAL     │ │   GESTION DES STOCKS      │ │    FINANCES & AUDIT       │
-│ ───────────────────────── │ │ ───────────────────────── │ │ ───────────────────────── │
-│ • Fiches Clients B2B      │ │ • Stocks Quantitatifs     │ │ • Acomptes & Soldes       │
-│ • Plafonds & Encours      │ │ • Lots & Péremptions      │ │ • Anti-doublons Airtel/Moov│
-│ • Devis & Packs Dédiés    │ │ • Mouvements & Pertes     │ │ • Factures & Avoirs       │
-│ • Relances Ciblées        │ │ • Réapprovisionnements    │ │ • Journal d'Audit Immuable│
-│ • Fusion de Doublons      │ │ • Import / Export CSV     │ │ • Sauvegarde / Import DB  │
-└─────────────┬─────────────┘ └─────────────┬─────────────┘ └─────────────┬─────────────┘
-              │                             │                             │
-              └─────────────────────────────┼─────────────────────────────┘
-                                            ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                           CENTRE DE CONTRÔLE ADMIN                                  │
-│  [Vue KPIs]  [Commandes & Rapprochement]  [Stocks & Lots]  [Clients]  [Audit] ...   │
-└─────────────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                        GLORYDAY PHARMA APP                             │
+└────────────────────────────────────┬───────────────────────────────────┘
+                                     │
+           ┌─────────────────────────┴─────────────────────────┐
+           ▼                                                   ▼
+┌───────────────────────────────┐               ┌───────────────────────────────┐
+│     ESPACE COLLABORATEUR      │               │     ESPACE DIRECTION VALIDÉE  │
+│  (Docteur / Chargé commandes) │               │   (Directeur de structure)    │
+├───────────────────────────────┤               ├───────────────────────────────┤
+│ • Commandes personnelles      │               │ • Vue consolidée structure    │
+│ • Dépenses (J / S / M)        │               │ • Dépenses par collaborateur  │
+│ • Top articles personnels     │               │ • Commande au nom structure   │
+│ • Réassort rapide             │               │ • Suivi du quota de comptes   │
+└──────────────┬────────────────┘               └──────────────┬────────────────┘
+               │                                               │
+               └───────────────────────┬───────────────────────┘
+                                       ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                      STRUCTURES & USERS STORAGE LAYER                         │
+├───────────────────────────────────────────────────────────────────────────────┤
+│  HealthcareStructure {                                                        │
+│    id: string; name: string; type: FacilityType; maxAccounts: number;         │
+│    directorUserId?: string; activeAccountIds: string[];                       │
+│  }                                                                            │
+│                                                                               │
+│  User {                                                                       │
+│    id: string; phone: string; facilityName: string; structureId: string;      │
+│    jobTitle: 'directeur' | 'charge_commandes' | 'docteur';                    │
+│    directorApprovalStatus: 'none' | 'pending' | 'approved' | 'rejected';      │
+│    role: 'client';                                                            │
+│  }                                                                            │
+│                                                                               │
+│  Order {                                                                      │
+│    id: string; reference: string; userId: string; structureId?: string;       │
+│    authorName?: string; createdAt: string; estimatedTotal: number; ...        │
+│  }                                                                            │
+└───────────────────────────────────────────────────────────────────────────────┘
+                                       ▲
+                                       │ Validation & Quotas
+┌──────────────────────────────────────┴────────────────────────────────────────┐
+│                        SUPER-ADMIN CONSOLE                                    │
+│  • Validation des demandes Direction en attente                               │
+│  • Ajustement des plafonds de comptes par hôpital / polyclinique              │
+│  • Traçabilité d'audit immuable                                               │
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### Modèles de Données Clés
-- **AuditEntry** : `id`, `timestamp`, `userId`, `userName`, `userRole`, `actionType`, `targetEntity`, `targetId`, `deviceInfo`, `details`, `previousState`, `newState`.
-- **StockBatch** : `id`, `productId`, `lotNumber`, `expiryDate`, `quantity`, `purchasePrice`, `supplierName`, `receivedDate`.
-- **StockMovement** : `id`, `productId`, `lotNumber`, `type` ('entree' | 'sortie_commande' | 'perte_casse' | 'inventaire'), `quantity`, `reason`, `date`, `performedBy`.
-- **Courier** : `id`, `name`, `phone`, `vehicleType`, `matricule`, `activeOrdersCount`, `status`.
-- **PaymentInstallment** : `id`, `type` ('acompte' | 'solde'), `amount`, `paymentMethod`, `transactionRef`, `status`, `paidAt`, `validatedBy`.
-- **InvoiceRecord** : `id`, `orderId`, `type` ('facture' | 'avoir'), `number`, `issueDate`, `tvaRate`, `totalTTC`, `balanceDue`.
-- **SystemSettings** : `deliveryZones`, `volumeDiscounts`, `promoCodes`, `operationalHours`, `merchantNumbers`, `pdfHeaderInfo`.
+#### Modèles de données complémentaires (`src/types.ts`)
+- `JobTitle` : `'directeur' | 'charge_commandes' | 'docteur'`
+- `DirectorApprovalStatus` : `'none' | 'pending' | 'approved' | 'rejected'`
+- `HealthcareStructure` :
+  - `id: string`
+  - `name: string`
+  - `type: FacilityType`
+  - `maxAccounts: number`
+  - `accountCount: number`
+  - `directorUserId?: string`
+  - `createdAt: string`
+- Extension de `User` :
+  - `structureId?: string`
+  - `jobTitle?: JobTitle`
+  - `directorApprovalStatus?: DirectorApprovalStatus`
+- Extension de `Order` :
+  - `structureId?: string`
+  - `createdByName?: string`
+  - `createdByJobTitle?: JobTitle`
 
----
-
-### 5. Phases d'Exécution & Vérification
-
-1. **Enrichissement des Types & Utilitaires Métier** :
-   - Mise à jour de `src/types.ts` avec les interfaces d'audit, lots, mouvements de stock, paiements échelonnés, coursiers, factures/avoirs et paramètres.
-   - Création de `src/utils/auditLogger.ts` pour la journalisation automatique de toutes les mutations.
-   - Création de `src/utils/systemSettingsStorage.ts` pour la persistance locale des paramètres modifiables sans code.
-
-2. **Refonte & Expansion des Composants d'Administration** :
-   - **Journal d'Audit** : Création de `src/components/AuditLogModule.tsx` avec filtrage par type d'action, utilisateur, date et recherche.
-   - **Gestion B2B Clients** : Extension de la vue clients avec suspension/blocage, plafonds indicatifs, balance âgée et fusion.
-   - **Stock & Lots Réels** : Création de `src/components/StockLotsModule.tsx` gérant quantités réelles, alertes de seuils, lots FEFO, mouvements et import/export CSV.
-   - **Commandes & Finances** : Intégration des acomptes/soldes, validation renforcée Airtel/Moov avec détection de doublons, assignation coursier via annuaire, et émission d'avoirs.
-   - **Gestionnaire de Packs** : Intégration directe de la gestion complète des packs dans le portail d'administration.
-   - **Paramétrage Sans Code** : Interface complète pour ajuster zones, remises, codes promo et coordonnées marchandes.
-   - **Pilotage & Rapports** : Affichage des graphiques et métriques avancées (marges, commerciaux, zones, produits dormants).
-
-3. **Sauvegardes & Synchronisation Globale** :
-   - Export et import complet (restauration d'état depuis un fichier JSON).
-   - Validation via `compile_applet` et vérification de non-régression sur le panier et l'espace client.
+#### Plan d'intégration pas-à-pas (lors de l'exécution)
+1. **Étape 1 (Types & Stockage)** : Définition des types `HealthcareStructure`, `JobTitle` et fonctions d'accès dans `src/utils/structureStorage.ts` et `src/types.ts`.
+2. **Étape 2 (Inscription enrichie)** : Mise à jour de `AuthModal.tsx` avec sélection/création d'établissement, choix du poste et contrôle du plafond de comptes.
+3. **Étape 3 (Tableau de bord personnel avec filtres)** : Refonte de `ClientDashboard.tsx` pour intégrer le filtre des dépenses (jour, semaine, mois), l'affichage exclusif des données personnelles du collaborateur et les articles les plus fréquents.
+4. **Étape 4 (Vue Direction consolidée)** : Intégration dans `ClientDashboard.tsx` de la vue d'équipe pour le directeur validé (total des achats de la structure, filtre temporel, dépenses par collaborateur).
+5. **Étape 5 (Validation Admin)** : Ajout de la gestion des demandes de direction et des quotas de structure dans le panneau d'administration Gloryday.
+6. **Étape 6 (Contrôle qualité)** : Compilation TypeScript, vérification linter et tests d'étanchéité des données.

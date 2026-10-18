@@ -1,6 +1,6 @@
 {
-  "summary": "Plan d'implémentation de la refonte Enterprise pour Gloryday Pharma Gabon : Journal d'audit immuable, gestion B2B des clients et plafonds indicatifs, gestion du stock réel avec lots et péremptions, réconciliation financière Airtel/Moov et paiements échelonnés, paramétrage dynamique sans code, pilotage analytique complet, communication ciblée et sauvegarde/restauration.",
-  "updatedAt": "2026-10-18T06:06:55.093465988Z",
+  "summary": "Plan d'implémentation pour la refonte de l'espace client et la gestion des comptes de structure multi-utilisateurs Gloryday Pharma :\n- Inscription enrichie avec sélection/création d'établissement, type de structure et fonction (chargé de commandes, directeur, docteur).\n- Gestion des quotas modulables de comptes par structure (3 pour cabinets/pharmacies/cliniques/labos, jusqu'à 5-10 pour hôpitaux/polycliniques).\n- Processus de validation administrative de l'accès Direction avec statut en attente et interface d'approbation Super-Admin.\n- Tableau de bord client individuel avec suivi des commandes personnelles, filtre temporel des dépenses (jour, semaine, mois) et top articles récurrents.\n- Tableau de bord Direction consolidé permettant au directeur validé de superviser l'ensemble des achats de ses collaborateurs et de passer commande pour sa structure.",
+  "updatedAt": "2026-10-18T13:10:04.656603113Z",
   "requestFeedback": true,
   "userFacing": true
 }
