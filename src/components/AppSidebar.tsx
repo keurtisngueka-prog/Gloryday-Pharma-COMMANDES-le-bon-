@@ -34,8 +34,7 @@ interface AppSidebarProps {
   onOpenAuth: () => void;
   onSwitchRole?: (role: AppRole) => void;
   onOpenCreateProduct?: () => void;
-  onOpenDraftsModal?: () => void;
-  draftsCount?: number;
+  onLogoClick?: () => void;
 }
 
 export const AppSidebar: React.FC<AppSidebarProps> = ({
@@ -49,8 +48,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   onOpenAuth,
   onSwitchRole,
   onOpenCreateProduct,
-  onOpenDraftsModal,
-  draftsCount = 0
+  onLogoClick
 }) => {
   const role: AppRole = currentUser?.role || 'client';
 
@@ -78,8 +76,19 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
         <div className="overflow-y-auto flex-1">
           {/* 1. Header with Brand & Close Button */}
           <div className="p-4 px-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-[#0d44e8] text-white flex items-center justify-center font-black text-sm">
+            <div 
+              onClick={() => {
+                if (onLogoClick) {
+                  onLogoClick();
+                } else {
+                  handleNav('catalog');
+                }
+                onClose();
+              }}
+              className="flex items-center gap-2.5 cursor-pointer select-none group"
+              title="GLORYDAY Pharma · Clic pour réinitialiser le panier à 0 et revenir à l'accueil"
+            >
+              <div className="w-8 h-8 rounded-lg bg-[#0d44e8] text-white flex items-center justify-center font-black text-sm group-hover:scale-105 transition-transform">
                 +
               </div>
               <div>
@@ -215,29 +224,6 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               </div>
               <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
             </button>
-
-            {onOpenDraftsModal && (
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onOpenDraftsModal();
-                }}
-                className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                <div className="flex items-center gap-2.5">
-                  <FileText className="w-4 h-4 text-amber-600" />
-                  <span>Brouillons Hors-ligne</span>
-                </div>
-                {draftsCount !== undefined && draftsCount > 0 ? (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-[#0d44e8] text-white">
-                    {draftsCount}
-                  </span>
-                ) : (
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                )}
-              </button>
-            )}
           </div>
 
           {/* 4. Professional Back-Office Modules (STRICTLY HIDDEN FROM CLIENTS - ONLY VISIBLE WHEN AUTHENTICATED STAFF) */}

@@ -1,4 +1,5 @@
 import { Order, DeliveryStage } from '../types';
+import { computeDeliveryTimeWindow } from '../data/librevilleZones';
 
 export interface WhatsAppNotificationPayload {
   stageKey: string;
@@ -29,6 +30,7 @@ export function generateWhatsAppMessageForStage(
   const ref = order.reference || 'CMD-2026';
   const neighborhood = order.deliveryZone || order.customer.city || 'Libreville';
   const estimatedTime = order.deliveryEstimated || 'Dans 45 à 60 minutes';
+  const timeWindow = computeDeliveryTimeWindow(order.customer.neighborhoodId).timeWindow;
   const courierName = order.courier?.name || 'Alexandre Moundounga (Livreur Médical Gloryday)';
   const courierPhone = order.courier?.phone || '+241 77 003 004';
   const totalFmt = order.estimatedTotal?.toLocaleString('fr-FR') || '0';
@@ -49,7 +51,7 @@ Votre commande médicale n° *${ref}* a bien été confirmée par notre directio
 • Montant : *${totalFmt} FCFA*
 • Mode de paiement : ${order.isPaid ? '✅ Déjà réglé' : 'À réception'}
 • Destination : *${neighborhood}* (${order.customer.deliveryAddress})
-⏱️ *Délai estimé d'acheminement :* *${estimatedTime}*
+⏱️ *Créneau d'arrivée prévu :* *${timeWindow}* (${estimatedTime})
 
 📦 Vos dispositifs et consommables sont actuellement préparés en zone stérile à notre entrepôt central. Vous recevrez un avis dès la prise en charge par le coursier.
 
@@ -77,7 +79,7 @@ Bonjour *${contact}* (*${facility}*),
 Votre commande n° *${ref}* est en cours d'emballage et de scellé médical à notre Dépôt Central de Libreville.
 
 📍 *Zone de livraison :* *${neighborhood}*
-⏱️ *Délai estimé :* ${estimatedTime}
+⏱️ *Créneau d'arrivée prévu :* *${timeWindow}* (${estimatedTime})
 
 Le colis médical est vérifié selon les normes hospitalières et sera remis au coursier dédié dans quelques minutes.
 
@@ -105,7 +107,7 @@ Votre commande n° *${ref}* a été remise à notre coursier médicalisé.
 👤 *Livreur assigné :* *${courierName}*
 📞 *Contact direct livreur :* *${courierPhone}*
 📍 *Destination :* ${order.customer.deliveryAddress} (*${neighborhood}*)
-⏱️ *Délai d'arrivée prévu :* *${estimatedTime}*
+⏱️ *Créneau d'arrivée estimé :* *${timeWindow}*
 
 Le coursier dispose du caisson isotherme / scellé médical d'origine. Merci de préparer l'accueil pour la réception.
 

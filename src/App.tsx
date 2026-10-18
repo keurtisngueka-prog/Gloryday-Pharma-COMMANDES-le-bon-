@@ -154,6 +154,30 @@ export default function App() {
     return loadCartForUser(currentUser);
   });
 
+  // Transient Toast Notification
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => {
+        setToastMessage(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
+  // Keep references fresh for synchronous beforeunload/pagehide handlers
+  const cartItemsRef = useRef(cartItems);
+  useEffect(() => {
+    cartItemsRef.current = cartItems;
+  }, [cartItems]);
+
+  const currentUserRef = useRef(currentUser);
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+
+  // Standard reactive save to localStorage
   useEffect(() => {
     try {
       const key = getCartStorageKey(currentUser);
@@ -162,6 +186,34 @@ export default function App() {
       console.error('Error saving cart', e);
     }
   }, [cartItems, currentUser]);
+
+  // Guaranteed synchronous auto-save on browser close, tab close, reload, or app switch
+  useEffect(() => {
+    const handleSyncCartToStorage = () => {
+      try {
+        const key = getCartStorageKey(currentUserRef.current);
+        localStorage.setItem(key, JSON.stringify(cartItemsRef.current));
+      } catch (err) {
+        console.error('Auto-save cart on browser close error:', err);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleSyncCartToStorage);
+    window.addEventListener('pagehide', handleSyncCartToStorage);
+    
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        handleSyncCartToStorage();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleSyncCartToStorage);
+      window.removeEventListener('pagehide', handleSyncCartToStorage);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   // URL Hash synchronization & Route Guard listener
   useEffect(() => {
@@ -433,6 +485,40 @@ export default function App() {
 
   const handleClearCart = () => {
     setCartItems([]);
+    try {
+      const key = getCartStorageKey(currentUser);
+      localStorage.setItem(key, JSON.stringify([]));
+      localStorage.removeItem('gloryday_guest_customer_info');
+    } catch {}
+    setToastMessage('Panier vidé');
+  };
+
+  // Clicking on the brand logo resets the cart to 0 and navigates back to home/catalog
+  const handleLogoClick = () => {
+    setCartItems([]);
+    try {
+      const key = getCartStorageKey(currentUser);
+      localStorage.setItem(key, JSON.stringify([]));
+      localStorage.removeItem('gloryday_guest_customer_info');
+    } catch (e) {
+      console.error('Error resetting cart on logo click:', e);
+    }
+
+    // Dismiss any modal or confirmation flow
+    setIsPreviewModalOpen(false);
+    if (confirmedOrder) {
+      setConfirmedOrder(null);
+      setConfirmedPdfDataUrl(undefined);
+    }
+
+    // Navigate back to primary view
+    if (currentUser?.role === 'Super-Admin') {
+      setActiveTab('admin');
+    } else {
+      setActiveTab('catalog');
+    }
+
+    setToastMessage('Panier réinitialisé à 0 article');
   };
 
   const handleAddMultipleToCart = (itemsToAdd: { product: Product; variant: ProductVariant; quantity: number }[]) => {
@@ -506,6 +592,27 @@ export default function App() {
       setCartItems(newCartItems);
       setActiveTab('cart');
     }
+  };
+
+  const handleAddCartItemDirectly = (item: CartItem) => {
+    const currentProd = products.find(p => p.id === item.productId || p.name === item.productName);
+    if (currentProd && currentProd.status === 'rupture') {
+      setToastMessage(`Article en rupture : ${item.productName}`);
+      return;
+    }
+    setCartItems(prev => {
+      const existingIndex = prev.findIndex(
+        it => it.productId === item.productId && it.variant === item.variant
+      );
+      if (existingIndex > -1) {
+        const copy = [...prev];
+        copy[existingIndex].quantity = Math.min(9999, copy[existingIndex].quantity + (item.quantity || 1));
+        return copy;
+      } else {
+        return [...prev, { ...item, quantity: item.quantity || 1 }];
+      }
+    });
+    setToastMessage(`Article réapprovisionné au panier : ${item.productName}`);
   };
 
   // Order Submission
@@ -719,6 +826,7 @@ export default function App() {
         onOpenAuth={() => setIsAuthModalOpen(true)}
         onSwitchRole={handleDemoSwitchRole}
         onOpenCreateProduct={() => setIsGlobalProductModalOpen(true)}
+        onLogoClick={handleLogoClick}
       />
 
       {/* PWA In-App Install Prompt Banner */}
@@ -736,7 +844,22 @@ export default function App() {
         notifications={notifications}
         onOpenNotifications={() => setIsNotificationModalOpen(true)}
         onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
+        onLogoClick={handleLogoClick}
       />
+
+      {/* Toast Notification Banner (Feedback for Cart Reset & Actions) */}
+      {toastMessage && (
+        <aside
+          role="status"
+          aria-live="polite"
+          className="fixed top-16 sm:top-20 right-3 sm:right-6 z-50 animate-in fade-in slide-in-from-top-3 duration-250 pointer-events-none"
+        >
+          <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-slate-900/95 text-white text-xs font-semibold shadow-2xl border border-slate-700/80 backdrop-blur-md">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 animate-ping"></span>
+            <span>{toastMessage}</span>
+          </div>
+        </aside>
+      )}
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 md:pb-12">
@@ -812,6 +935,7 @@ export default function App() {
                   setActiveDeliveryOrder(order);
                   setIsDeliveryModalOpen(true);
                 }}
+                onAddToCartItem={handleAddCartItemDirectly}
               />
             )}
 

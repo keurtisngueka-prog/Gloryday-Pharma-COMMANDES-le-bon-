@@ -121,6 +121,7 @@ export interface OrderItem {
   productId: string;
   productName: string;
   variant: string;
+  category?: string;
   price: number;
   quantity: number;
   total: number;

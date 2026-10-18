@@ -7,16 +7,11 @@ import {
   Copy, 
   Check, 
   Clock,
-  Printer,
-  Smartphone,
-  ShieldCheck,
-  FileCheck2,
-  ChevronRight
+  Smartphone 
 } from 'lucide-react';
-import { Order, MobilePaymentDetails } from '../types';
+import { Order } from '../types';
 import { generateWhatsAppOrderUrl } from '../utils/whatsapp';
-import { generateInternalPurchaseOrderPdf } from '../utils/pdfGenerator';
-import { api } from '../api';
+import { computeDeliveryTimeWindow } from '../data/librevilleZones';
 import { MobilePaymentModal } from './MobilePaymentModal';
 
 interface OrderConfirmationViewProps {
@@ -28,18 +23,15 @@ interface OrderConfirmationViewProps {
 }
 
 export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
-  order: initialOrder,
+  order,
   pdfDataUrl,
   onNewOrder,
   onViewDashboard,
   onTrackOrder
 }) => {
-  const [order, setOrder] = useState<Order>(initialOrder);
   const [copied, setCopied] = useState(false);
-  const [copiedUssd, setCopiedUssd] = useState(false);
   const [useSecondaryNumber, setUseSecondaryNumber] = useState(false);
-  const [isMobileModalOpen, setIsMobileModalOpen] = useState(false);
-  const [validationSuccessToast, setValidationSuccessToast] = useState<string | null>(null);
+  const [isMobilePaymentOpen, setIsMobilePaymentOpen] = useState(false);
 
   const primaryUrl = generateWhatsAppOrderUrl(order, order.pdfUrl, false);
   const secondaryUrl = generateWhatsAppOrderUrl(order, order.pdfUrl, true);
@@ -49,17 +41,6 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
     navigator.clipboard.writeText(order.reference);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleSaveMobilePayment = async (details: MobilePaymentDetails) => {
-    try {
-      const updated = await api.updateOrderMobilePayment(order.id, details);
-      setOrder(updated);
-      setValidationSuccessToast('Paiement mobile enregistré et associé à votre commande !');
-      setTimeout(() => setValidationSuccessToast(null), 4000);
-    } catch (e) {
-      console.error('Error updating order mobile payment', e);
-    }
   };
 
   const handleDownloadPdf = () => {
@@ -140,30 +121,39 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
         </div>
 
         {/* Neighborhood & Delay estimation */}
-        <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-          <span className="text-slate-600 flex items-center gap-1.5">
-            <span className="text-base">📍</span>
-            <span>Destination : <strong className="text-slate-900">{order.deliveryZone || order.customer.neighborhoodName || 'Libreville'}</strong></span>
-          </span>
-          <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold text-[11px] border border-blue-200">
-            ⏱️ {order.deliveryEstimated || 'Délai : ~30 - 45 min'}
-          </span>
+        <div className="pt-2.5 border-t border-slate-100 space-y-1.5 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-600 flex items-center gap-1.5">
+              <span>📍</span>
+              <span>Destination : <strong className="text-slate-900">{order.deliveryZone || order.customer.neighborhoodName || 'Libreville'}</strong></span>
+            </span>
+            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold text-[11px] border border-blue-200">
+              ⏱️ {order.deliveryEstimated || 'Délai : ~30 - 45 min'}
+            </span>
+          </div>
+          <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 flex items-center justify-between text-xs font-semibold shadow-2xs">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Arrivée prévue : <strong className="text-emerald-900 font-black">{computeDeliveryTimeWindow(order.customer.neighborhoodId).timeWindow}</strong></span>
+            </div>
+            <span className="text-[10px] text-emerald-700 font-mono hidden sm:inline">Heure locale Libreville</span>
+          </div>
         </div>
       </div>
 
       {/* PDF Actions */}
       <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-left">
         <span className="text-xs font-bold text-slate-900 block mb-2">
-          Documents officiels imprimables (PDF)
+          Bon de commande officiel (PDF)
         </span>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
             onClick={handleDownloadPdf}
             className="h-10 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
           >
             <Download className="w-3.5 h-3.5 text-slate-500" />
-            Bon Commande
+            Télécharger PDF
           </button>
           <button
             type="button"
@@ -173,144 +163,7 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
             <Eye className="w-3.5 h-3.5 text-slate-500" />
             Visualiser
           </button>
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                const { blob } = await generateInternalPurchaseOrderPdf(order, {
-                  department: 'Bloc Chirurgical / Pharmacie',
-                  requesterTitle: order.customer.contactName || 'Major de Bloc'
-                });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `Bon_Visa_Interne_${order.reference}.pdf`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                setTimeout(() => URL.revokeObjectURL(url), 1000);
-              } catch (e) {
-                console.error('Error generating visa pdf', e);
-              }
-            }}
-            className="h-10 rounded-xl bg-blue-50 border border-blue-200 hover:bg-blue-100 text-[#0d44e8] font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-            title="Bon de Demande d'Achat avec cases de signatures et visas direction"
-          >
-            <Printer className="w-3.5 h-3.5 text-[#0d44e8]" />
-            Bon de Visa (A4)
-          </button>
         </div>
-      </div>
-
-      {/* Toast feedback if recently validated */}
-      {validationSuccessToast && (
-        <div className="mb-4 p-3 rounded-2xl bg-emerald-600 text-white text-xs font-bold flex items-center justify-between shadow-md animate-in slide-in-from-top duration-200">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-white" />
-            <span>{validationSuccessToast}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setValidationSuccessToast(null)}
-            className="text-white/80 hover:text-white"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* Mobile Payment Validation Module (Airtel Money / Moov Money) */}
-      <div className={`rounded-2xl p-4 mb-4 text-left border shadow-xs transition-all ${
-        order.mobilePayment?.provider === 'airtel_money' || order.customer.paymentMethod === 'airtel_money'
-          ? 'bg-red-50/60 border-red-200'
-          : order.mobilePayment?.provider === 'moov_money' || order.customer.paymentMethod === 'moov_money'
-            ? 'bg-blue-50/60 border-blue-200'
-            : 'bg-slate-50 border-slate-200'
-      }`}>
-        <div className="flex items-start justify-between gap-3 mb-2.5">
-          <div className="flex items-center gap-2.5">
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0 shadow-xs ${
-              order.mobilePayment?.provider === 'airtel_money' || order.customer.paymentMethod === 'airtel_money'
-                ? 'bg-red-600'
-                : 'bg-[#0d44e8]'
-            }`}>
-              <Smartphone className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-bold text-slate-900 text-xs sm:text-sm">
-                  Validation Paiement Mobile Gabon
-                </h3>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                  order.mobilePayment?.provider === 'airtel_money' || order.customer.paymentMethod === 'airtel_money'
-                    ? 'bg-red-100 text-red-800 border-red-200'
-                    : 'bg-blue-100 text-blue-800 border-blue-200'
-                }`}>
-                  {order.mobilePayment?.provider === 'moov_money' || order.customer.paymentMethod === 'moov_money'
-                    ? 'Moov Money (*555#)'
-                    : 'Airtel Money (*150#)'}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                Compte marchand Gloryday : <strong className="text-slate-800 font-mono">
-                  {order.mobilePayment?.provider === 'moov_money' || order.customer.paymentMethod === 'moov_money'
-                    ? '066 24 03 99'
-                    : '077 00 30 04'}
-                </strong> · Net à payer : <strong className="text-slate-900">{order.estimatedTotal.toLocaleString('fr-FR')} FCFA</strong>
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Status preview banner */}
-        <div className="p-3 rounded-xl bg-white border border-slate-200/90 mb-3 text-xs space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase font-bold text-slate-400">Statut du versement :</span>
-            {order.mobilePayment?.transactionReference ? (
-              <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1 text-[11px]">
-                <FileCheck2 className="w-3.5 h-3.5 text-emerald-600" />
-                Référence SMS Validée
-              </span>
-            ) : (
-              <span className="font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 flex items-center gap-1 text-[11px]">
-                <Clock className="w-3.5 h-3.5 text-amber-600" />
-                En attente d'ID SMS
-              </span>
-            )}
-          </div>
-
-          {order.mobilePayment?.transactionReference ? (
-            <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
-              <span className="text-slate-600">ID Transaction : <strong className="font-mono text-slate-900">{order.mobilePayment.transactionReference}</strong></span>
-              <span className="text-[10px] text-emerald-700 font-bold">✓ Prêt pour WhatsApp</span>
-            </div>
-          ) : (
-            <p className="text-[11px] text-slate-500 pt-0.5">
-              Si vous avez déjà transféré les fonds ou dès réception du SMS d'Airtel/Moov, renseignez le code pour accélérer le traitement prioritaire de votre commande.
-            </p>
-          )}
-
-          {order.mobilePayment?.screenshotUrl && (
-            <div className="pt-1 flex items-center gap-2">
-              <img src={order.mobilePayment.screenshotUrl} alt="Reçu" className="w-8 h-8 object-cover rounded border border-slate-200" />
-              <span className="text-[11px] font-semibold text-emerald-800">Preuve de versement attachée</span>
-            </div>
-          )}
-        </div>
-
-        {/* Action Button */}
-        <button
-          type="button"
-          onClick={() => setIsMobileModalOpen(true)}
-          className="w-full py-2.5 px-3 rounded-xl bg-white border border-slate-300 hover:border-slate-400 font-bold text-xs text-slate-800 flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-        >
-          <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          <span>
-            {order.mobilePayment?.transactionReference
-              ? 'Modifier ou vérifier la référence SMS'
-              : 'Valider mon règlement mobile (Saisir référence SMS)'}
-          </span>
-        </button>
       </div>
 
       {/* WhatsApp Transmission */}
@@ -372,7 +225,16 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
       </div>
 
       {/* Secondary links */}
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-2 pt-1">
+      <div className="flex flex-col sm:flex-row items-center justify-center gap-2 pt-1 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setIsMobilePaymentOpen(true)}
+          className="w-full sm:w-auto px-4 py-2 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+        >
+          <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Payer par Mobile Money (Airtel / Moov)</span>
+        </button>
+
         {onTrackOrder && (
           <button
             type="button"
@@ -389,23 +251,23 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
         >
           Mes commandes
         </button>
+        <button
+          type="button"
+          onClick={onNewOrder}
+          className="w-full sm:w-auto px-4 py-2 rounded-xl bg-[#0f0f12] text-white text-xs font-bold hover:bg-black cursor-pointer"
+        >
+          Nouvelle commande
+        </button>
       </div>
 
-      {/* Interactive Mobile Payment Validation Modal */}
-      <MobilePaymentModal
-        isOpen={isMobileModalOpen}
-        onClose={() => setIsMobileModalOpen(false)}
-        orderTotal={order.estimatedTotal}
-        orderReference={order.reference}
-        facilityName={order.customer.facilityName}
-        initialProvider={order.mobilePayment?.provider || (order.customer.paymentMethod === 'moov_money' ? 'moov_money' : 'airtel_money')}
-        initialDetails={order.mobilePayment || {
-          provider: order.customer.paymentMethod === 'moov_money' ? 'moov_money' : 'airtel_money',
-          merchantPhone: order.customer.paymentMethod === 'moov_money' ? '066240399' : '077003004',
-          senderPhone: order.customer.phone
-        }}
-        onSavePayment={handleSaveMobilePayment}
-      />
+      {/* Mobile Money Payment Modal */}
+      {isMobilePaymentOpen && (
+        <MobilePaymentModal
+          isOpen={isMobilePaymentOpen}
+          order={order}
+          onClose={() => setIsMobilePaymentOpen(false)}
+        />
+      )}
     </div>
   );
 };

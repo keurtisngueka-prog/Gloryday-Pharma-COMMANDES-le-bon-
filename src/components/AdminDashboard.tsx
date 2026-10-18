@@ -15,8 +15,7 @@ import {
   MessageCircle,
   Download,
   Database,
-  Smartphone,
-  CreditCard
+  Smartphone
 } from 'lucide-react';
 import { Order, OrderStatus, AdminStats, Pack, Product, User, AppRole } from '../types';
 import { ProductFormModal } from './ProductFormModal';
@@ -24,6 +23,8 @@ import { BestClientsModule } from './BestClientsModule';
 import { DirectMessagingModal } from './DirectMessagingModal';
 import { ClientPurchasesStatsModule } from './ClientPurchasesStatsModule';
 import { DataExportModule } from './DataExportModule';
+import { SalesMonthlyChart } from './SalesMonthlyChart';
+import { MobilePaymentModal } from './MobilePaymentModal';
 import { generateWhatsAppMessageForStage } from '../utils/whatsappNotifications';
 
 interface AdminDashboardProps {
@@ -79,6 +80,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
   const [targetMessageClient, setTargetMessageClient] = useState<any | null>(null);
+  const [paymentModalOrder, setPaymentModalOrder] = useState<Order | null>(null);
 
   const filteredOrders = orders.filter(o => {
     if (!searchQuery.trim()) return true;
@@ -255,6 +257,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Interactive 6-Month Sales Evolution AreaChart */}
+          <SalesMonthlyChart orders={orders} stats={stats} />
         </div>
       )}
 
@@ -308,64 +313,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       📍 {order.deliveryZone || order.customer.neighborhoodName || 'Libreville'} · ⏱️ {order.deliveryEstimated || '~30-45 min'}
                     </span>
                   </div>
-
-                  {/* Mobile Payment Validation Banner */}
-                  {(order.mobilePayment || order.customer.paymentMethod === 'airtel_money' || order.customer.paymentMethod === 'moov_money') && (
-                    <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 border ${
-                        (order.mobilePayment?.provider || order.customer.paymentMethod) === 'airtel_money'
-                          ? 'bg-red-50 text-red-800 border-red-200'
-                          : 'bg-blue-50 text-blue-800 border-blue-200'
-                      }`}>
-                        <Smartphone className="w-3 h-3" />
-                        <span>{(order.mobilePayment?.provider || order.customer.paymentMethod) === 'airtel_money' ? 'Airtel Money' : 'Moov Money'}</span>
-                      </span>
-                      {order.mobilePayment?.transactionReference ? (
-                        <span className="text-[10px] font-mono font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                          Réf: {order.mobilePayment.transactionReference}
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                          ⏳ En attente Réf SMS
-                        </span>
-                      )}
-                      {order.mobilePayment?.senderPhone && (
-                        <span className="text-[10px] text-slate-500">
-                          Payeur: {order.mobilePayment.senderPhone}
-                        </span>
-                      )}
-                      {order.mobilePayment?.screenshotUrl && (
-                        <a
-                          href={order.mobilePayment.screenshotUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[10px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-200 flex items-center gap-1"
-                        >
-                          <span>Voir reçu SMS</span>
-                        </a>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 {/* Status Transitions & WhatsApp Notification Actions */}
                 <div className="flex items-center gap-1.5 self-end sm:self-center flex-wrap">
-                  {/* Payment validation toggle */}
-                  {!order.isPaid ? (
-                    <button
-                      type="button"
-                      onClick={() => onUpdatePayment(order.id, true)}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-bold border border-emerald-300 text-xs flex items-center gap-1 transition-colors"
-                      title="Valider l'encaissement du paiement (Airtel/Moov/Espèces)"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Valider Paiement</span>
-                    </button>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 font-bold text-[10px] border border-emerald-200">
-                      ✓ Payée
-                    </span>
-                  )}
                   {/* Automated WhatsApp Notification 1-Click Button */}
                   <a
                     href={generateWhatsAppMessageForStage(
@@ -380,6 +331,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
                     <span>WhatsApp Client</span>
                   </a>
+
+                  {/* Mobile Money Payment Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => setPaymentModalOrder(order)}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-bold border border-emerald-300 flex items-center gap-1 transition-colors shadow-2xs cursor-pointer"
+                    title="Enregistrer / Vérifier un paiement Mobile Money (Airtel / Moov)"
+                  >
+                    <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Paiement Mobile</span>
+                  </button>
 
                   {onOpenDeliveryModal && (
                     <button
@@ -599,6 +561,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         targetClient={targetMessageClient}
         onSuccess={() => onRefresh()}
       />
+
+      {/* Mobile Money Payment Verification Modal */}
+      {paymentModalOrder && (
+        <MobilePaymentModal
+          isOpen={Boolean(paymentModalOrder)}
+          order={paymentModalOrder}
+          onClose={() => setPaymentModalOrder(null)}
+          onPaymentConfirmed={async () => {
+            await onUpdatePayment(paymentModalOrder.id, true);
+            onRefresh();
+          }}
+        />
+      )}
     </div>
   );
 };

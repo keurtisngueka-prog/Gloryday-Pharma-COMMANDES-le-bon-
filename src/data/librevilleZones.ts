@@ -275,3 +275,55 @@ export function getEstimatedDeliveryText(neighborhoodId?: string, fallbackAddres
   }
   return '45 à 60 minutes (Grand Libreville)';
 }
+
+export function computeDeliveryTimeWindow(
+  neighborhoodId?: string, 
+  baseDate: Date = new Date()
+): { timeWindow: string; shortWindow: string; isTomorrow: boolean } {
+  const neighborhood = neighborhoodId ? getNeighborhoodById(neighborhoodId) : undefined;
+  
+  // Extract minutes range
+  let minMinutes = 35;
+  let maxMinutes = 55;
+  if (neighborhood && neighborhood.estimatedMinutes) {
+    const parts = neighborhood.estimatedMinutes.match(/\d+/g);
+    if (parts && parts.length >= 2) {
+      minMinutes = parseInt(parts[0], 10);
+      maxMinutes = parseInt(parts[1], 10);
+    } else if (parts && parts.length === 1) {
+      minMinutes = parseInt(parts[0], 10);
+      maxMinutes = minMinutes + 25;
+    }
+  }
+
+  // Current hours in local time
+  const currentHours = baseDate.getHours();
+  const currentMinutes = baseDate.getMinutes();
+
+  // If outside regular distribution depot hours (18h00 to 07h30)
+  if (currentHours >= 18 || currentHours < 7) {
+    return {
+      timeWindow: 'Demain matin dès 08h30 (Première tournée prioritaire)',
+      shortWindow: 'Demain dès 08h30',
+      isTomorrow: true
+    };
+  }
+
+  const start = new Date(baseDate.getTime() + minMinutes * 60 * 1000);
+  const end = new Date(baseDate.getTime() + maxMinutes * 60 * 1000);
+
+  const formatTime = (d: Date) => {
+    const h = d.getHours().toString().padStart(2, '0');
+    const m = d.getMinutes().toString().padStart(2, '0');
+    return `${h}h${m}`;
+  };
+
+  const startStr = formatTime(start);
+  const endStr = formatTime(end);
+
+  return {
+    timeWindow: `Aujourd'hui entre ${startStr} et ${endStr}`,
+    shortWindow: `${startStr} - ${endStr}`,
+    isTomorrow: false
+  };
+}

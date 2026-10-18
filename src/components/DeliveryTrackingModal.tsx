@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { Order, DeliveryStage } from '../types';
 import { generateWhatsAppMessageForStage, generateCourierMissionWhatsApp } from '../utils/whatsappNotifications';
+import { computeDeliveryTimeWindow } from '../data/librevilleZones';
 
 interface DeliveryTrackingModalProps {
   isOpen: boolean;
@@ -187,9 +188,14 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
             </div>
 
             <div className="text-right">
-              <span className="text-[10px] uppercase font-bold text-slate-500 block">Délai estimé</span>
-              <span className="font-bold text-xs sm:text-sm text-slate-900">
-                {currentStage === 'delivered' ? 'Livré' : deliveryEstimated}
+              <span className="text-[10px] uppercase font-bold text-slate-500 block">Créneau estimé</span>
+              <span className="font-bold text-xs sm:text-sm text-slate-900 block">
+                {currentStage === 'delivered' 
+                  ? 'Livré & Émargé' 
+                  : computeDeliveryTimeWindow(order.customer.neighborhoodId).shortWindow}
+              </span>
+              <span className="text-[10px] text-slate-500 font-medium block">
+                {currentStage === 'delivered' ? 'Commande terminée' : deliveryEstimated}
               </span>
             </div>
           </div>

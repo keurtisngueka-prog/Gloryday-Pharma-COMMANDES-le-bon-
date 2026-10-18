@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Menu, 
   ShoppingBag, 
@@ -10,11 +10,9 @@ import {
   Layers,
   FileText,
   ShieldCheck,
-  LogOut,
-  WifiOff
+  LogOut
 } from 'lucide-react';
 import { User as UserType, AppNotification } from '../types';
-import { useOnlineStatus } from '../utils/pwa';
 
 interface NavbarProps {
   activeTab: string;
@@ -27,8 +25,7 @@ interface NavbarProps {
   notifications: AppNotification[];
   onOpenNotifications: () => void;
   onToggleSidebar: () => void;
-  onOpenDraftsModal?: () => void;
-  draftsCount?: number;
+  onLogoClick?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -42,12 +39,24 @@ export const Navbar: React.FC<NavbarProps> = ({
   notifications,
   onOpenNotifications,
   onToggleSidebar,
-  onOpenDraftsModal,
-  draftsCount = 0
+  onLogoClick
 }) => {
-  const isOnline = useOnlineStatus();
   const unreadCount = notifications.filter(n => !n.read).length;
   const role = currentUser?.role || 'client';
+
+  // Subtle Cart Animation on item addition
+  const [isCartBumping, setIsCartBumping] = useState(false);
+  const prevCountRef = useRef(cartCount);
+
+  useEffect(() => {
+    if (cartCount > prevCountRef.current) {
+      setIsCartBumping(true);
+      const timer = setTimeout(() => setIsCartBumping(false), 650);
+      prevCountRef.current = cartCount;
+      return () => clearTimeout(timer);
+    }
+    prevCountRef.current = cartCount;
+  }, [cartCount]);
 
   return (
     <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-2xs">
@@ -60,12 +69,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
             <span className="text-slate-500">·</span>
             <span>Fournisseur certifié d'équipements & consommables hospitaliers</span>
-            {!isOnline && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-400/30 animate-pulse">
-                <WifiOff className="w-2.5 h-2.5" />
-                <span>Hors-ligne</span>
-              </span>
-            )}
           </div>
           <div className="flex items-center gap-4">
             <a 
@@ -121,14 +124,18 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <div 
               onClick={() => {
-                if (role === 'Super-Admin') {
-                  setActiveTab('admin');
+                if (onLogoClick) {
+                  onLogoClick();
                 } else {
-                  setActiveTab('catalog');
+                  if (role === 'Super-Admin') {
+                    setActiveTab('admin');
+                  } else {
+                    setActiveTab('catalog');
+                  }
                 }
               }}
               className="flex items-center gap-2 cursor-pointer select-none group"
-              title={role === 'Super-Admin' ? "Tableau de Bord Super-Admin" : "Catalogue Gloryday Pharma"}
+              title="GLORYDAY Pharma · Clic pour réinitialiser le panier à 0 et revenir à l'accueil"
             >
               <div className="w-8 h-8 rounded-lg bg-[#0d44e8] text-white flex items-center justify-center font-black text-sm shadow-xs group-hover:scale-105 transition-transform">
                 +
@@ -228,39 +235,27 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Right Zone: Notifications, Cart, Profile */}
           <div className="flex items-center gap-1.5 sm:gap-2">
-            {/* Drafts Manager Button */}
-            {onOpenDraftsModal && (
-              <button
-                type="button"
-                onClick={onOpenDraftsModal}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 sm:py-2 rounded-xl text-xs font-bold transition-all cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200/80 shadow-2xs"
-                title="Gestionnaire de brouillons et commandes hors-ligne"
-              >
-                <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#0d44e8]" />
-                <span className="hidden sm:inline">Brouillons</span>
-                {draftsCount > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-[#0d44e8] text-white">
-                    {draftsCount}
-                  </span>
-                )}
-              </button>
-            )}
-
-            {/* Desktop Cart Button */}
+            {/* Desktop Cart Button with Subtle Bounce & Pulse */}
             <button
               type="button"
               onClick={() => setActiveTab('cart')}
-              className={`hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all duration-300 cursor-pointer ${
+                isCartBumping ? 'scale-105 shadow-md ring-2 ring-[#0d44e8] bg-blue-50' : ''
+              } ${
                 activeTab === 'cart'
                   ? 'bg-[#0d44e8] text-white shadow-xs'
                   : 'bg-slate-100 hover:bg-slate-200 text-slate-900'
               }`}
             >
-              <ShoppingBag className="w-4 h-4" />
+              <ShoppingBag className={`w-4 h-4 transition-transform duration-300 ${
+                isCartBumping ? 'scale-125 -rotate-12 text-[#0d44e8]' : ''
+              }`} />
               <span>{cartTotal > 0 ? `${cartTotal.toLocaleString('fr-FR')} F` : 'Panier'}</span>
               {cartCount > 0 && (
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
-                  activeTab === 'cart' ? 'bg-white text-[#0d44e8]' : 'bg-[#0d44e8] text-white'
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black transition-all duration-300 ${
+                  isCartBumping 
+                    ? 'scale-125 ring-4 ring-[#0d44e8]/50 bg-emerald-600 text-white animate-pulse'
+                    : (activeTab === 'cart' ? 'bg-white text-[#0d44e8]' : 'bg-[#0d44e8] text-white')
                 }`}>
                   {cartCount}
                 </span>
