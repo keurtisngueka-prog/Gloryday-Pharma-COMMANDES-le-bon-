@@ -47,13 +47,6 @@ export interface Product {
   isPromotion?: boolean;
   originalPrice?: number;
   discountPercentage?: number;
-  stockQuantity?: number; // Alias rétrocompatible
-  quantityAvailable?: number; // Quantité disponible en stock réel
-  lowStockAlertThreshold?: number; // Alias rétrocompatible
-  alertThreshold?: number; // Seuil d'alerte rupture / stock critique
-  purchasePrice?: number; // Prix d'achat pour calcul de marge
-  batches?: StockBatch[]; // Lots actifs
-  batchHistory?: StockBatch[]; // Historique complet des lots et péremptions
 }
 
 export interface PackItem {
@@ -128,7 +121,6 @@ export interface OrderItem {
   productId: string;
   productName: string;
   variant: string;
-  category?: string;
   price: number;
   quantity: number;
   total: number;
@@ -167,9 +159,6 @@ export interface Order {
   reference: string; // GP-2026-00001
   createdAt: string;
   userId?: string;
-  structureId?: string;
-  authorName?: string;
-  authorJobTitle?: JobTitle;
   customer: CustomerInfo;
   items: OrderItem[];
   estimatedTotal: number;
@@ -186,36 +175,20 @@ export interface Order {
   deliveryEstimated?: string;
   deliveryFee?: number;
   lastWhatsAppNotifiedStage?: string;
-  installments?: PaymentInstallment[];
-  amountPaid?: number;
-  deliveryProof?: {
-    signatureUrl?: string;
-    photoUrl?: string;
-    receivedBy?: string;
-    timestamp?: string;
-  };
-  isPartialDelivery?: boolean;
-  partialDeliveryNotes?: string;
-  invoices?: InvoiceRecord[];
+  whatsappLogs?: WhatsAppNotificationLog[];
 }
 
-export type ClientAccountStatus = 'actif' | 'en_attente' | 'suspendu' | 'bloque';
-export type PaymentTerms = 'comptant' | '30_jours' | '60_jours' | 'acompte_solde';
-
-export type JobTitle = 'directeur' | 'charge_commandes' | 'docteur';
-export type DirectorApprovalStatus = 'none' | 'pending' | 'approved' | 'rejected';
-
-export interface HealthcareStructure {
+export interface WhatsAppNotificationLog {
   id: string;
-  name: string;
-  type: FacilityType;
-  maxAccounts: number;
-  directorUserId?: string;
-  directorName?: string;
-  directorPhone?: string;
-  createdAt: string;
-  city?: string;
-  deliveryAddress?: string;
+  stage: DeliveryStage;
+  stageLabel: string;
+  recipientRole: 'client' | 'coursier';
+  recipientPhone: string;
+  recipientName: string;
+  timestamp: string;
+  status: 'sent' | 'delivered' | 'failed';
+  messagePreview: string;
+  triggeredBy: string;
 }
 
 export interface User {
@@ -227,9 +200,9 @@ export interface User {
   facilityTypeOther?: string;
   role: AppRole;
   createdAt: string;
-  structureId?: string;
-  jobTitle?: JobTitle;
-  directorApprovalStatus?: DirectorApprovalStatus;
+  email?: string;
+  avatarUrl?: string;
+  authProvider?: 'credentials' | 'google';
   assignedToCommercialId?: string;
   assignedToCommercialName?: string;
   coordinates?: Coordinates;
@@ -239,13 +212,6 @@ export interface User {
   lastOrderDate?: string;
   totalOrdersCount?: number;
   totalSpent?: number;
-  accountStatus?: ClientAccountStatus;
-  creditLimit?: number; // Plafond de crédit accordé en FCFA
-  paymentTerms?: PaymentTerms;
-  outstandingBalance?: number; // Encours total impayé
-  overdueDays?: number; // Ancienneté des impayés en jours
-  isMergedInto?: string; // ID du compte principal si fusionné
-  notes?: string;
 }
 
 export interface CommercialQuote {
@@ -340,196 +306,3 @@ export interface AdminStats {
   inactiveClientsCount: number;
   clientPurchases?: ClientPurchaseStats[];
 }
-
-// -------------------------------------------------------------
-// NOUVEAUX TYPES ENTERPRISE : AUDIT, STOCKS, FINANCES, PARAMÈTRES
-// -------------------------------------------------------------
-
-export type AuditActionType =
-  | 'statut_commande'
-  | 'validation_paiement'
-  | 'modification_prix'
-  | 'suppression_produit'
-  | 'creation_produit'
-  | 'annulation_commande'
-  | 'export_donnees'
-  | 'import_donnees'
-  | 'mouvement_stock'
-  | 'reappro_fournisseur'
-  | 'statut_client'
-  | 'fusion_client'
-  | 'modification_parametres'
-  | 'creation_pack'
-  | 'suppression_pack';
-
-export interface AuditEntry {
-  id: string;
-  timestamp: string;
-  userId: string;
-  userName: string;
-  userRole: AppRole;
-  actionType: AuditActionType;
-  targetEntity: string;
-  targetId: string;
-  deviceInfo: string;
-  details: string;
-  previousState?: string;
-  newState?: string;
-}
-
-export interface StockBatch {
-  id: string;
-  productId: string;
-  lotNumber: string;
-  expiryDate: string; // YYYY-MM-DD
-  quantity: number;
-  initialQuantity?: number;
-  purchasePrice: number;
-  supplierName?: string;
-  receivedDate: string;
-  notes?: string;
-  isArchived?: boolean;
-}
-
-export type StockMovementType = 
-  | 'entree' 
-  | 'sortie' 
-  | 'sortie_commande' 
-  | 'perte' 
-  | 'perte_casse' 
-  | 'inventaire' 
-  | 'retour_client';
-
-export interface StockMovement {
-  id: string;
-  productId: string;
-  productName: string;
-  lotNumber?: string;
-  type: StockMovementType;
-  quantity: number;
-  previousQuantity: number;
-  newQuantity: number;
-  reason: string;
-  date: string;
-  performedBy: string;
-}
-
-export interface Supplier {
-  id: string;
-  name: string;
-  contactPerson: string;
-  phone: string;
-  email?: string;
-  country: string;
-  leadTimeDays: number;
-}
-
-export interface PurchaseOrder {
-  id: string;
-  reference: string;
-  supplierId: string;
-  supplierName: string;
-  createdAt: string;
-  status: 'Brouillon' | 'Commandé' | 'Reçu' | 'Annulé';
-  items: {
-    productId: string;
-    productName: string;
-    quantity: number;
-    purchaseUnitPrice: number;
-  }[];
-  totalAmount: number;
-  expectedDate?: string;
-}
-
-export interface PaymentInstallment {
-  id: string;
-  type: 'acompte' | 'solde' | 'unique';
-  amount: number;
-  paymentMethod: 'especes' | 'airtel_money' | 'moov_money' | 'virement';
-  transactionReference?: string;
-  status: 'en_attente' | 'valide' | 'rejete';
-  paidAt: string;
-  validatedBy?: string;
-  notes?: string;
-}
-
-export interface InvoiceRecord {
-  id: string;
-  orderId: string;
-  orderReference: string;
-  type: 'facture' | 'avoir';
-  number: string; // FAC-2026-0001 ou AVOIR-2026-0001
-  issueDate: string;
-  clientFacilityName: string;
-  tvaRate: number; // 0 ou 0.18
-  tvaAmount: number;
-  totalHT: number;
-  totalTTC: number;
-  reason?: string; // pour les avoirs / retours
-  isCreditRefunded?: boolean;
-}
-
-export interface Courier {
-  id: string;
-  name: string;
-  phone: string;
-  vehicle: string;
-  matricule: string;
-  active: boolean;
-  assignedOrdersCount: number;
-}
-
-export interface SystemPromoCode {
-  code: string;
-  discountPercentage: number;
-  validUntil: string;
-  minOrderAmount?: number;
-  active: boolean;
-}
-
-export interface ClientCustomPrice {
-  clientId: string;
-  productId: string;
-  customPrice: number;
-}
-
-export interface DeliveryZoneConfig {
-  id: string;
-  name: string;
-  fee: number;
-  delayHours: number;
-  active: boolean;
-}
-
-export interface VolumeDiscountTier {
-  minQuantity: number;
-  discountPercentage: number;
-}
-
-export interface SystemSettings {
-  minOrderAmount: number;
-  openingHours: string;
-  whatsappPrimaryPhone: string;
-  whatsappSecondaryPhone: string;
-  airtelMerchantPhone: string;
-  moovMerchantPhone: string;
-  deliveryZones: DeliveryZoneConfig[];
-  volumeDiscounts: VolumeDiscountTier[];
-  promoCodes: SystemPromoCode[];
-  customPrices: ClientCustomPrice[];
-  whatsappTemplates: {
-    orderConfirmation: string;
-    inTransit: string;
-    delivered: string;
-    reminderInactive: string;
-  };
-  pdfHeaderInfo: {
-    companyName: string;
-    legalNotice: string;
-    rccm: string;
-    nif: string;
-    address: string;
-    phone: string;
-  };
-}
-

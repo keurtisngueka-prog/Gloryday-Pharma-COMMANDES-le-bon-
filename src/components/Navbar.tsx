@@ -277,22 +277,37 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* Profile / Account */}
             {currentUser ? (
-              <button
-                type="button"
-                onClick={onLogout}
-                className="w-9 h-9 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors cursor-pointer"
-                title="Se déconnecter"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('dashboard')}
+                  className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl overflow-hidden border border-slate-200 hover:border-[#0d44e8] hover:ring-2 hover:ring-blue-100 transition-all flex items-center justify-center cursor-pointer bg-slate-100"
+                  title={`${currentUser.facilityName} - Ouvrir Tableau de Bord`}
+                >
+                  {currentUser.avatarUrl ? (
+                    <img src={currentUser.avatarUrl} alt={currentUser.facilityName} className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="font-bold text-xs text-[#0d44e8]">{currentUser.facilityName.charAt(0).toUpperCase()}</span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  className="w-8 h-8 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors cursor-pointer"
+                  title="Se déconnecter"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
             ) : (
               <button
                 type="button"
                 onClick={onOpenAuth}
-                className="w-9 h-9 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 flex items-center justify-center transition-colors cursor-pointer"
-                title="Se connecter"
+                className="px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-700 hover:text-[#0d44e8] hover:bg-blue-50 border border-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Se connecter / Connexion Google"
               >
-                <UserIcon className="w-4 h-4" />
+                <UserIcon className="w-3.5 h-3.5 text-[#0d44e8]" />
+                <span className="hidden sm:inline">Connexion</span>
               </button>
             )}
           </div>

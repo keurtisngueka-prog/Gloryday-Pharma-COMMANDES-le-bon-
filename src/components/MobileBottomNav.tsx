@@ -6,13 +6,15 @@ interface MobileBottomNavProps {
   setActiveTab: (tab: any) => void;
   cartCount: number;
   onOpenSidebar: () => void;
+  draftsCount?: number;
 }
 
 export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   activeTab,
   setActiveTab,
   cartCount,
-  onOpenSidebar
+  onOpenSidebar,
+  draftsCount
 }) => {
   const [isBumping, setIsBumping] = useState(false);
   const prevCountRef = useRef(cartCount);
@@ -134,9 +136,14 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         <button
           type="button"
           onClick={onOpenSidebar}
-          className="flex flex-col items-center justify-center h-full min-h-[44px] text-slate-500 hover:text-slate-900 font-medium transition-colors cursor-pointer"
+          className="flex flex-col items-center justify-center h-full min-h-[44px] text-slate-500 hover:text-slate-900 font-medium transition-colors cursor-pointer relative"
         >
-          <Menu className="w-5 h-5 stroke-[2.2]" />
+          <div className="relative">
+            <Menu className="w-5 h-5 stroke-[2.2]" />
+            {draftsCount !== undefined && draftsCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-white" title={`${draftsCount} brouillon(s) hors-ligne`}></span>
+            )}
+          </div>
           <span className="text-[10px] tracking-tight mt-1 leading-none">
             Menu
           </span>

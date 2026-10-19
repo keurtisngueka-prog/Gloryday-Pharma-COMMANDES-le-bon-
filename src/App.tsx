@@ -19,6 +19,7 @@ import {
   CartItem, 
   CustomerInfo, 
   Order, 
+  OrderDraft,
   User, 
   AppNotification, 
   AdminStats, 
@@ -30,10 +31,9 @@ import {
 import { api, setStoredToken, getStoredCustomerInfo } from './api';
 import { matchesProductSearch } from './utils/search';
 import { generateOrderPdf } from './utils/pdfGenerator';
+import { getStoredDrafts, deleteDraft } from './utils/draftsStorage';
 import { CATEGORIES, CONSUMABLE_SUBCATEGORIES, MEDICAL_SPECIALTIES } from './data/initialProducts';
 import { getProductSpecialty } from './utils/specialties';
-import { logAuditEvent } from './utils/auditLogger';
-import { deductStockForOrder } from './utils/stockStorage';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -54,6 +54,7 @@ import { CommercialQuotesModule } from './components/CommercialQuotesModule';
 import { BestClientsModule } from './components/BestClientsModule';
 import { NotificationModal } from './components/NotificationModal';
 import { ProductFormModal } from './components/ProductFormModal';
+import { DraftsManagerModal } from './components/DraftsManagerModal';
 import { PWAInstallBanner, OfflineIndicator } from './components/PWAInstallBanner';
 import { RestrictedAccessView } from './components/RestrictedAccessView';
 
@@ -156,30 +157,6 @@ export default function App() {
     return loadCartForUser(currentUser);
   });
 
-  // Transient Toast Notification
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (toastMessage) {
-      const timer = setTimeout(() => {
-        setToastMessage(null);
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [toastMessage]);
-
-  // Keep references fresh for synchronous beforeunload/pagehide handlers
-  const cartItemsRef = useRef(cartItems);
-  useEffect(() => {
-    cartItemsRef.current = cartItems;
-  }, [cartItems]);
-
-  const currentUserRef = useRef(currentUser);
-  useEffect(() => {
-    currentUserRef.current = currentUser;
-  }, [currentUser]);
-
-  // Standard reactive save to localStorage
   useEffect(() => {
     try {
       const key = getCartStorageKey(currentUser);
@@ -188,34 +165,6 @@ export default function App() {
       console.error('Error saving cart', e);
     }
   }, [cartItems, currentUser]);
-
-  // Guaranteed synchronous auto-save on browser close, tab close, reload, or app switch
-  useEffect(() => {
-    const handleSyncCartToStorage = () => {
-      try {
-        const key = getCartStorageKey(currentUserRef.current);
-        localStorage.setItem(key, JSON.stringify(cartItemsRef.current));
-      } catch (err) {
-        console.error('Auto-save cart on browser close error:', err);
-      }
-    };
-
-    window.addEventListener('beforeunload', handleSyncCartToStorage);
-    window.addEventListener('pagehide', handleSyncCartToStorage);
-    
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        handleSyncCartToStorage();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleSyncCartToStorage);
-      window.removeEventListener('pagehide', handleSyncCartToStorage);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []);
 
   // URL Hash synchronization & Route Guard listener
   useEffect(() => {
@@ -247,6 +196,11 @@ export default function App() {
   // Modals & Flows
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [isDraftsModalOpen, setIsDraftsModalOpen] = useState(false);
+  const [draftsCount, setDraftsCount] = useState<number>(() => {
+    return getStoredDrafts(currentUser?.phone).length;
+  });
+  const [initialDraftCustomerInfo, setInitialDraftCustomerInfo] = useState<Partial<CustomerInfo> | undefined>(undefined);
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<Order | null>(null);
   const [confirmedPdfDataUrl, setConfirmedPdfDataUrl] = useState<string | undefined>(undefined);
@@ -254,6 +208,20 @@ export default function App() {
   const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
   const [pendingCustomerInfo, setPendingCustomerInfo] = useState<CustomerInfo | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+
+  // Sync drafts count on mount, user change, or storage / custom events
+  useEffect(() => {
+    const updateCount = () => {
+      setDraftsCount(getStoredDrafts(currentUser?.phone).length);
+    };
+    updateCount();
+    window.addEventListener('storage', updateCount);
+    window.addEventListener('gloryday_drafts_updated', updateCount);
+    return () => {
+      window.removeEventListener('storage', updateCount);
+      window.removeEventListener('gloryday_drafts_updated', updateCount);
+    };
+  }, [currentUser]);
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -375,7 +343,7 @@ export default function App() {
       api.getClients().then(setClients).catch(() => {});
     } else {
       setActiveTab('dashboard');
-      api.getOrders().then(setOrders).catch(() => {});
+      api.getOrders(user.phone).then(setOrders).catch(() => {});
     }
   };
 
@@ -399,6 +367,39 @@ export default function App() {
     api.getOrders().then(setOrders).catch(() => {});
   };
 
+  const handleDemoSwitchRole = async (targetRole: AppRole) => {
+    try {
+      if (currentUser) {
+        try {
+          localStorage.setItem(getCartStorageKey(currentUser), JSON.stringify(cartItems));
+        } catch {}
+      }
+
+      if (targetRole === 'client') {
+        const res = await api.login('+24177001122', 'client123');
+        setCurrentUser(res.user);
+        setCartItems(loadCartForUser(res.user));
+        loadInitialData();
+        setActiveTab('catalog');
+      } else {
+        const res = await api.adminLogin('gloryday-admin-2026', targetRole);
+        setCurrentUser(res.user);
+        setCartItems(loadCartForUser(res.user));
+        api.getClients().then(setClients).catch(console.warn);
+        api.getQuotes().then(setQuotes).catch(console.warn);
+        api.getAdminStats().then(setAdminStats).catch(console.warn);
+        if (targetRole === 'Super-Admin') {
+          setActiveTab('admin');
+        } else if (targetRole === 'Commercial') {
+          setActiveTab('commercial-quotes');
+        } else {
+          setActiveTab('catalog');
+        }
+      }
+    } catch (e) {
+      console.error('Error switching role', e);
+    }
+  };
 
   // Cart Operations
   const handleAddToCart = (product: Product, variant: ProductVariant, quantity: number) => {
@@ -454,40 +455,6 @@ export default function App() {
 
   const handleClearCart = () => {
     setCartItems([]);
-    try {
-      const key = getCartStorageKey(currentUser);
-      localStorage.setItem(key, JSON.stringify([]));
-      localStorage.removeItem('gloryday_guest_customer_info');
-    } catch {}
-    setToastMessage('Panier vidé');
-  };
-
-  // Clicking on the brand logo resets the cart to 0 and navigates back to home/catalog
-  const handleLogoClick = () => {
-    setCartItems([]);
-    try {
-      const key = getCartStorageKey(currentUser);
-      localStorage.setItem(key, JSON.stringify([]));
-      localStorage.removeItem('gloryday_guest_customer_info');
-    } catch (e) {
-      console.error('Error resetting cart on logo click:', e);
-    }
-
-    // Dismiss any modal or confirmation flow
-    setIsPreviewModalOpen(false);
-    if (confirmedOrder) {
-      setConfirmedOrder(null);
-      setConfirmedPdfDataUrl(undefined);
-    }
-
-    // Navigate back to primary view
-    if (currentUser?.role === 'Super-Admin') {
-      setActiveTab('admin');
-    } else {
-      setActiveTab('catalog');
-    }
-
-    setToastMessage('Panier réinitialisé à 0 article');
   };
 
   const handleAddMultipleToCart = (itemsToAdd: { product: Product; variant: ProductVariant; quantity: number }[]) => {
@@ -522,6 +489,25 @@ export default function App() {
       if (activeDeliveryOrder?.id === orderId) {
         setActiveDeliveryOrder(updated);
       }
+
+      const stageNameMap: Record<DeliveryStage, string> = {
+        preparation: 'En préparation à l’entrepôt',
+        picked_up: 'Prise en charge par le coursier',
+        in_transit: 'En cours d’acheminement',
+        delivered: 'Livrée à l’établissement'
+      };
+
+      const waNotif: AppNotification = {
+        id: `notif-wa-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: 'status_changed',
+        orderId,
+        orderReference: updated.reference,
+        message: `📱 Notification WhatsApp automatique expédiée à ${updated.customer.facilityName} (${updated.customer.phone}) : étape « ${stageNameMap[stage] || stage} ».`,
+        targetRole: 'Super-Admin',
+        read: false
+      };
+
       if (stage === 'delivered') {
         const notif: AppNotification = {
           id: `notif-deliv-${Date.now()}`,
@@ -533,7 +519,9 @@ export default function App() {
           targetRole: 'all',
           read: false
         };
-        setNotifications(prev => [notif, ...prev]);
+        setNotifications(prev => [notif, waNotif, ...prev]);
+      } else {
+        setNotifications(prev => [waNotif, ...prev]);
       }
     } catch (e) {
       console.error('Failed to update delivery stage', e);
@@ -563,27 +551,6 @@ export default function App() {
     }
   };
 
-  const handleAddCartItemDirectly = (item: CartItem) => {
-    const currentProd = products.find(p => p.id === item.productId || p.name === item.productName);
-    if (currentProd && currentProd.status === 'rupture') {
-      setToastMessage(`Article en rupture : ${item.productName}`);
-      return;
-    }
-    setCartItems(prev => {
-      const existingIndex = prev.findIndex(
-        it => it.productId === item.productId && it.variant === item.variant
-      );
-      if (existingIndex > -1) {
-        const copy = [...prev];
-        copy[existingIndex].quantity = Math.min(9999, copy[existingIndex].quantity + (item.quantity || 1));
-        return copy;
-      } else {
-        return [...prev, { ...item, quantity: item.quantity || 1 }];
-      }
-    });
-    setToastMessage(`Article réapprovisionné au panier : ${item.productName}`);
-  };
-
   // Order Submission
   const handleProceedToPreview = (customerInfo: CustomerInfo) => {
     setPendingCustomerInfo(customerInfo);
@@ -594,7 +561,7 @@ export default function App() {
     if (!pendingCustomerInfo || cartItems.length === 0) return;
     try {
       setIsSubmittingOrder(true);
-      const newOrder = await api.createOrder(pendingCustomerInfo, cartItems, currentUser);
+      const newOrder = await api.createOrder(pendingCustomerInfo, cartItems);
       const { dataUrl } = await generateOrderPdf(newOrder);
       setConfirmedPdfDataUrl(dataUrl);
       api.uploadOrderPdf(newOrder.reference, dataUrl).then(url => {
@@ -603,27 +570,6 @@ export default function App() {
       setCartItems([]);
       setIsPreviewModalOpen(false);
       setConfirmedOrder(newOrder);
-
-      // Décrémentation automatique du stock réel et des lots (FEFO)
-      deductStockForOrder(
-        newOrder.items,
-        products,
-        (updatedP) => {
-          setProducts(prev => prev.map(p => p.id === updatedP.id ? updatedP : p));
-        },
-        currentUser
-      );
-
-      // Enregistrement d'audit immuable
-      logAuditEvent(
-        currentUser,
-        'statut_commande',
-        'Commande Médicale',
-        newOrder.reference,
-        `Création commande ${newOrder.reference} (${newOrder.estimatedTotal.toLocaleString('fr-FR')} FCFA) pour ${pendingCustomerInfo.facilityName}`,
-        undefined,
-        'À confirmer'
-      );
 
       // Automated notifications dispatch (Client confirmation & Staff alert)
       const clientConfirmationNotif: AppNotification = {
@@ -656,6 +602,77 @@ export default function App() {
     }
   };
 
+  // Drafts Management Handlers
+  const handleLoadDraftToCart = (draft: OrderDraft) => {
+    setCartItems(draft.items);
+    setInitialDraftCustomerInfo(draft.customerInfo);
+    setIsDraftsModalOpen(false);
+    setActiveTab('cart');
+
+    const restoreNotif: AppNotification = {
+      id: `notif-${Date.now()}-draft-loaded`,
+      timestamp: new Date().toISOString(),
+      type: 'order_created',
+      orderId: draft.id,
+      orderReference: draft.name,
+      message: `Brouillon « ${draft.name} » chargé dans votre panier avec succès (${draft.itemsCount} article(s)).`,
+      targetRole: 'client',
+      read: false
+    };
+    setNotifications(prev => [restoreNotif, ...prev]);
+  };
+
+  const handleDirectSubmitDraft = async (draft: OrderDraft) => {
+    if (!draft.customerInfo?.facilityName || !draft.customerInfo?.phone) {
+      handleLoadDraftToCart(draft);
+      return;
+    }
+    const completeCustomerInfo: CustomerInfo = {
+      facilityName: draft.customerInfo.facilityName || 'Établissement de Santé',
+      contactName: draft.customerInfo.contactName || 'Responsable Pharmacie',
+      phone: draft.customerInfo.phone,
+      deliveryAddress: draft.customerInfo.deliveryAddress || 'Libreville, Gabon',
+      neighborhoodId: draft.customerInfo.neighborhoodId,
+      neighborhoodName: draft.customerInfo.neighborhoodName,
+      deliveryMode: draft.customerInfo.deliveryMode || 'livraison',
+      paymentMethod: draft.customerInfo.paymentMethod || 'especes',
+      mobilePayment: draft.customerInfo.mobilePayment,
+      notes: draft.notes || ''
+    };
+
+    setIsSubmittingOrder(true);
+    try {
+      const newOrder = await api.createOrder(completeCustomerInfo, draft.items);
+      const { dataUrl } = await generateOrderPdf(newOrder);
+      setConfirmedPdfDataUrl(dataUrl);
+      api.uploadOrderPdf(newOrder.reference, dataUrl).then(url => {
+        newOrder.pdfUrl = url;
+      }).catch(() => {});
+      
+      deleteDraft(draft.id, currentUser?.phone);
+      setDraftsCount(getStoredDrafts(currentUser?.phone).length);
+      setIsDraftsModalOpen(false);
+      setConfirmedOrder(newOrder);
+
+      const clientConfirmationNotif: AppNotification = {
+        id: `notif-${Date.now()}-client`,
+        timestamp: new Date().toISOString(),
+        type: 'order_created',
+        orderId: newOrder.id,
+        orderReference: newOrder.reference,
+        message: `Votre commande ${newOrder.reference} (brouillon synchronisé) d'un montant de ${newOrder.estimatedTotal.toLocaleString('fr-FR')} FCFA a été validée avec succès.`,
+        targetRole: 'client',
+        read: false
+      };
+      setNotifications(prev => [clientConfirmationNotif, ...prev]);
+      api.getOrders(currentUser ? currentUser.phone : completeCustomerInfo.phone).then(setOrders).catch(() => {});
+    } catch (err: any) {
+      alert(err.message || 'Erreur lors de la synchronisation de la commande.');
+    } finally {
+      setIsSubmittingOrder(false);
+    }
+  };
+
   const handleViewOrderPdf = async (order: Order) => {
     try {
       const { dataUrl } = await generateOrderPdf(order);
@@ -672,23 +689,11 @@ export default function App() {
 
   // Admin Actions
   const handleAdminUpdateStatus = async (orderId: string, status: OrderStatus, reason?: string) => {
-    const prevOrder = orders.find(o => o.id === orderId);
     await api.updateOrderStatus(orderId, status, reason);
     const updated = await api.getOrders();
     setOrders(updated);
     const stats = await api.getAdminStats();
     setAdminStats(stats);
-
-    // Enregistrement d'audit immuable
-    logAuditEvent(
-      currentUser,
-      'statut_commande',
-      'Statut Commande',
-      prevOrder?.reference || orderId,
-      `Passage du statut à « ${status} »${reason ? ` (Motif: ${reason})` : ''}`,
-      prevOrder?.status,
-      status
-    );
 
     // Automated client notification on order status change
     const targetOrder = updated.find(o => o.id === orderId);
@@ -707,57 +712,9 @@ export default function App() {
   };
 
   const handleAdminUpdatePayment = async (orderId: string, isPaid: boolean) => {
-    const prevOrder = orders.find(o => o.id === orderId);
     await api.updateOrderPayment(orderId, isPaid);
     const updated = await api.getOrders();
     setOrders(updated);
-
-    logAuditEvent(
-      currentUser,
-      'validation_paiement',
-      'Règlement Commande',
-      prevOrder?.reference || orderId,
-      `Statut de règlement marqué comme ${isPaid ? 'PAYÉE' : 'NON PAYÉE'}`,
-      prevOrder?.isPaid ? 'Payée' : 'Non payée',
-      isPaid ? 'Payée' : 'Non payée'
-    );
-  };
-
-  const handleAdminUpdateOrder = (updatedOrder: Order) => {
-    setOrders(prev => {
-      const next = prev.map(o => o.id === updatedOrder.id ? updatedOrder : o);
-      try {
-        localStorage.setItem('gloryday_orders_v2', JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-  };
-
-  const handleAdminUpdateClient = (updatedClient: User) => {
-    setClients(prev => {
-      const next = prev.map(c => c.id === updatedClient.id ? updatedClient : c);
-      try {
-        localStorage.setItem('gloryday_clients_v2', JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-  };
-
-  const handleAdminDeleteClientData = (clientId: string) => {
-    setClients(prev => {
-      const next = prev.filter(c => c.id !== clientId);
-      try {
-        localStorage.setItem('gloryday_clients_v2', JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-    logAuditEvent(
-      currentUser,
-      'export_donnees',
-      'Données Client B2B',
-      clientId,
-      `Suppression / Droit à l'oubli appliqué pour le compte client ${clientId}`
-    );
   };
 
   const handleAdminCreatePack = async (packData: Omit<Pack, 'id'>) => {
@@ -785,16 +742,8 @@ export default function App() {
   };
 
   const handleAdminDeleteProduct = async (productId: string) => {
-    const prod = products.find(p => p.id === productId);
     await api.deleteProduct(productId);
     setProducts(prev => prev.filter(p => p.id !== productId));
-    logAuditEvent(
-      currentUser,
-      'suppression_produit',
-      'Catalogue Médical',
-      productId,
-      `Suppression du produit ${prod?.name || productId}`
-    );
   };
 
   const handleAdminProductSaved = (savedProduct: Product) => {
@@ -808,13 +757,6 @@ export default function App() {
         return [savedProduct, ...prev];
       }
     });
-    logAuditEvent(
-      currentUser,
-      'creation_produit',
-      'Catalogue Médical',
-      savedProduct.id,
-      `Enregistrement du produit ${savedProduct.name} (Stock: ${savedProduct.stockQuantity || 'N/A'})`
-    );
   };
 
   // Cart counts
@@ -889,8 +831,10 @@ export default function App() {
         cartCount={cartCount}
         onLogout={handleLogout}
         onOpenAuth={() => setIsAuthModalOpen(true)}
+        onSwitchRole={handleDemoSwitchRole}
         onOpenCreateProduct={() => setIsGlobalProductModalOpen(true)}
-        onLogoClick={handleLogoClick}
+        onOpenDraftsModal={() => setIsDraftsModalOpen(true)}
+        draftsCount={draftsCount}
       />
 
       {/* PWA In-App Install Prompt Banner */}
@@ -908,22 +852,9 @@ export default function App() {
         notifications={notifications}
         onOpenNotifications={() => setIsNotificationModalOpen(true)}
         onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
-        onLogoClick={handleLogoClick}
+        onOpenDraftsModal={() => setIsDraftsModalOpen(true)}
+        draftsCount={draftsCount}
       />
-
-      {/* Toast Notification Banner (Feedback for Cart Reset & Actions) */}
-      {toastMessage && (
-        <aside
-          role="status"
-          aria-live="polite"
-          className="fixed top-16 sm:top-20 right-3 sm:right-6 z-50 animate-in fade-in slide-in-from-top-3 duration-250 pointer-events-none"
-        >
-          <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-slate-900/95 text-white text-xs font-semibold shadow-2xl border border-slate-700/80 backdrop-blur-md">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 animate-ping"></span>
-            <span>{toastMessage}</span>
-          </div>
-        </aside>
-      )}
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 md:pb-12">
@@ -983,6 +914,9 @@ export default function App() {
                 onClearCart={handleClearCart}
                 onProceedToPreview={handleProceedToPreview}
                 onContinueShopping={() => setActiveTab('catalog')}
+                onOpenDraftsModal={() => setIsDraftsModalOpen(true)}
+                draftsCount={draftsCount}
+                initialCustomerInfo={initialDraftCustomerInfo}
               />
             )}
 
@@ -999,7 +933,6 @@ export default function App() {
                   setActiveDeliveryOrder(order);
                   setIsDeliveryModalOpen(true);
                 }}
-                onAddToCartItem={handleAddCartItemDirectly}
               />
             )}
 
@@ -1074,13 +1007,11 @@ export default function App() {
                           ? 'export-deploy'
                           : 'kpi'
                   }
+                  notifications={notifications}
                   onOpenDeliveryModal={(order: Order) => {
                     setActiveDeliveryOrder(order);
                     setIsDeliveryModalOpen(true);
                   }}
-                  onUpdateOrder={handleAdminUpdateOrder}
-                  onUpdateClient={handleAdminUpdateClient}
-                  onDeleteClientData={handleAdminDeleteClientData}
                 />
               ) : (
                 <RestrictedAccessView
@@ -1354,6 +1285,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         cartCount={cartCount}
         onOpenSidebar={() => setIsSidebarOpen(true)}
+        draftsCount={draftsCount}
       />
 
       {/* MODALS */}
@@ -1372,6 +1304,25 @@ export default function App() {
           isSubmitting={isSubmittingOrder}
         />
       )}
+
+      {/* Offline Order Drafts Manager Modal */}
+      <DraftsManagerModal
+        isOpen={isDraftsModalOpen}
+        onClose={() => {
+          setIsDraftsModalOpen(false);
+          setDraftsCount(getStoredDrafts(currentUser?.phone).length);
+        }}
+        currentUser={currentUser}
+        currentCartItems={cartItems}
+        currentCustomerInfo={initialDraftCustomerInfo || (currentUser ? {
+          facilityName: currentUser.facilityName,
+          contactName: currentUser.contactName,
+          phone: currentUser.phone,
+          deliveryAddress: currentUser.deliveryAddress
+        } : undefined)}
+        onLoadDraftToCart={handleLoadDraftToCart}
+        onDirectSubmitDraft={handleDirectSubmitDraft}
+      />
 
       <NotificationModal
         isOpen={isNotificationModalOpen}

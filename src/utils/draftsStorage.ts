@@ -19,6 +19,12 @@ export const getAutoDraftStorageKey = (userPhone?: string): string => {
   return 'gloryday_autodraft_guest';
 };
 
+export const notifyDraftsChange = () => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('gloryday_drafts_updated'));
+  }
+};
+
 /**
  * Retrieve all saved drafts for the active session
  */
@@ -88,6 +94,7 @@ export const saveDraft = (
       };
       existingDrafts[index] = updatedDraft;
       localStorage.setItem(getDraftsStorageKey(userPhone), JSON.stringify(existingDrafts));
+      notifyDraftsChange();
       return updatedDraft;
     }
   }
@@ -110,6 +117,7 @@ export const saveDraft = (
 
   const updatedList = [newDraft, ...existingDrafts.filter(d => d.id !== newDraft.id)];
   localStorage.setItem(getDraftsStorageKey(userPhone), JSON.stringify(updatedList));
+  notifyDraftsChange();
   return newDraft;
 };
 
@@ -121,6 +129,7 @@ export const deleteDraft = (draftId: string, userPhone?: string): void => {
     const list = getStoredDrafts(userPhone);
     const filtered = list.filter(d => d.id !== draftId);
     localStorage.setItem(getDraftsStorageKey(userPhone), JSON.stringify(filtered));
+    notifyDraftsChange();
   } catch (err) {
     console.error('Error deleting draft', err);
   }
@@ -146,6 +155,7 @@ export const duplicateDraft = (draftId: string, userPhone?: string): OrderDraft 
 
   const updated = [duplicated, ...list];
   localStorage.setItem(getDraftsStorageKey(userPhone), JSON.stringify(updated));
+  notifyDraftsChange();
   return duplicated;
 };
 
@@ -164,6 +174,7 @@ export const renameDraft = (draftId: string, newName: string, userPhone?: string
   };
 
   localStorage.setItem(getDraftsStorageKey(userPhone), JSON.stringify(list));
+  notifyDraftsChange();
   return list[index];
 };
 

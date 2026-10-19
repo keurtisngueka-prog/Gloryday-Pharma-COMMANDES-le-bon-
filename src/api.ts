@@ -10,129 +10,27 @@ import {
   CommercialQuote, 
   DirectMessage,
   AppRole,
-  JobTitle,
-  DirectorApprovalStatus,
-  HealthcareStructure,
-  FacilityType
+  DeliveryStage,
+  WhatsAppNotificationLog,
+  CourierInfo
 } from './types';
 import { INITIAL_PRODUCTS, INITIAL_PACKS } from './data/initialProducts';
 import { getEstimatedDeliveryText, detectNeighborhoodFromAddress } from './data/librevilleZones';
 import { calculateCartVolumeSummary, calculateItemVolumePrice } from './utils/volumeDiscount';
-import { getStockBatches } from './utils/stockStorage';
-import { 
-  registerOrGetStructure, 
-  canAddAccountToStructure, 
-  saveRegisteredUsers,
-  getRegisteredUsers 
-} from './utils/structureStorage';
+import { generateWhatsAppMessageForStage } from './utils/whatsappNotifications';
 
 const TOKEN_KEY = 'gloryday_auth_token';
 const GUEST_ORDERS_KEY = 'gloryday_guest_orders';
 const GUEST_INFO_KEY = 'gloryday_customer_info';
 const REGISTERED_USERS_KEY = 'gloryday_registered_users';
-const STAFF_ACCOUNTS_KEY = 'gloryday_staff_accounts_v1';
 
 export interface StoredAccount {
   user: User;
   passwordHash: string;
 }
 
-export interface StoredStaffAccount {
-  id: string;
-  emailOrIdentifier: string;
-  phone: string;
-  fullName: string;
-  role: AppRole;
-  passwordHash: string;
-  isActive: boolean;
-  createdAt: string;
-}
-
-const PASSWORD_SALT = 'gloryday_pharma_salt_2026';
-
-export async function hashPassword(plainText: string): Promise<string> {
-  if (!plainText) return '';
-  const textToHash = `${plainText}:${PASSWORD_SALT}`;
-  if (typeof crypto !== 'undefined' && crypto.subtle) {
-    try {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(textToHash);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return 'sha256_' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    } catch {
-      // fallback if subtle crypto is restricted
-    }
-  }
-  let hash = 0;
-  for (let i = 0; i < textToHash.length; i++) {
-    const char = textToHash.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0;
-  }
-  return `sha256_compat_${Math.abs(hash).toString(16)}`;
-}
-
-export async function verifyPassword(inputPassword: string, storedHash: string): Promise<boolean> {
-  if (!inputPassword || !storedHash) return false;
-  const cleanInput = (inputPassword || '').trim();
-  const cleanStored = (storedHash || '').trim();
-
-  // 1. Direct plaintext match (case-insensitive for convenience)
-  if (cleanInput === cleanStored || cleanInput.toLowerCase() === cleanStored.toLowerCase()) {
-    return true;
-  }
-
-  // 2. Computed SHA-256 hash match
-  const computed = await hashPassword(cleanInput);
-  if (computed === cleanStored) return true;
-
-  // 3. Fallback for legacy mock hashes or corrupted truncated placeholders
-  const legacyBrokenHashes = [
-    'sha256_5a1099fd1e428bc4',
-    'sha256_b73e51f4c7d03a19e',
-    'sha256_882c918ef00a294b'
-  ];
-  if (legacyBrokenHashes.includes(cleanStored) || cleanStored.length < 32) {
-    const standardPasswords = [
-      'client123',
-      'pharma123',
-      'Gloryday@2026',
-      'gloryday@2026',
-      'admin123',
-      'password',
-      '123456'
-    ];
-    if (
-      standardPasswords.includes(cleanInput) ||
-      standardPasswords.map(p => p.toLowerCase()).includes(cleanInput.toLowerCase()) ||
-      cleanInput.length >= 4
-    ) {
-      return true;
-    }
-  }
-
-  // 4. Default demo credentials safety net
-  const demoPasswords = ['client123', 'pharma123', 'Gloryday@2026', 'gloryday@2026', 'admin123'];
-  if (demoPasswords.includes(cleanInput) || demoPasswords.map(p => p.toLowerCase()).includes(cleanInput.toLowerCase())) {
-    return true;
-  }
-
-  return false;
-}
-
 export function normalizePhone(p: string): string {
-  if (!p) return '';
-  let cleaned = p.replace(/[\s\-\.\(\)]/g, '').toLowerCase();
-  // Strip Gabon international prefixes
-  if (cleaned.startsWith('+241')) cleaned = cleaned.slice(4);
-  else if (cleaned.startsWith('00241')) cleaned = cleaned.slice(5);
-  else if (cleaned.startsWith('241') && cleaned.length >= 10) cleaned = cleaned.slice(3);
-  // Remove leading 0 for 9-digit or 8-digit Gabonese phone numbers (e.g. 074001122 -> 74001122)
-  if (cleaned.startsWith('0') && (cleaned.length === 9 || cleaned.length === 8)) {
-    cleaned = cleaned.slice(1);
-  }
-  return cleaned;
+  return (p || '').replace(/[\s\-\.\(\)]/g, '').toLowerCase();
 }
 
 const DEFAULT_ACCOUNTS: StoredAccount[] = [
@@ -140,14 +38,11 @@ const DEFAULT_ACCOUNTS: StoredAccount[] = [
     user: {
       id: 'usr-ste-marie',
       phone: '+24177001122',
-      facilityName: 'Clinique Chambrier',
-      contactName: 'Dr. Marcel Chambrier',
+      facilityName: 'Clinique Sainte-Marie',
+      contactName: 'Dr. Jeanne Ndong',
       facilityType: 'Clinique',
-      structureId: 'struct-chambrier',
-      jobTitle: 'directeur',
-      directorApprovalStatus: 'approved',
       role: 'client',
-      deliveryAddress: 'Montagne Sainte, Libreville, Gabon',
+      deliveryAddress: 'Quartier Louis, Libreville, Gabon',
       coordinates: { lat: 0.4022, lng: 9.4442 },
       createdAt: '2026-01-10T08:00:00Z'
     },
@@ -157,14 +52,11 @@ const DEFAULT_ACCOUNTS: StoredAccount[] = [
     user: {
       id: 'usr-pharma-mer',
       phone: '+24166334455',
-      facilityName: 'Grande Pharmacie des Forestiers',
+      facilityName: 'Pharmacie du Bord de Mer',
       contactName: 'Dr. Obame',
       facilityType: 'Pharmacie',
-      structureId: 'struct-pharm-forestiers',
-      jobTitle: 'charge_commandes',
-      directorApprovalStatus: 'none',
       role: 'client',
-      deliveryAddress: 'Glass, Centre-Ville, Libreville, Gabon',
+      deliveryAddress: 'Boulevard Triomphal, Libreville, Gabon',
       coordinates: { lat: 0.3920, lng: 9.4530 },
       createdAt: '2026-01-15T09:30:00Z'
     },
@@ -175,100 +67,16 @@ const DEFAULT_ACCOUNTS: StoredAccount[] = [
       id: 'usr-rapha',
       phone: '+24174001122',
       facilityName: 'Polyclinique El Rapha',
-      contactName: 'Dr. Jeanne Mengue (Directrice Médicale)',
+      contactName: 'Dr. Mengue (Major de Bloc)',
       facilityType: 'Polyclinique',
-      structureId: 'struct-el-rapha',
-      jobTitle: 'directeur',
-      directorApprovalStatus: 'approved',
       role: 'client',
       deliveryAddress: 'Batterie 4, Libreville, Gabon',
       coordinates: { lat: 0.418, lng: 9.432 },
       createdAt: '2026-01-20T10:15:00Z'
     },
-    passwordHash: 'client123'
-  },
-  {
-    user: {
-      id: 'usr-rapha-soignant',
-      phone: '+24177556677',
-      facilityName: 'Polyclinique El Rapha',
-      contactName: 'M. Paul Bongo (Chargé des Approvisionnements)',
-      facilityType: 'Polyclinique',
-      structureId: 'struct-el-rapha',
-      jobTitle: 'charge_commandes',
-      directorApprovalStatus: 'none',
-      role: 'client',
-      deliveryAddress: 'Batterie 4, Libreville, Gabon',
-      coordinates: { lat: 0.418, lng: 9.432 },
-      createdAt: '2026-01-22T14:30:00Z'
-    },
-    passwordHash: 'client123'
+    passwordHash: 'rapha123'
   }
 ];
-
-export const INITIAL_STAFF_ACCOUNTS: StoredStaffAccount[] = [
-  {
-    id: 'staff-direction-01',
-    emailOrIdentifier: 'direction@glorydaypharma.ga',
-    phone: '+24177003004',
-    fullName: 'Direction Générale',
-    role: 'Super-Admin',
-    passwordHash: 'Gloryday@2026',
-    isActive: true,
-    createdAt: '2026-01-01T08:00:00Z'
-  },
-  {
-    id: 'staff-comm-01',
-    emailOrIdentifier: 'commercial@glorydaypharma.ga',
-    phone: '+24174003005',
-    fullName: 'M. Landry Kombila',
-    role: 'Commercial',
-    passwordHash: 'Gloryday@2026',
-    isActive: true,
-    createdAt: '2026-01-01T08:00:00Z'
-  },
-  {
-    id: 'staff-cat-01',
-    emailOrIdentifier: 'stock@glorydaypharma.ga',
-    phone: '+24174003006',
-    fullName: 'Mme Carine Nze',
-    role: 'Gestionnaire Catalogue',
-    passwordHash: 'Gloryday@2026',
-    isActive: true,
-    createdAt: '2026-01-01T08:00:00Z'
-  },
-  {
-    id: 'staff-log-01',
-    emailOrIdentifier: 'logistique@glorydaypharma.ga',
-    phone: '+24174003007',
-    fullName: 'M. Patrick Ondo',
-    role: 'Logistique',
-    passwordHash: 'Gloryday@2026',
-    isActive: true,
-    createdAt: '2026-01-01T08:00:00Z'
-  }
-];
-
-export function getStaffAccounts(): StoredStaffAccount[] {
-  try {
-    const raw = localStorage.getItem(STAFF_ACCOUNTS_KEY);
-    if (!raw) {
-      localStorage.setItem(STAFF_ACCOUNTS_KEY, JSON.stringify(INITIAL_STAFF_ACCOUNTS));
-      return INITIAL_STAFF_ACCOUNTS;
-    }
-    return JSON.parse(raw);
-  } catch {
-    return INITIAL_STAFF_ACCOUNTS;
-  }
-}
-
-export function saveStaffAccounts(accounts: StoredStaffAccount[]): void {
-  try {
-    localStorage.setItem(STAFF_ACCOUNTS_KEY, JSON.stringify(accounts));
-  } catch (err) {
-    console.error('Erreur save staff accounts:', err);
-  }
-}
 
 export function getRegisteredAccounts(): StoredAccount[] {
   try {
@@ -279,51 +87,19 @@ export function getRegisteredAccounts(): StoredAccount[] {
     }
     const accounts: StoredAccount[] = JSON.parse(raw);
     let modified = false;
-
-    // Auto-heal broken legacy hashes or empty hashes
-    for (const acc of accounts) {
-      if (
-        acc.passwordHash === 'sha256_5a1099fd1e428bc4' ||
-        acc.passwordHash === 'sha256_b73e51f4c7d03a19e' ||
-        acc.passwordHash === 'sha256_882c918ef00a294b' ||
-        !acc.passwordHash
-      ) {
-        acc.passwordHash = acc.user.facilityType === 'Pharmacie' ? 'pharma123' : 'client123';
-        modified = true;
-      }
-    }
-
     for (const def of DEFAULT_ACCOUNTS) {
-      const existing = accounts.find(a => normalizePhone(a.user.phone) === normalizePhone(def.user.phone));
-      if (!existing) {
+      if (!accounts.some(a => normalizePhone(a.user.phone) === normalizePhone(def.user.phone))) {
         accounts.push(def);
-        modified = true;
-      } else if (
-        existing.passwordHash === 'sha256_5a1099fd1e428bc4' ||
-        existing.passwordHash === 'sha256_b73e51f4c7d03a19e' ||
-        existing.passwordHash === 'sha256_882c918ef00a294b'
-      ) {
-        existing.passwordHash = def.passwordHash;
         modified = true;
       }
     }
     if (modified) {
       localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(accounts));
     }
-    saveRegisteredUsers(accounts.map(a => a.user));
     return accounts;
   } catch {
-    saveRegisteredUsers(DEFAULT_ACCOUNTS.map(a => a.user));
     return DEFAULT_ACCOUNTS;
   }
-}
-
-export function resetDemoAccounts(): void {
-  try {
-    localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(DEFAULT_ACCOUNTS));
-    localStorage.setItem(STAFF_ACCOUNTS_KEY, JSON.stringify(INITIAL_STAFF_ACCOUNTS));
-    saveRegisteredUsers(DEFAULT_ACCOUNTS.map(a => a.user));
-  } catch {}
 }
 
 export function getStoredToken(): string | null {
@@ -367,15 +143,11 @@ export function getLocalGuestOrders(): Order[] {
         id: 'ord-demo-01',
         reference: 'GP-2026-0089',
         createdAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-        userId: 'usr-rapha-soignant',
-        structureId: 'struct-el-rapha',
-        authorName: 'M. Paul Bongo (Chargé Approvisionnement)',
-        authorJobTitle: 'charge_commandes',
         customer: {
           facilityName: 'Polyclinique El Rapha',
           facilityType: 'Polyclinique',
-          contactName: 'M. Paul Bongo',
-          phone: '+24177556677',
+          contactName: 'Dr. Mengue (Major de Bloc)',
+          phone: '+24177001122',
           deliveryAddress: 'Batterie 4, Libreville, Gabon',
           deliveryMode: 'livraison',
           paymentMethod: 'airtel_money',
@@ -428,16 +200,12 @@ export function getLocalGuestOrders(): Order[] {
         id: 'ord-demo-02',
         reference: 'GP-2026-0042',
         createdAt: new Date(Date.now() - 1000 * 60 * 60 * 26).toISOString(),
-        userId: 'usr-pharma-mer',
-        structureId: 'struct-pharm-forestiers',
-        authorName: 'Dr. Obame',
-        authorJobTitle: 'charge_commandes',
         customer: {
-          facilityName: 'Grande Pharmacie des Forestiers',
+          facilityName: 'Pharmacie du Bord de Mer',
           facilityType: 'Pharmacie',
           contactName: 'Dr. Obame',
           phone: '+24166334455',
-          deliveryAddress: 'Glass, Centre-Ville, Libreville',
+          deliveryAddress: 'Boulevard de la Mer, Libreville',
           deliveryMode: 'livraison',
           paymentMethod: 'especes'
         },
@@ -463,57 +231,6 @@ export function getLocalGuestOrders(): Order[] {
           vehicle: 'Pick-up Isuzu GP-Log',
           matricule: 'LOG-LBV-02',
           currentZone: 'Livré et émargé au comptoir pharmacie',
-          estimatedTime: 'Livré'
-        }
-      },
-      {
-        id: 'ord-demo-03',
-        reference: 'GP-2026-0095',
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(),
-        userId: 'usr-rapha',
-        structureId: 'struct-el-rapha',
-        authorName: 'Dr. Jeanne Mengue (Directrice Médicale)',
-        authorJobTitle: 'directeur',
-        customer: {
-          facilityName: 'Polyclinique El Rapha',
-          facilityType: 'Polyclinique',
-          contactName: 'Dr. Jeanne Mengue',
-          phone: '+24174001122',
-          deliveryAddress: 'Batterie 4, Libreville, Gabon',
-          deliveryMode: 'livraison',
-          paymentMethod: 'airtel_money'
-        },
-        items: [
-          {
-            productId: 'c-masq-01',
-            productName: 'Masques chirurgicaux 3 plis Type IIR',
-            variant: 'Boîte de 50 masques',
-            price: 3500,
-            quantity: 10,
-            total: 35000,
-            isQuote: false
-          },
-          {
-            productId: 'c-comp-01',
-            productName: 'Compresses de gaze stériles 10x10 cm',
-            variant: 'Paquet de 100',
-            price: 5500,
-            quantity: 4,
-            total: 22000,
-            isQuote: false
-          }
-        ],
-        estimatedTotal: 57000,
-        hasQuoteItems: false,
-        status: 'Livrée',
-        isPaid: true,
-        deliveryStage: 'delivered',
-        courier: {
-          name: 'Alexandre Moundounga',
-          phone: '+24177003004',
-          vehicle: 'Moto Express Honda GP-04',
-          matricule: 'COUR-LBV-04',
-          currentZone: 'Livré au bureau médical Direction',
           estimatedTime: 'Livré'
         }
       }
@@ -566,46 +283,12 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   return response.json();
 }
 
-function enrichProductStock(p: Product): Product {
-  const batches = getStockBatches(p.id);
-  const totalBatchesQty = batches.reduce((acc, b) => acc + (b.quantity || 0), 0);
-  
-  const qty = typeof p.quantityAvailable === 'number'
-    ? p.quantityAvailable
-    : typeof p.stockQuantity === 'number'
-      ? p.stockQuantity
-      : totalBatchesQty > 0 ? totalBatchesQty : 75;
-
-  const threshold = typeof p.alertThreshold === 'number'
-    ? p.alertThreshold
-    : typeof p.lowStockAlertThreshold === 'number'
-      ? p.lowStockAlertThreshold
-      : 15;
-
-  const basePrice = p.variants && p.variants[0] ? p.variants[0].price : 5000;
-  const purchase = typeof p.purchasePrice === 'number' && p.purchasePrice > 0
-    ? p.purchasePrice
-    : Math.round(basePrice * 0.65);
-
-  return {
-    ...p,
-    quantityAvailable: qty,
-    stockQuantity: qty,
-    alertThreshold: threshold,
-    lowStockAlertThreshold: threshold,
-    purchasePrice: purchase,
-    batches: batches,
-    batchHistory: batches
-  };
-}
-
 export const api = {
   async getProducts(): Promise<Product[]> {
     try {
-      const prods = await request<Product[]>('/api/products');
-      return prods.map(enrichProductStock);
+      return await request<Product[]>('/api/products');
     } catch (err) {
-      return INITIAL_PRODUCTS.map(enrichProductStock);
+      return INITIAL_PRODUCTS;
     }
   },
 
@@ -711,13 +394,11 @@ export const api = {
     phone: string;
     facilityName: string;
     contactName?: string;
-    facilityType?: FacilityType;
+    facilityType?: string;
     facilityTypeOther?: string;
     password: string;
     deliveryAddress?: string;
     coordinates?: { lat: number; lng: number };
-    structureId?: string;
-    jobTitle?: JobTitle;
   }): Promise<{ token: string; user: User }> {
     const cleanPhone = normalizePhone(registrationData.phone);
     const cleanPass = (registrationData.password || '').trim();
@@ -735,50 +416,27 @@ export const api = {
       throw new Error('Un compte existe déjà avec ce numéro de téléphone. Veuillez vous connecter.');
     }
 
-    // Resolve or register structure
-    const facType = registrationData.facilityType || 'Clinique';
-    const struct = registerOrGetStructure(
-      registrationData.facilityName,
-      facType,
-      registrationData.deliveryAddress
-    );
-
-    // Verify account quota for this structure
-    const allUsers = accounts.map(a => a.user);
-    const quotaCheck = canAddAccountToStructure(struct.id, allUsers);
-    if (!quotaCheck.allowed) {
-      throw new Error(quotaCheck.reason || 'Quota de comptes atteint pour cet établissement.');
-    }
-
-    const jobTitle: JobTitle = registrationData.jobTitle || 'charge_commandes';
-    const directorApprovalStatus: DirectorApprovalStatus = jobTitle === 'directeur' ? 'pending' : 'none';
-
     const newUser: User = {
       id: `usr-${Date.now()}`,
       phone: registrationData.phone.trim(),
-      facilityName: struct.name,
+      facilityName: registrationData.facilityName.trim(),
       contactName: registrationData.contactName?.trim() || 'Responsable Approvisionnement',
-      facilityType: struct.type,
+      facilityType: (registrationData.facilityType as any) || 'Clinique',
       facilityTypeOther: registrationData.facilityTypeOther,
-      structureId: struct.id,
-      jobTitle,
-      directorApprovalStatus,
       role: 'client',
-      deliveryAddress: registrationData.deliveryAddress || struct.deliveryAddress || 'Libreville, Gabon',
+      deliveryAddress: registrationData.deliveryAddress || 'Libreville, Gabon',
       coordinates: registrationData.coordinates || { lat: 0.3924, lng: 9.4536 },
       createdAt: new Date().toISOString()
     };
 
-    const hashedPassword = await hashPassword(cleanPass);
     accounts.push({
       user: newUser,
-      passwordHash: hashedPassword
+      passwordHash: cleanPass
     });
 
     try {
       localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(accounts));
       localStorage.setItem('gloryday_current_user', JSON.stringify(newUser));
-      saveRegisteredUsers(accounts.map(a => a.user));
     } catch {}
 
     const token = `usr-token-${newUser.id}-${Date.now()}`;
@@ -794,25 +452,25 @@ export const api = {
       throw new Error('Veuillez renseigner votre numéro de téléphone et votre mot de passe.');
     }
 
+    // Check if it's admin credentials entered in the client login tab
+    if (
+      (cleanPhone === 'admin' || cleanPhone === '+24177003004' || cleanPhone === '077003004' || cleanPhone === '24177003004') &&
+      (cleanPass === 'admin' || cleanPass === 'gloryday2026')
+    ) {
+      return this.adminLogin('admin', cleanPass, 'Super-Admin');
+    }
+
     // Check against registered accounts in local storage
     const accounts = getRegisteredAccounts();
     const found = accounts.find(a => normalizePhone(a.user.phone) === cleanPhone);
 
     if (!found) {
-      throw new Error('Aucun compte client trouvé avec ce numéro. Veuillez vérifier votre saisie ou créer un compte.');
+      throw new Error('Aucun compte trouvé avec ce numéro. Si vous êtes nouveau client, veuillez créer un compte.');
     }
 
-    const isMatch = await verifyPassword(cleanPass, found.passwordHash);
-    if (!isMatch) {
-      throw new Error('Mot de passe incorrect. Veuillez vérifier votre saisie ou réinitialiser votre mot de passe.');
+    if (found.passwordHash !== cleanPass) {
+      throw new Error('Mot de passe incorrect. Veuillez vérifier votre saisie.');
     }
-
-    // Upgrade password to valid SHA-256 hash on successful login
-    try {
-      found.passwordHash = await hashPassword(cleanPass);
-      localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(accounts));
-      saveRegisteredUsers(accounts.map(a => a.user));
-    } catch {}
 
     const token = `usr-token-${found.user.id}-${Date.now()}`;
     setStoredToken(token);
@@ -822,130 +480,140 @@ export const api = {
     return { token, user: found.user };
   },
 
-  async adminLogin(identifier: string, password?: string): Promise<{ token: string; user: User }> {
+  async loginWithGoogle(googleProfile: {
+    email: string;
+    name: string;
+    avatarUrl?: string;
+  }): Promise<{ isNewUser: boolean; token?: string; user?: User; profileData: { email: string; name: string; avatarUrl?: string } }> {
+    const cleanEmail = (googleProfile.email || '').trim().toLowerCase();
+    const accounts = getRegisteredAccounts();
+    const found = accounts.find(a => (a.user.email || '').trim().toLowerCase() === cleanEmail);
+
+    if (found && found.user) {
+      const token = `google-token-${found.user.id}-${Date.now()}`;
+      setStoredToken(token);
+      if (googleProfile.avatarUrl && !found.user.avatarUrl) {
+        found.user.avatarUrl = googleProfile.avatarUrl;
+      }
+      try {
+        localStorage.setItem('gloryday_current_user', JSON.stringify(found.user));
+      } catch {}
+      return {
+        isNewUser: false,
+        token,
+        user: found.user,
+        profileData: googleProfile
+      };
+    }
+
+    return {
+      isNewUser: true,
+      profileData: googleProfile
+    };
+  },
+
+  async completeGoogleRegistration(data: {
+    email: string;
+    name: string;
+    avatarUrl?: string;
+    facilityName: string;
+    phone: string;
+    contactName?: string;
+    facilityType?: string;
+    deliveryAddress?: string;
+    coordinates?: { lat: number; lng: number };
+  }): Promise<{ token: string; user: User }> {
+    const cleanEmail = (data.email || '').trim().toLowerCase();
+    const cleanPhone = normalizePhone(data.phone);
+    if (!cleanPhone) {
+      throw new Error('Numéro de téléphone gabonais (+241) obligatoire.');
+    }
+    if (!data.facilityName?.trim()) {
+      throw new Error('Le nom de l\'établissement de santé est obligatoire.');
+    }
+
+    const accounts = getRegisteredAccounts();
+    const existing = accounts.find(
+      a => normalizePhone(a.user.phone) === cleanPhone || (a.user.email || '').toLowerCase() === cleanEmail
+    );
+    if (existing) {
+      existing.user.email = cleanEmail;
+      existing.user.facilityName = data.facilityName.trim();
+      if (data.avatarUrl) existing.user.avatarUrl = data.avatarUrl;
+      if (data.contactName) existing.user.contactName = data.contactName;
+      existing.user.authProvider = 'google';
+      const token = `google-token-${existing.user.id}-${Date.now()}`;
+      setStoredToken(token);
+      try {
+        localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(accounts));
+        localStorage.setItem('gloryday_current_user', JSON.stringify(existing.user));
+      } catch {}
+      return { token, user: existing.user };
+    }
+
+    const newUser: User = {
+      id: `usr-google-${Date.now()}`,
+      email: cleanEmail,
+      phone: data.phone.trim(),
+      facilityName: data.facilityName.trim(),
+      contactName: data.contactName?.trim() || data.name?.trim() || 'Responsable Pharmacie',
+      facilityType: (data.facilityType as any) || 'Clinique',
+      role: 'client',
+      authProvider: 'google',
+      avatarUrl: data.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+      deliveryAddress: data.deliveryAddress || 'Libreville, Gabon',
+      coordinates: data.coordinates || { lat: 0.3924, lng: 9.4536 },
+      createdAt: new Date().toISOString()
+    };
+
+    accounts.push({
+      user: newUser,
+      passwordHash: 'google_oauth_auth'
+    });
+
+    try {
+      localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(accounts));
+      localStorage.setItem('gloryday_current_user', JSON.stringify(newUser));
+    } catch {}
+
+    const token = `google-token-${newUser.id}-${Date.now()}`;
+    setStoredToken(token);
+    return { token, user: newUser };
+  },
+
+  async adminLogin(identifier: string, passwordOrRole?: string | AppRole, roleOption?: AppRole): Promise<{ token: string; user: User }> {
+    let password = typeof passwordOrRole === 'string' && !['client', 'Super-Admin', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'].includes(passwordOrRole)
+      ? passwordOrRole
+      : undefined;
+    let role: AppRole = (roleOption || (typeof passwordOrRole === 'string' && ['client', 'Super-Admin', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'].includes(passwordOrRole) ? passwordOrRole as AppRole : 'Super-Admin'));
+
     const cleanId = (identifier || '').trim().toLowerCase();
     const cleanPass = (password || '').trim();
 
-    if (!cleanId || !cleanPass) {
-      throw new Error('Identifiant et mot de passe administrateur obligatoires.');
+    // Check credentials: admin / admin OR admin@glorydaypharma.ga / admin OR gloryday-admin-2026 OR +24177003004 / admin
+    const isKeyValid = cleanId === 'gloryday-admin-2026';
+    const isIdValid = cleanId === 'admin' || cleanId === 'admin@glorydaypharma.ga' || normalizePhone(cleanId) === '+24177003004' || normalizePhone(cleanId) === '24177003004' || normalizePhone(cleanId) === '077003004';
+    const isPassValid = !password || cleanPass === 'admin' || cleanPass === 'gloryday2026';
+
+    if (!isKeyValid && (!isIdValid || !isPassValid)) {
+      throw new Error('Identifiants administrateur incorrects. Utilisez : admin / admin (ou admin@glorydaypharma.ga)');
     }
 
-    const staffAccounts = getStaffAccounts();
-    const foundStaff = staffAccounts.find(
-      s => s.emailOrIdentifier.toLowerCase() === cleanId || normalizePhone(s.phone) === normalizePhone(cleanId)
-    );
-
-    if (!foundStaff) {
-      throw new Error('Identifiants administrateur incorrects. Vérifiez l\'adresse email ou le numéro de téléphone.');
-    }
-
-    if (!foundStaff.isActive) {
-      throw new Error('Ce compte collaborateur a été désactivé par la direction.');
-    }
-
-    // Allow Gloryday@2026 case-insensitively, or standard admin test passwords
-    let isMatch = await verifyPassword(cleanPass, foundStaff.passwordHash);
-    if (!isMatch) {
-      if (
-        cleanPass.toLowerCase() === 'gloryday@2026' ||
-        cleanPass === 'admin123' ||
-        cleanPass === 'Gloryday@2026' ||
-        foundStaff.passwordHash.toLowerCase() === cleanPass.toLowerCase()
-      ) {
-        isMatch = true;
-      }
-    }
-
-    if (!isMatch) {
-      throw new Error('Mot de passe administrateur incorrect. Veuillez vérifier votre saisie ou réinitialiser.');
-    }
-
-    // Upgrade to fresh hash
-    try {
-      foundStaff.passwordHash = await hashPassword(cleanPass);
-      saveStaffAccounts(staffAccounts);
-    } catch {}
-
-    // Strict role attribution directly from backend staff record - no dropdown override
+    const assignedRole = role || 'Super-Admin';
     const staffUser: User = {
-      id: foundStaff.id,
-      phone: foundStaff.phone,
-      facilityName: 'Direction Générale Gloryday',
-      contactName: foundStaff.fullName,
-      role: foundStaff.role,
-      createdAt: foundStaff.createdAt
+      id: `staff-${assignedRole.toLowerCase().replace(/\s+/g, '-')}`,
+      phone: '+24177003004',
+      facilityName: `Direction Générale Gloryday`,
+      contactName: `Direction & Staff [${assignedRole}]`,
+      role: assignedRole,
+      createdAt: new Date().toISOString()
     };
-
-    const token = `staff-token-${foundStaff.id}-${Date.now()}`;
+    const token = `staff-token-${Date.now()}`;
     setStoredToken(token);
     try {
       localStorage.setItem('gloryday_current_user', JSON.stringify(staffUser));
     } catch {}
     return { token, user: staffUser };
-  },
-
-  async resetPassword(identifierOrPhone: string, newPassword: string): Promise<{ user: User; token: string }> {
-    const cleanId = (identifierOrPhone || '').trim();
-    const cleanPass = (newPassword || '').trim();
-
-    if (!cleanId) {
-      throw new Error('Veuillez renseigner votre numéro de téléphone ou identifiant.');
-    }
-    if (!cleanPass || cleanPass.length < 6) {
-      throw new Error('Le nouveau mot de passe doit comporter au moins 6 caractères.');
-    }
-
-    const cleanPhone = normalizePhone(cleanId);
-    const newHash = await hashPassword(cleanPass);
-
-    // 1. Check client accounts
-    const accounts = getRegisteredAccounts();
-    const clientIdx = accounts.findIndex(
-      a => normalizePhone(a.user.phone) === cleanPhone || a.user.phone === cleanId || a.user.id === cleanId
-    );
-
-    if (clientIdx > -1) {
-      accounts[clientIdx].passwordHash = newHash;
-      try {
-        localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(accounts));
-        saveRegisteredUsers(accounts.map(a => a.user));
-        localStorage.setItem('gloryday_current_user', JSON.stringify(accounts[clientIdx].user));
-      } catch {}
-      const token = `usr-token-${accounts[clientIdx].user.id}-${Date.now()}`;
-      setStoredToken(token);
-      return { user: accounts[clientIdx].user, token };
-    }
-
-    // 2. Check staff accounts
-    const staffAccounts = getStaffAccounts();
-    const staffIdx = staffAccounts.findIndex(
-      s => s.emailOrIdentifier.toLowerCase() === cleanId.toLowerCase() || normalizePhone(s.phone) === cleanPhone
-    );
-
-    if (staffIdx > -1) {
-      staffAccounts[staffIdx].passwordHash = newHash;
-      saveStaffAccounts(staffAccounts);
-      const staffUser: User = {
-        id: staffAccounts[staffIdx].id,
-        phone: staffAccounts[staffIdx].phone,
-        facilityName: 'Direction Générale Gloryday',
-        contactName: staffAccounts[staffIdx].fullName,
-        role: staffAccounts[staffIdx].role,
-        createdAt: staffAccounts[staffIdx].createdAt
-      };
-      try {
-        localStorage.setItem('gloryday_current_user', JSON.stringify(staffUser));
-      } catch {}
-      const token = `staff-token-${staffUser.id}-${Date.now()}`;
-      setStoredToken(token);
-      return { user: staffUser, token };
-    }
-
-    throw new Error('Aucun compte trouvé avec ce numéro de téléphone ou cet identifiant.');
-  },
-
-  resetDemoAccounts(): void {
-    resetDemoAccounts();
   },
 
   async getCurrentUser(): Promise<{ user: User; role: AppRole } | null> {
@@ -1036,7 +704,7 @@ export const api = {
     return request<DirectMessage[]>('/api/messages');
   },
 
-  async createOrder(customer: Order['customer'], items: CartItem[], currentUser?: User | null): Promise<Order> {
+  async createOrder(customer: Order['customer'], items: CartItem[]): Promise<Order> {
     const zoneName = customer.neighborhoodName || 
       (customer.deliveryAddress ? detectNeighborhoodFromAddress(customer.deliveryAddress)?.name : null) || 
       'Grand Libreville';
@@ -1045,20 +713,8 @@ export const api = {
     try {
       const order = await request<Order>('/api/orders', {
         method: 'POST',
-        body: JSON.stringify({ 
-          customer, 
-          items,
-          userId: currentUser?.id,
-          structureId: currentUser?.structureId,
-          authorName: currentUser?.contactName || customer.contactName,
-          authorJobTitle: currentUser?.jobTitle
-        })
+        body: JSON.stringify({ customer, items })
       });
-      if (currentUser?.id && !order.userId) order.userId = currentUser.id;
-      if (currentUser?.structureId && !order.structureId) order.structureId = currentUser.structureId;
-      if (currentUser?.contactName && !order.authorName) order.authorName = currentUser.contactName;
-      if (currentUser?.jobTitle && !order.authorJobTitle) order.authorJobTitle = currentUser.jobTitle;
-
       if (!order.deliveryZone) order.deliveryZone = zoneName;
       if (!order.deliveryEstimated) order.deliveryEstimated = estimatedTime;
       if (customer.mobilePayment && !order.mobilePayment) {
@@ -1080,10 +736,6 @@ export const api = {
         id: `ord-offline-${Date.now()}`,
         reference: fallbackRef,
         createdAt: new Date().toISOString(),
-        userId: currentUser?.id,
-        structureId: currentUser?.structureId,
-        authorName: currentUser?.contactName || customer.contactName,
-        authorJobTitle: currentUser?.jobTitle,
         customer,
         items: items.map(it => {
           const calc = calculateItemVolumePrice(it.price, it.quantity, it.isQuote);
@@ -1162,12 +814,58 @@ export const api = {
     }
   },
 
-  async updateOrderDeliveryStage(orderId: string, deliveryStage: import('./types').DeliveryStage, courier?: import('./types').CourierInfo): Promise<Order> {
+  async triggerAutomatedWhatsAppNotification(orderId: string, stage: DeliveryStage): Promise<Order> {
+    const STAGE_LABELS: Record<DeliveryStage, string> = {
+      preparation: 'En préparation à l’entrepôt',
+      picked_up: 'Pris en charge par le coursier',
+      in_transit: 'En cours d’acheminement',
+      delivered: 'Livré à l’établissement'
+    };
+
+    const orders = getLocalGuestOrders();
+    const idx = orders.findIndex(o => o.id === orderId || o.reference === orderId);
+    if (idx > -1) {
+      const stagePayload = generateWhatsAppMessageForStage(orders[idx], stage);
+      const logEntry: WhatsAppNotificationLog = {
+        id: `wlog-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        stage,
+        stageLabel: STAGE_LABELS[stage] || stage,
+        recipientRole: 'client',
+        recipientPhone: orders[idx].customer?.phone || '+24177001122',
+        recipientName: orders[idx].customer?.facilityName || 'Client Médical',
+        timestamp: new Date().toISOString(),
+        status: 'sent',
+        messagePreview: stagePayload.messageText.length > 140 
+          ? stagePayload.messageText.slice(0, 140) + '...' 
+          : stagePayload.messageText,
+        triggeredBy: 'Automate API Logistique (Gloryday)'
+      };
+
+      if (!orders[idx].whatsappLogs) {
+        orders[idx].whatsappLogs = [];
+      }
+      orders[idx].whatsappLogs = [logEntry, ...orders[idx].whatsappLogs];
+      orders[idx].lastWhatsAppNotifiedStage = stage;
+      localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(orders));
+      return orders[idx];
+    }
+    throw new Error('Commande non trouvée pour envoi WhatsApp');
+  },
+
+  async updateOrderDeliveryStage(orderId: string, deliveryStage: DeliveryStage, courier?: CourierInfo): Promise<Order> {
+    const STAGE_LABELS: Record<DeliveryStage, string> = {
+      preparation: 'En préparation à l’entrepôt',
+      picked_up: 'Pris en charge par le coursier',
+      in_transit: 'En cours d’acheminement',
+      delivered: 'Livré à l’établissement'
+    };
+
     try {
-      return await request<Order>(`/api/orders/${orderId}/delivery-stage`, {
+      await request<Order>(`/api/orders/${orderId}/delivery-stage`, {
         method: 'PATCH',
         body: JSON.stringify({ deliveryStage, courier })
       });
+      return await this.triggerAutomatedWhatsAppNotification(orderId, deliveryStage);
     } catch {
       const orders = getLocalGuestOrders();
       const idx = orders.findIndex(o => o.id === orderId || o.reference === orderId);
@@ -1181,6 +879,30 @@ export const api = {
         if (courier) {
           orders[idx].courier = { ...orders[idx].courier, ...courier };
         }
+
+        // Automated WhatsApp Notification Triggering Logic via api
+        const stagePayload = generateWhatsAppMessageForStage(orders[idx], deliveryStage);
+        const logEntry: WhatsAppNotificationLog = {
+          id: `wlog-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          stage: deliveryStage,
+          stageLabel: STAGE_LABELS[deliveryStage] || deliveryStage,
+          recipientRole: 'client',
+          recipientPhone: orders[idx].customer?.phone || '+24177001122',
+          recipientName: orders[idx].customer?.facilityName || 'Client Médical',
+          timestamp: new Date().toISOString(),
+          status: 'sent',
+          messagePreview: stagePayload.messageText.length > 140 
+            ? stagePayload.messageText.slice(0, 140) + '...' 
+            : stagePayload.messageText,
+          triggeredBy: 'Automate API Logistique (Gloryday)'
+        };
+
+        if (!orders[idx].whatsappLogs) {
+          orders[idx].whatsappLogs = [];
+        }
+        orders[idx].whatsappLogs = [logEntry, ...orders[idx].whatsappLogs];
+        orders[idx].lastWhatsAppNotifiedStage = deliveryStage;
+
         localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(orders));
         return orders[idx];
       }
@@ -1238,85 +960,24 @@ export const api = {
     try {
       return await request<AdminStats>('/api/admin/stats');
     } catch {
-      const orders = getLocalGuestOrders();
-      const accounts = getRegisteredAccounts();
-      const nonCancelledOrders = orders.filter(o => o.status !== 'Annulée');
-
-      const totalRevenue = nonCancelledOrders.reduce((acc, o) => acc + (o.estimatedTotal || 0), 0);
-      const ordersToConfirm = orders.filter(o => o.status === 'À confirmer').length;
-      
-      const now = new Date();
-      const thisMonthOrders = nonCancelledOrders.filter(o => {
-        try {
-          const d = new Date(o.createdAt);
-          return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-        } catch {
-          return false;
-        }
-      });
-      const monthOrdersCount = thisMonthOrders.length;
-      const averageBasket = nonCancelledOrders.length > 0 
-        ? Math.round(totalRevenue / nonCancelledOrders.length) 
-        : 0;
-
-      // Unique real clients
-      const clientPhones = new Set<string>();
-      accounts.forEach(a => clientPhones.add(normalizePhone(a.user.phone)));
-      orders.forEach(o => {
-        if (o.customer && o.customer.phone) {
-          clientPhones.add(normalizePhone(o.customer.phone));
-        }
-      });
-      const totalClients = clientPhones.size > 0 ? clientPhones.size : accounts.length;
-
-      // Real pending payment amount on delivered or unconfirmed non-cancelled orders
-      const pendingPaymentAmount = nonCancelledOrders
-        .filter(o => !o.isPaid)
-        .reduce((sum, o) => {
-          const paid = o.amountPaid || 0;
-          return sum + Math.max(0, (o.estimatedTotal || 0) - paid);
-        }, 0);
-
-      // Real orders by status breakdown
-      const ordersByStatus: Record<string, number> = {
-        'À confirmer': 0,
-        'Confirmée': 0,
-        'En préparation': 0,
-        'Livrée': 0,
-        'Annulée': 0
-      };
-      orders.forEach(o => {
-        if (ordersByStatus[o.status] !== undefined) {
-          ordersByStatus[o.status]++;
-        } else {
-          ordersByStatus[o.status] = (ordersByStatus[o.status] || 0) + 1;
-        }
-      });
-
-      // Priority orders requiring immediate processing
-      const priorityOrders = orders
-        .filter(o => o.status === 'À confirmer' || (!o.isPaid && o.status === 'Livrée'))
-        .slice(0, 5);
-
-      // Inactive clients (> 15 days without order)
-      const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 3600 * 1000).toISOString();
-      const recentlyActivePhones = new Set(
-        orders.filter(o => o.createdAt >= fifteenDaysAgo).map(o => normalizePhone(o.customer?.phone || ''))
-      );
-      const inactiveClientsCount = accounts.filter(a => !recentlyActivePhones.has(normalizePhone(a.user.phone))).length;
-
       return {
-        totalRevenue,
-        ordersToConfirm,
-        monthOrdersCount,
-        averageBasket,
-        totalClients,
-        pendingPaymentAmount,
+        totalRevenue: 1250000,
+        ordersToConfirm: 3,
+        monthOrdersCount: 18,
+        averageBasket: 69400,
+        totalClients: 8,
+        pendingPaymentAmount: 320000,
         salesLast14Days: [],
-        ordersByStatus,
+        ordersByStatus: {
+          'À confirmer': 3,
+          'Confirmée': 5,
+          'En préparation': 4,
+          'Livrée': 12,
+          'Annulée': 1
+        },
         topProducts: [],
-        priorityOrders,
-        inactiveClientsCount
+        priorityOrders: [],
+        inactiveClientsCount: 2
       };
     }
   },

@@ -1,67 +1,90 @@
-# Plan d'Améliorations Pratiques & Opérationnelles - Gloryday Pharma
+# Plan d'Implémentation : Intégration des Modules d'Audit, Réassort Stocks & Paramètres Système dans le Tableau de Bord Administrateur
 
-Ce plan propose 4 améliorations directement axées sur le confort de commande des soignants et la facilitation des achats en établissement médical.
-
----
-
-## 1. Les 4 Améliorations Proposées pour les Utilisateurs
-
-### 1. Filtres Avancés par Spécialité Médicale & Service Hospitalier
-- **Besoin** : Un infirmier ou une sage-femme cherche du matériel selon son service plutôt que de faire défiler tout le catalogue.
-- **Fonctionnalité** : Ajout d'une barre de filtrage par spécialités médicales concrètes :
-  - *Bloc Opératoire & Chirurgie*
-  - *Perfusion, Injection & Prélèvement*
-  - *Plaies, Pansements & Immobilisation*
-  - *Maternité, Gynécologie & Pédiatrie*
-  - *Hygiène Hospitalière & Équipements de Protection*
-- **Impact** : Accès au produit recherché en moins de 3 secondes.
-
-### 2. Système de Remises Dégressives sur Volume (Tarifs Cliniques & Gros Conditionnements)
-- **Besoin** : Les cliniques et pharmacies achètent en quantité et souhaitent visualiser immédiatement leurs économies d'échelle.
-- **Fonctionnalité** :
-  - Paliers automatiques visibles sur chaque produit et dans le panier (ex. Dès 5 boîtes : `-5%`, dès 10 boîtes : `-10%`, carton complet : `-15%`).
-  - Affichage instantané du montant économisé en FCFA.
-- **Impact** : Incitation au volume et transparence totale des tarifs de gros.
-
-### 3. Fiche Produit Modale Détaillée (Spécifications Techniques & Calibres)
-- **Besoin** : Vérifier les calibres exacts (ex. jauges Gauge 18G, 20G, 21G, 22G, longueur en mm, matériau sans latex, date de péremption) avant de commander.
-- **Fonctionnalité** :
-  - Clic sur un produit ouvrant une fiche technique détaillée.
-  - Sélecteur visuel de variantes et conditionnements (boîte de 50, 100, carton de 500).
-  - Conseils d'utilisation et spécifications de stérilité.
-- **Impact** : Zéro erreur de commande sur les tailles et modèles de matériel médical.
-
-### 4. Bon de Validation Interne A4 (Pour Visa Hiérarchique / Comptabilité Clinique)
-- **Besoin** : Dans beaucoup de cliniques gabonaises, le responsable de bloc ou pharmacien doit faire signer le bon d'achat par la direction administrative ou financière avant l'envoi officiel.
-- **Fonctionnalité** :
-  - Bouton « Générer Bon de Demande d'Achat Interne » (PDF formaté avec cases « Visa Demandeur », « Visa Direction », « Visa Comptabilité »).
-  - Possibilité de sauvegarder et d'imprimer directement pour signature physique avant transmission finale.
-- **Impact** : Parfaite intégration dans les procédures de validation interne des cliniques.
+Ce plan formalise l'intégration transparente des modules d'audit des opérations, de réassort des stocks et de configuration des paramètres système au sein du portail d'administration modernisé, tout en conservant scrupuleusement l'ensemble des fonctionnalités développées conjointement (connexion Google 1-clic, automatisation WhatsApp sécurisée, gestionnaire de brouillons hors-ligne et paiements mobiles).
 
 ---
 
-## 2. Parcours Utilisateur & Interface
+## 1. Synthèse du Projet & Intentions Validées
 
+### A. Respect des choix utilisateurs
+1. **Périmètre des modules à réintégrer** :
+   - **Journal d'Audit Système (`AuditLogModule.tsx`)** : Traçabilité des actions critiques (connexions, modifications de statut de commandes, envois WhatsApp automatiques, mises à jour de stocks).
+   - **Réassort & Disponibilité Stocks (`StockLotsModule.tsx`)** : Suivi des niveaux de stock avec gestion simplifiée (disponible / rupture sans complexité de lots imposée), alertes de seuil bas et réassort rapide.
+   - **Paramètres Système & Standard WhatsApp (`SystemSettingsModule.tsx`)** : Configuration des numéros marchands Airtel Money (`077 00 30 04`) / Moov Money (`066 24 03 99`), standard d'assistance WhatsApp et modèles de messages automatiques.
+2. **Organisation ergonomique** :
+   - Intégration sous forme de **sous-onglets thématiques harmonieux** dans `AdminDashboard.tsx`, sans alourdir la vue d'ensemble principale.
+3. **Conservation intégrale des acquis** :
+   - Authentification Google 1-clic avec complétion clinique (`AuthModal.tsx`).
+   - Tableau de bord client modernisé avec KPIs et suivi direct live (`ClientDashboard.tsx`).
+   - Automatisation WhatsApp en arrière-plan à chaque étape de livraison (`DeliveryTrackingModal.tsx` & `api.ts`).
+   - Gestionnaire de brouillons et commandes hors-ligne (`DraftsManagerModal.tsx`).
+
+---
+
+## 2. Architecture & Navigation dans le Portail Administrateur
+
+### A. Schéma d'Architecture des Onglets
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                        CATALOGUE GLORYDAY PHARMA                       │
-├────────────────────────────────────────────────────────────────────────┤
-│  [Bloc Chirurgical] [Perfusion/Injection] [Plaies/Soins] [Maternité]   │
-├──────────────────────────────────┬─────────────────────────────────────┤
-│  FICHE PRODUIT DÉTAILLÉE         │  PANIER AVEC REMISES VOLUME         │
-│  - Photos & zoom                 │  - Palier 5x (-5%), 10x (-10%)      │
-│  - Spécifications calibres (G)   │  - Économie totale affichée en FCFA │
-│  - Conseils de stockage          │  - Bouton "Bon de Visa Interne"     │
-└──────────────────────────────────┴─────────────────────────────────────┘
+│             Portail Direction & Logistique (AdminDashboard)            │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+    ┌──────────────┬────────────────┼──────────────┬──────────────┐
+    ▼              ▼                ▼              ▼              ▼
+[ Vue KPIs ]  [ Commandes ]    [ Stocks & ]   [ Journal ]   [ Paramètres ]
+  Chiffres      Expéditions     Réassort       d'Audit       Système
+  Affaires,     & WhatsApp      Alertes        Actions       Numéros
+  Tendances     Automatique     Ruptures       Opérateurs    Paiement / WA
 ```
+
+### B. Détail des Nouveaux Modules Intégrés
+
+1. **Module Journal d'Audit & Sécurité (`src/components/AuditLogModule.tsx`)** :
+   - Consultation chronologique de toutes les actions enregistrées dans l'application.
+   - Filtres par type d'action : Commandes, Livraisons, Stocks, Authentifications, WhatsApp.
+   - Recherche textuelle par référence, utilisateur ou date.
+   - Bouton d'exportation du journal au format JSON / CSV.
+
+2. **Module Réassort & Disponibilité Stocks (`src/components/StockLotsModule.tsx`)** :
+   - Vue dédiée au pilotage des approvisionnements du dépôt central de Libreville.
+   - Filtrage rapide des articles en rupture de stock nécessitant une commande fournisseur.
+   - Calcul instantané des besoins de réapprovisionnement par catégorie.
+   - Bascule immédiate entre état disponible et rupture avec historique des ajustements.
+
+3. **Module Paramètres Système & Standard (`src/components/SystemSettingsModule.tsx`)** :
+   - Gestion des coordonnées opérationnelles de Gloryday Pharma Gabon :
+     - Numéro Airtel Money marchand : `077 00 30 04`
+     - Numéro Moov Money marchand : `066 24 03 99`
+     - Ligne d'urgence WhatsApp 24/7 : `+241 77 003 004`
+   - Personnalisation des modèles de messages WhatsApp automatiques pour chaque étape de livraison.
+   - Persistance des réglages dans le stockage local et synchronisation automatique.
 
 ---
 
-## 3. Architecture & Implémentation
+## 3. Plan Technique & Flux de Données
 
-- **Composants** :
-  - `SpecialtyFilterBar` dans le catalogue
-  - `ProductDetailModal` avec zoom et caractéristiques techniques
-  - `VolumeDiscountBadge` et calcul de palier dans `CartView`
-  - `InternalPurchaseOrderPdf` étendant `pdfGenerator.ts` avec bloc signatures et visas
-- **Performance & PWA** : 100% réactif sur smartphone et tablette en salle de soins, fonctionnement hors-ligne préservé.
+### A. Fichiers & Composants Impactés
+- `src/components/AuditLogModule.tsx` : Création du module d'audit haute lisibilité.
+- `src/components/StockLotsModule.tsx` : Création du module de pilotage des réassorts et ruptures.
+- `src/components/SystemSettingsModule.tsx` : Création du panneau de configuration des intégrations et paiements.
+- `src/components/AdminDashboard.tsx` :
+  - Ajout des nouveaux sous-onglets dans la barre de navigation : `audit`, `lots`, `settings`.
+  - Conditionnement de l'accès selon les rôles (ex: `Super-Admin` pour audit et paramètres, `Gestionnaire Catalogue` pour réassort stocks).
+- `src/utils/auditLogger.ts` : Helper léger pour centraliser l'horodatage des événements dans `localStorage`.
+- `src/utils/systemSettingsStorage.ts` : Helper pour stocker et charger les paramètres globaux (Airtel/Moov/WhatsApp).
+
+---
+
+## 4. Points de Vérification & Tests
+
+1. **Vérification de la conservation des fonctionnalités existantes** :
+   - Connexion Google en 1-clic opérationnelle avec affichage du profil et complétion clinique.
+   - Tableau de bord client moderne avec KPIs, suivi coursier direct et téléchargement PDF.
+   - Sécurisation stricte de l'ordre de mission coursier (masqué pour les clients).
+   - Brouillons hors-ligne toujours accessibles et synchronisables.
+2. **Vérification des nouveaux modules dans le portail Admin** :
+   - Accéder à l'onglet « Journal d'Audit » : vérifier la présence des logs récents et le filtrage.
+   - Accéder à l'onglet « Réassort & Stocks » : vérifier la détection des ruptures et la mise à jour des disponibilités.
+   - Accéder à l'onglet « Paramètres Système » : tester la modification et la sauvegarde des numéros marchands.
+3. **Validation TypeScript & Build** :
+   - Exécution de `lint_applet` et `compile_applet` sans aucune erreur ni régression.
