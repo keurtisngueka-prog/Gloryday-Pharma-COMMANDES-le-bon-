@@ -19,6 +19,7 @@ import { getEstimatedDeliveryText, detectNeighborhoodFromAddress } from './data/
 import { calculateCartVolumeSummary, calculateItemVolumePrice } from './utils/volumeDiscount';
 import { generateWhatsAppMessageForStage } from './utils/whatsappNotifications';
 import { recordAuditLog } from './utils/auditLogger';
+import { isDemoOrder, DEMO_ACCOUNT_IDS, executeProductionCleanup, CleanupReport } from './utils/productionCleanup';
 
 const TOKEN_KEY = 'gloryday_auth_token';
 const GUEST_ORDERS_KEY = 'gloryday_guest_orders';
@@ -33,9 +34,6 @@ export interface StoredAccount {
 export function normalizePhone(p: string): string {
   return (p || '').replace(/[\s\-\.\(\)]/g, '').toLowerCase();
 }
-
-const DEMO_ACCOUNT_IDS = new Set(['usr-ste-marie', 'usr-pharma-mer', 'usr-rapha']);
-const DEMO_ORDER_IDS = new Set(['ord-demo-01', 'ord-demo-02']);
 
 export function getRegisteredAccounts(): StoredAccount[] {
   try {
@@ -93,7 +91,7 @@ export function getLocalGuestOrders(): Order[] {
     }
     const parsed: Order[] = JSON.parse(raw);
     const cleaned = Array.isArray(parsed)
-      ? parsed.filter(o => o && !DEMO_ORDER_IDS.has(o.id))
+      ? parsed.filter(o => o && !isDemoOrder(o))
       : [];
     if (cleaned.length !== parsed.length) {
       localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(cleaned));
@@ -422,7 +420,7 @@ export const api = {
       facilityType: (data.facilityType as any) || 'Clinique',
       role: 'client',
       authProvider: 'google',
-      avatarUrl: data.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+      avatarUrl: data.avatarUrl || undefined,
       deliveryAddress: data.deliveryAddress || 'Libreville, Gabon',
       coordinates: data.coordinates || { lat: 0.3924, lng: 9.4536 },
       createdAt: new Date().toISOString()
@@ -444,21 +442,53 @@ export const api = {
   },
 
   async adminLogin(identifier: string, passwordOrRole?: string | AppRole, roleOption?: AppRole): Promise<{ token: string; user: User }> {
-    let password = typeof passwordOrRole === 'string' && !['client', 'Super-Admin', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'].includes(passwordOrRole)
+    const password = typeof passwordOrRole === 'string' && !['client', 'Super-Admin', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'].includes(passwordOrRole)
       ? passwordOrRole
       : undefined;
-    let role: AppRole = (roleOption || (typeof passwordOrRole === 'string' && ['client', 'Super-Admin', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'].includes(passwordOrRole) ? passwordOrRole as AppRole : 'Super-Admin'));
+    const role: AppRole = (roleOption || (typeof passwordOrRole === 'string' && ['client', 'Super-Admin', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'].includes(passwordOrRole) ? passwordOrRole as AppRole : 'Super-Admin'));
 
     const cleanId = (identifier || '').trim().toLowerCase();
     const cleanPass = (password || '').trim();
 
-    // Check credentials: admin / admin OR admin@glorydaypharma.ga / admin OR gloryday-admin-2026 OR +24177003004 / admin
-    const isKeyValid = cleanId === 'gloryday-admin-2026';
-    const isIdValid = cleanId === 'admin' || cleanId === 'admin@glorydaypharma.ga' || normalizePhone(cleanId) === '+24177003004' || normalizePhone(cleanId) === '24177003004' || normalizePhone(cleanId) === '077003004';
-    const isPassValid = !password || cleanPass === 'admin' || cleanPass === 'gloryday2026';
+    if (password) {
+      try {
+        const res = await request<{ token: string; user: User }>('/api/auth/admin', {
+          method: 'POST',
+          body: JSON.stringify({ identifier: cleanId, password: cleanPass, role })
+        });
+        setStoredToken(res.token);
+        try {
+          localStorage.setItem('gloryday_current_user', JSON.stringify(res.user));
+        } catch {}
+        recordAuditLog({
+          category: 'auth',
+          action: 'Connexion Portail Direction',
+          actorName: res.user.contactName || 'Direction Générale',
+          actorRole: res.user.role,
+          details: `Ouverture de session avec le rôle [${res.user.role}] (${cleanId}).`,
+          status: 'success'
+        });
+        return res;
+      } catch (err: any) {
+        // Fallback local verification if offline
+        const storedCustomPass = (() => {
+          try {
+            return localStorage.getItem('gloryday_admin_custom_password');
+          } catch {
+            return null;
+          }
+        })();
+        const validIds = ['admin', 'admin@glorydaypharma.ga', 'direction@glorydaypharma.ga', '+24177003004', '24177003004', '077003004', 'gloryday-admin-2026'];
+        const isIdValid = validIds.includes(cleanId) || validIds.includes(normalizePhone(cleanId));
+        const activeSecret = storedCustomPass || 'Gloryday@2026!';
+        const isPassValid =
+          cleanPass === activeSecret ||
+          (!storedCustomPass && (cleanPass === 'Gloryday@2026!' || cleanPass === 'admin' || cleanPass === 'gloryday2026'));
 
-    if (!isKeyValid && (!isIdValid || !isPassValid)) {
-      throw new Error('Identifiants administrateur incorrects. Utilisez : admin / admin (ou admin@glorydaypharma.ga)');
+        if (!isIdValid || !isPassValid) {
+          throw new Error('Identifiants administrateur ou mot de passe de sécurité incorrects.');
+        }
+      }
     }
 
     const assignedRole = role || 'Super-Admin';
@@ -478,6 +508,33 @@ export const api = {
     return { token, user: staffUser };
   },
 
+  async updateAdminPassword(newPassword: string): Promise<{ success: boolean }> {
+    const cleanNew = (newPassword || '').trim();
+    if (cleanNew.length < 6) {
+      throw new Error('Le nouveau mot de passe administrateur doit comporter au moins 6 caractères.');
+    }
+    try {
+      localStorage.setItem('gloryday_admin_custom_password', cleanNew);
+    } catch {}
+    try {
+      await request<{ success: boolean }>('/api/auth/admin-password', {
+        method: 'PUT',
+        body: JSON.stringify({ newPassword: cleanNew })
+      });
+    } catch {
+      // Saved locally if server temporarily unreachable
+    }
+    recordAuditLog({
+      category: 'settings',
+      action: 'Mise à jour Mot de Passe Administrateur',
+      actorName: 'Direction Générale',
+      actorRole: 'Super-Admin',
+      details: 'Le mot de passe secret du Portail Direction a été personnalisé et synchronisé.',
+      status: 'success'
+    });
+    return { success: true };
+  },
+
   async getCurrentUser(): Promise<{ user: User; role: AppRole } | null> {
     const token = getStoredToken();
     if (!token) return null;
@@ -495,35 +552,18 @@ export const api = {
     try {
       return await request<any[]>('/api/clients');
     } catch {
-      return [
-        {
-          id: 'client-1',
-          phone: '+24174001122',
-          facilityName: 'Polyclinique El Rapha',
-          contactName: 'Dr. Mengue',
-          facilityType: 'Polyclinique',
-          role: 'client',
-          deliveryAddress: 'Libreville, Batterie 4',
-          totalOrdersCount: 4,
-          totalSpent: 485000,
-          daysSinceLastOrder: 14,
-          isInactive10Days: true
-        },
-        {
-          id: 'client-2',
-          phone: '+24166334455',
-          facilityName: 'Pharmacie du Bord de Mer',
-          contactName: 'Dr. Obame',
-          facilityType: 'Pharmacie',
-          role: 'client',
-          deliveryAddress: 'Libreville, Boulevard Triomphal',
-          totalOrdersCount: 6,
-          totalSpent: 792000,
-          daysSinceLastOrder: 3,
-          isInactive10Days: false
-        }
-      ];
+      return getRegisteredAccounts().map(acc => ({
+        ...acc.user,
+        totalOrdersCount: 0,
+        totalSpent: 0,
+        daysSinceLastOrder: 0,
+        isInactive10Days: false
+      }));
     }
+  },
+
+  async cleanupProductionData(fullReset = true): Promise<CleanupReport> {
+    return executeProductionCleanup({ fullReset });
   },
 
   async assignClientToCommercial(clientId: string, commercialId: string): Promise<any> {

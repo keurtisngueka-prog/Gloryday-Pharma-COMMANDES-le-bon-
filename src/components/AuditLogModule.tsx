@@ -13,9 +13,11 @@ import {
   Settings, 
   RefreshCw,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  Trash2
 } from 'lucide-react';
-import { getAuditLogs, AuditLogEntry, AuditCategory } from '../utils/auditLogger';
+import { getAuditLogs, clearAuditLogs, AuditLogEntry, AuditCategory } from '../utils/auditLogger';
+import { executeProductionCleanup } from '../utils/productionCleanup';
 import { Order } from '../types';
 
 interface AuditLogModuleProps {
@@ -169,7 +171,7 @@ export const AuditLogModule: React.FC<AuditLogModuleProps> = ({ orders = [] }) =
             </p>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-center">
+          <div className="flex items-center gap-2 self-start sm:self-center flex-wrap">
             <button
               type="button"
               onClick={loadLogs}
@@ -177,6 +179,18 @@ export const AuditLogModule: React.FC<AuditLogModuleProps> = ({ orders = [] }) =
             >
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Actualiser</span>
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                clearAuditLogs();
+                await executeProductionCleanup({ fullReset: false });
+                loadLogs();
+              }}
+              className="py-1.5 px-3 rounded-xl border border-rose-200 bg-rose-50/60 hover:bg-rose-100 text-rose-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Purger le Journal</span>
             </button>
             <button
               type="button"

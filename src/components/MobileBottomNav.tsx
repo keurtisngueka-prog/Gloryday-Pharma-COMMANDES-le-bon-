@@ -7,6 +7,7 @@ interface MobileBottomNavProps {
   cartCount: number;
   onOpenSidebar: () => void;
   draftsCount?: number;
+  cartBounceEvent?: { id: number; addedQty: number } | null;
 }
 
 export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
@@ -14,15 +15,38 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   setActiveTab,
   cartCount,
   onOpenSidebar,
-  draftsCount
+  draftsCount,
+  cartBounceEvent
 }) => {
   const [isBumping, setIsBumping] = useState(false);
+  const [bounceKey, setBounceKey] = useState(0);
+  const [lastAddedQty, setLastAddedQty] = useState<number | null>(null);
   const prevCountRef = useRef(cartCount);
 
   useEffect(() => {
-    if (cartCount > prevCountRef.current) {
+    if (cartBounceEvent) {
       setIsBumping(true);
-      const timer = setTimeout(() => setIsBumping(false), 650);
+      setBounceKey(prev => prev + 1);
+      setLastAddedQty(cartBounceEvent.addedQty);
+      const timer = setTimeout(() => {
+        setIsBumping(false);
+        setLastAddedQty(null);
+      }, 750);
+      prevCountRef.current = cartCount;
+      return () => clearTimeout(timer);
+    }
+  }, [cartBounceEvent]);
+
+  useEffect(() => {
+    if (cartCount > prevCountRef.current && !isBumping) {
+      const diff = cartCount - prevCountRef.current;
+      setIsBumping(true);
+      setBounceKey(prev => prev + 1);
+      setLastAddedQty(diff > 0 ? diff : 1);
+      const timer = setTimeout(() => {
+        setIsBumping(false);
+        setLastAddedQty(null);
+      }, 750);
       prevCountRef.current = cartCount;
       return () => clearTimeout(timer);
     }
@@ -82,21 +106,32 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           type="button"
           onClick={() => setActiveTab('cart')}
           className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-all duration-300 cursor-pointer relative ${
-            isBumping ? 'scale-110' : ''
+            isBumping ? 'text-[#0d44e8] font-bold' : ''
           } ${
             activeTab === 'cart'
               ? 'text-[#0d44e8] font-bold'
               : 'text-slate-500 hover:text-slate-900 font-medium'
           }`}
         >
-          <div className="relative">
-            <ShoppingBag className={`w-5 h-5 stroke-[2.2] transition-transform duration-300 ${
-              isBumping ? 'scale-125 -rotate-12 text-[#0d44e8]' : ''
+          {isBumping && lastAddedQty && (
+            <span
+              key={`mob-float-${bounceKey}`}
+              className="pointer-events-none absolute -top-3 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-full bg-emerald-600 text-white text-[9px] font-black shadow-md animate-cart-plus-float whitespace-nowrap z-20"
+            >
+              +{lastAddedQty}
+            </span>
+          )}
+          <div
+            key={`mob-icon-${bounceKey}`}
+            className={`relative ${isBumping ? 'animate-cart-bounce' : ''}`}
+          >
+            <ShoppingBag className={`w-5 h-5 stroke-[2.2] transition-colors duration-200 ${
+              isBumping ? 'text-[#0d44e8] animate-bounce' : ''
             }`} />
             {cartCount > 0 && (
               <span className={`absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[10px] font-black flex items-center justify-center shadow-xs transition-all duration-300 ${
                 isBumping 
-                  ? 'bg-emerald-600 scale-125 ring-4 ring-[#0d44e8]/40 animate-pulse' 
+                  ? 'bg-emerald-600 scale-125 ring-4 ring-[#0d44e8]/40' 
                   : 'bg-[#0d44e8]'
               }`}>
                 {cartCount > 99 ? '99+' : cartCount}

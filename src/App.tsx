@@ -10,7 +10,8 @@ import {
   Filter,
   CheckCircle2,
   FileText,
-  Stethoscope
+  Stethoscope,
+  Plus
 } from 'lucide-react';
 import { 
   Product, 
@@ -34,6 +35,7 @@ import { generateOrderPdf } from './utils/pdfGenerator';
 import { getStoredDrafts, deleteDraft } from './utils/draftsStorage';
 import { CATEGORIES, CONSUMABLE_SUBCATEGORIES, MEDICAL_SPECIALTIES } from './data/initialProducts';
 import { getProductSpecialty } from './utils/specialties';
+import { ensureProductionCleanSlateOnBoot } from './utils/productionCleanup';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -233,37 +235,41 @@ export default function App() {
   const [sortBy, setSortBy] = useState<'default' | 'price-asc' | 'price-desc' | 'name-asc'>('default');
   const [priceRange, setPriceRange] = useState<'all' | 'promotions' | 'under10k' | '10k-50k' | 'over50k' | 'quote'>('all');
   const [inspectedProduct, setInspectedProduct] = useState<Product | null>(null);
+  const [selectedProductsMap, setSelectedProductsMap] = useState<
+    Record<string, { product: Product; variant: ProductVariant; quantity: number }>
+  >({});
 
-  // Notifications (Initialized with automated event notifications)
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => [
-    {
-      id: 'notif-promo-1',
-      timestamp: new Date(Date.now() - 1000 * 60 * 35).toISOString(),
-      type: 'promotion',
-      message: '🔥 Offre Spéciale : -25% sur les Gants d\'examen Latex et -20% sur les Seringues 2ml 3 pièces en stock !',
-      discountBadge: '-25%',
-      targetRole: 'all',
-      read: false
-    },
-    {
-      id: 'notif-promo-2',
-      timestamp: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-      type: 'promotion',
-      message: '🏷️ Réduction immédiate : -15% sur les Tests rapides TDR Paludisme et Cathéters courts (Cathlon).',
-      discountBadge: '-15%',
-      targetRole: 'all',
-      read: false
-    },
-    {
-      id: 'notif-status-demo',
-      timestamp: new Date(Date.now() - 1000 * 60 * 360).toISOString(),
-      type: 'status_changed',
-      orderReference: 'GP-2026-0042',
-      message: 'Votre commande GP-2026-0042 a été validée par le service logistique. Livraison programmée ce jour à Libreville.',
-      targetRole: 'client',
-      read: true
-    }
-  ]);
+  const handleToggleProductSelection = (product: Product, variant: ProductVariant, quantity: number) => {
+    setSelectedProductsMap(prev => {
+      const next = { ...prev };
+      if (next[product.id]) {
+        delete next[product.id];
+      } else {
+        next[product.id] = { product, variant, quantity };
+      }
+      return next;
+    });
+  };
+
+  const handleUpdateProductSelection = (product: Product, variant: ProductVariant, quantity: number) => {
+    setSelectedProductsMap(prev => {
+      if (!prev[product.id]) return prev;
+      return {
+        ...prev,
+        [product.id]: { product, variant, quantity }
+      };
+    });
+  };
+
+  const handleAddSelectedProductsToCart = () => {
+    const entries = Object.values(selectedProductsMap);
+    if (entries.length === 0) return;
+    handleAddMultipleToCart(entries);
+    setSelectedProductsMap({});
+  };
+
+  // Notifications (Clean production state - populated only by real events)
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const lastEventTimestamp = useRef<number>(Date.now() - 60000);
 
   // Initial Data Load
@@ -280,7 +286,7 @@ export default function App() {
       if (authData) {
         setCurrentUser(authData.user);
         setCartItems(loadCartForUser(authData.user));
-        const userOrders = await api.getOrders(authData.user.phone);
+        const userOrders = await api.getOrders(authData.user.role === 'client' ? authData.user.phone : undefined);
         setOrders(userOrders);
         if (authData.role === 'Super-Admin') {
           api.getAdminStats().then(setAdminStats).catch(() => {});
@@ -299,7 +305,18 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadInitialData();
+    ensureProductionCleanSlateOnBoot().finally(() => {
+      loadInitialData();
+    });
+
+    const handleProductionCleaned = () => {
+      setOrders([]);
+      setQuotes([]);
+      setNotifications([]);
+      loadInitialData();
+    };
+    window.addEventListener('gloryday_production_cleaned', handleProductionCleaned);
+    return () => window.removeEventListener('gloryday_production_cleaned', handleProductionCleaned);
   }, []);
 
   // Notifications 20s Polling
@@ -401,16 +418,24 @@ export default function App() {
     }
   };
 
-  // Cart Operations
+  // Cart Operations & Visual Bounce Trigger
+  const [cartBounceEvent, setCartBounceEvent] = useState<{ id: number; addedQty: number } | null>(null);
+
+  const triggerCartBounce = (addedQty: number) => {
+    setCartBounceEvent({ id: Date.now() + Math.random(), addedQty: Math.max(1, addedQty) });
+  };
+
   const handleAddToCart = (product: Product, variant: ProductVariant, quantity: number) => {
     if (product.status === 'rupture') return;
+    const validQty = Math.min(9999, Math.max(1, quantity));
+    triggerCartBounce(validQty);
     setCartItems(prev => {
       const existingIndex = prev.findIndex(
         it => it.productId === product.id && it.variant === variant.label
       );
       if (existingIndex > -1) {
         const copy = [...prev];
-        copy[existingIndex].quantity = Math.min(9999, copy[existingIndex].quantity + quantity);
+        copy[existingIndex].quantity = Math.min(9999, copy[existingIndex].quantity + validQty);
         return copy;
       } else {
         const newItem: CartItem = {
@@ -419,7 +444,7 @@ export default function App() {
           category: product.category,
           variant: variant.label,
           price: variant.price,
-          quantity: Math.min(9999, Math.max(1, quantity)),
+          quantity: validQty,
           isQuote: variant.price === 0
         };
         return [...prev, newItem];
@@ -458,6 +483,10 @@ export default function App() {
   };
 
   const handleAddMultipleToCart = (itemsToAdd: { product: Product; variant: ProductVariant; quantity: number }[]) => {
+    const totalAdded = itemsToAdd.reduce((sum, entry) => sum + Math.max(1, entry.quantity), 0);
+    if (totalAdded > 0) {
+      triggerCartBounce(totalAdded);
+    }
     setCartItems(prev => {
       let copy = [...prev];
       itemsToAdd.forEach(({ product, variant, quantity }) => {
@@ -676,14 +705,14 @@ export default function App() {
   const handleViewOrderPdf = async (order: Order) => {
     try {
       const { dataUrl } = await generateOrderPdf(order);
-      const win = window.open();
-      if (win) {
-        win.document.write(
-          `<iframe src="${dataUrl}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`
-        );
-      }
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = `Bon_Commande_${order.reference}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     } catch (e) {
-      alert('Impossible d afficher le PDF.');
+      console.error('Impossible de générer le PDF', e);
     }
   };
 
@@ -790,7 +819,10 @@ export default function App() {
       result = result.filter(p => p.subcategory === selectedSubcategory);
     }
     if (onlySelected) {
-      const selectedIds = new Set(cartItems.map(it => it.productId));
+      const selectedIds = new Set([
+        ...cartItems.map(it => it.productId),
+        ...Object.keys(selectedProductsMap)
+      ]);
       result = result.filter(p => selectedIds.has(p.id));
     }
     if (onlyPromotions || priceRange === 'promotions') {
@@ -817,7 +849,7 @@ export default function App() {
       result = [...result].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
     }
     return result;
-  }, [products, searchQuery, selectedSpecialty, selectedCategory, selectedSubcategory, onlySelected, onlyPromotions, priceRange, sortBy, cartItems]);
+  }, [products, searchQuery, selectedSpecialty, selectedCategory, selectedSubcategory, onlySelected, onlyPromotions, priceRange, sortBy, cartItems, selectedProductsMap]);
 
   return (
     <div className="min-h-screen flex flex-col bg-white text-slate-900 font-['Plus_Jakarta_Sans',sans-serif]">
@@ -854,6 +886,7 @@ export default function App() {
         onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
         onOpenDraftsModal={() => setIsDraftsModalOpen(true)}
         draftsCount={draftsCount}
+        cartBounceEvent={cartBounceEvent}
       />
 
       {/* Main Content Area */}
@@ -1182,10 +1215,33 @@ export default function App() {
                         }`}
                       >
                         <Check className="w-3 h-3" />
-                        <span>Ma sélection ({cartItems.length})</span>
+                        <span>
+                          Ma sélection ({new Set([...cartItems.map(it => it.productId), ...Object.keys(selectedProductsMap)]).size})
+                        </span>
                       </button>
 
-                      {/* PROMOTIONS FAST ACCESS BUTTON (Positioned right next to Ma sélection as requested) */}
+                      {Object.keys(selectedProductsMap).length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleAddSelectedProductsToCart}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Ajouter les {Object.keys(selectedProductsMap).length} coché(s) au panier</span>
+                        </button>
+                      )}
+
+                      {Object.keys(selectedProductsMap).length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedProductsMap({})}
+                          className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold transition-all cursor-pointer"
+                        >
+                          Tout décocher
+                        </button>
+                      )}
+
+                      {/* PROMOTIONS FAST ACCESS BUTTON */}
                       <button
                         type="button"
                         onClick={() => setOnlyPromotions(!onlyPromotions)}
@@ -1261,6 +1317,7 @@ export default function App() {
                   <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
                     {filteredProducts.map((prod) => {
                       const cartItem = cartItems.find(it => it.productId === prod.id);
+                      const isProdSelected = Boolean(selectedProductsMap[prod.id]);
                       return (
                         <ProductCard
                           key={prod.id}
@@ -1268,9 +1325,55 @@ export default function App() {
                           onAddToCart={handleAddToCart}
                           isInCart={Boolean(cartItem)}
                           cartQuantity={cartItem?.quantity || 0}
+                          isSelected={isProdSelected}
+                          onToggleSelect={handleToggleProductSelection}
+                          onSelectionChange={handleUpdateProductSelection}
                         />
                       );
                     })}
+                  </div>
+                )}
+
+                {/* FLOATING MULTI-SELECTION ACTION BAR */}
+                {Object.keys(selectedProductsMap).length > 0 && (
+                  <div className="fixed bottom-16 md:bottom-5 left-3 right-3 z-40 max-w-2xl mx-auto">
+                    <div className="bg-[#0f0f12] text-white rounded-2xl p-3 sm:px-5 sm:py-3.5 shadow-2xl border border-slate-700/80 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-xs sm:text-sm font-extrabold flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded-md bg-[#0d44e8] text-white text-xs font-black tabular-nums">
+                            {Object.keys(selectedProductsMap).length}
+                          </span>
+                          <span className="truncate">article(s) sélectionné(s)</span>
+                        </div>
+                        <div className="text-[11px] text-slate-300 mt-0.5 tabular-nums">
+                          Total sélection :{' '}
+                          <strong className="text-white">
+                            {Object.values(selectedProductsMap)
+                              .reduce((sum, entry) => sum + (entry.variant?.price || 0) * entry.quantity, 0)
+                              .toLocaleString('fr-FR')}{' '}
+                            FCFA
+                          </strong>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedProductsMap({})}
+                          className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-bold transition-colors cursor-pointer"
+                        >
+                          Annuler
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleAddSelectedProductsToCart}
+                          className="px-4 py-2 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white text-xs font-extrabold flex items-center gap-1.5 shadow-md transition-colors cursor-pointer"
+                        >
+                          <Plus className="w-4 h-4 stroke-[2.5]" />
+                          <span>Tout ajouter au panier</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1286,6 +1389,7 @@ export default function App() {
         cartCount={cartCount}
         onOpenSidebar={() => setIsSidebarOpen(true)}
         draftsCount={draftsCount}
+        cartBounceEvent={cartBounceEvent}
       />
 
       {/* MODALS */}

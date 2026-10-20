@@ -22,6 +22,7 @@ import {
   Database
 } from 'lucide-react';
 import { User, AppRole } from '../types';
+import { BrandLogo } from './BrandLogo';
 
 interface AppSidebarProps {
   isOpen: boolean;
@@ -75,7 +76,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
         }`}
       >
         <div className="overflow-y-auto flex-1">
-          {/* 1. Header with Brand & Close Button */}
+          {/* 1. Header with Complete Brand Logo & Close Button */}
           <div className="p-4 px-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
             <div 
               onClick={() => {
@@ -86,20 +87,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 }
                 onClose();
               }}
-              className="flex items-center gap-2.5 cursor-pointer select-none group"
-              title="GLORYDAY Pharma · Clic pour réinitialiser le panier à 0 et revenir à l'accueil"
+              className="cursor-pointer"
+              title="GLORYDAY Pharma Gabon · Retour à l'accueil"
             >
-              <div className="w-8 h-8 rounded-lg bg-[#0d44e8] text-white flex items-center justify-center font-black text-sm group-hover:scale-105 transition-transform">
-                +
-              </div>
-              <div>
-                <span className="font-extrabold text-base tracking-tight text-[#000000] block leading-none">
-                  GLORYDAY
-                </span>
-                <span className="text-[10px] text-[#0d44e8] font-bold uppercase tracking-wider">
-                  Pharma Gabon
-                </span>
-              </div>
+              <BrandLogo variant="light" size="md" showSubtitle={true} />
             </div>
             <button
               type="button"

@@ -1,6 +1,6 @@
 {
-  "summary": "Plan de mise en production et sécurisation avant déploiement : suppression des identifiants et données de démonstration, mot de passe administrateur secret configurable, et activation du serveur backend Express centralisé.",
-  "updatedAt": "2026-10-19T10:50:11.690383144Z",
+  "summary": "Plan d'implémentation pour la restauration des contrôles de sélection rapide sur les cartes produits (conditionnement, compteur -/+, case à cocher multi-sélection), du logo officiel complet Gloryday Pharma dans l'interface et les PDF, ainsi que la personnalisation immédiate du mot de passe Administrateur.",
+  "updatedAt": "2026-10-20T09:20:01.009221192Z",
   "requestFeedback": true,
   "userFacing": true
 }

@@ -10,10 +10,13 @@ import {
   CheckCircle2, 
   AlertCircle,
   MapPin,
-  Compass
+  Compass,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { api } from '../api';
 import { User, AppRole, FacilityType } from '../types';
+import { BrandLogo } from './BrandLogo';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -60,6 +63,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [password, setPassword] = useState('');
   const [adminIdentifier, setAdminIdentifier] = useState('admin');
   const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [isCustomizingAdminPass, setIsCustomizingAdminPass] = useState(false);
+  const [newCustomAdminPassword, setNewCustomAdminPassword] = useState('');
+  const [customPassSuccess, setCustomPassSuccess] = useState<string | null>(null);
   const [selectedRole, setSelectedRole] = useState<AppRole>('Super-Admin');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,8 +78,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     avatarUrl?: string;
   }>({
     email: 'chidisstore3@gmail.com',
-    name: 'Responsable Établissement',
-    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'
+    name: 'Responsable Établissement'
   });
   const [googleCustomEmail, setGoogleCustomEmail] = useState('');
   const [showCustomGoogleInput, setShowCustomGoogleInput] = useState(false);
@@ -241,11 +247,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           >
             <X className="w-4 h-4" />
           </button>
-          <div className="w-9 h-9 rounded-xl bg-[#0d44e8] flex items-center justify-center mb-2 text-white font-bold text-sm">
-            +
+          <div className="mb-1.5">
+            <BrandLogo variant="dark" size="md" showSubtitle={true} />
           </div>
-          <h2 className="text-base sm:text-lg font-bold tracking-tight">Gloryday Pharma Gabon</h2>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-slate-400 mt-1">
             Commandes médicales pour cliniques, hôpitaux & officines
           </p>
         </div>
@@ -740,6 +745,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 Authentification sécurisée requise pour accéder au portail d'administration, aux expéditions et aux paramètres.
               </div>
 
+              {customPassSuccess && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{customPassSuccess}</span>
+                </div>
+              )}
+
               <div>
                 <label className="block font-bold text-slate-700 uppercase mb-1">
                   Email ou Identifiant Administrateur
@@ -747,7 +759,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="direction@glorydaypharma.ga"
+                  placeholder="admin ou direction@glorydaypharma.ga"
                   value={adminIdentifier}
                   onChange={(e) => setAdminIdentifier(e.target.value)}
                   className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-purple-600 focus:outline-none"
@@ -755,18 +767,89 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 uppercase mb-1">
-                  Mot de passe de sécurité
-                </label>
-                <input
-                  type="password"
-                  required
-                  placeholder="••••••••••••"
-                  value={adminPassword}
-                  onChange={(e) => setAdminPassword(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-purple-600 focus:outline-none"
-                />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-bold text-slate-700 uppercase">
+                    Mot de passe Administrateur
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCustomizingAdminPass(!isCustomizingAdminPass);
+                      setError(null);
+                      setCustomPassSuccess(null);
+                    }}
+                    className="text-purple-700 hover:underline font-bold text-[11px] cursor-pointer flex items-center gap-1"
+                  >
+                    <KeyRound className="w-3 h-3" />
+                    {isCustomizingAdminPass ? 'Fermer la personnalisation' : 'Personnaliser mon mot de passe'}
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showAdminPassword ? 'text' : 'password'}
+                    required
+                    placeholder="Saisissez votre mot de passe secret"
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    className="w-full p-2.5 pr-10 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-purple-600 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminPassword(!showAdminPassword)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-700 cursor-pointer"
+                    title={showAdminPassword ? 'Masquer' : 'Afficher'}
+                  >
+                    {showAdminPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
+
+              {/* CUSTOM ADMIN PASSWORD CONFIGURATOR */}
+              {isCustomizingAdminPass && (
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-purple-200 space-y-2.5">
+                  <div className="font-bold text-purple-950 text-[11px] flex items-center justify-between">
+                    <span>Définir votre nouveau mot de passe Administrateur :</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type={showAdminPassword ? 'text' : 'password'}
+                      placeholder="Nouveau mot de passe (min. 6 car.)"
+                      value={newCustomAdminPassword}
+                      onChange={(e) => setNewCustomAdminPassword(e.target.value)}
+                      className="flex-1 p-2 rounded-lg border border-slate-300 bg-white text-xs font-medium focus:ring-2 focus:ring-purple-600 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setError(null);
+                        setCustomPassSuccess(null);
+                        if (newCustomAdminPassword.trim().length < 6) {
+                          setError('Le nouveau mot de passe personnalisé doit contenir au moins 6 caractères.');
+                          return;
+                        }
+                        try {
+                          setLoading(true);
+                          await api.updateAdminPassword(newCustomAdminPassword.trim());
+                          setAdminPassword(newCustomAdminPassword.trim());
+                          setCustomPassSuccess('Nouveau mot de passe Administrateur enregistré et prêt à l’emploi !');
+                          setNewCustomAdminPassword('');
+                          setIsCustomizingAdminPass(false);
+                        } catch (err: any) {
+                          setError(err.message || 'Impossible de mettre à jour le mot de passe.');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                      className="px-3 py-2 rounded-lg bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs cursor-pointer shrink-0 transition-colors"
+                    >
+                      Enregistrer
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    Une fois enregistré, ce nouveau mot de passe remplace immédiatement le mot de passe par défaut sur le serveur et votre session.
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="block font-bold text-slate-700 uppercase mb-1">

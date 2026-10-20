@@ -170,6 +170,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span>Nouveau Produit</span>
               </button>
             )}
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('settings')}
+                className="py-2 px-3.5 rounded-xl bg-purple-600/80 hover:bg-purple-600 text-white text-xs font-bold border border-purple-400/30 transition-colors cursor-pointer flex items-center gap-1.5"
+                title="Personnaliser le mot de passe Administrateur"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                <span>Mot de passe Admin</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onRefresh}

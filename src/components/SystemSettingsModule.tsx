@@ -8,7 +8,9 @@ import {
   Zap,
   Database,
   Copy,
-  Terminal
+  Terminal,
+  Trash2,
+  ShieldCheck
 } from 'lucide-react';
 import { 
   getSystemSettings, 
@@ -17,6 +19,7 @@ import {
   SystemSettings 
 } from '../utils/systemSettingsStorage';
 import { recordAuditLog } from '../utils/auditLogger';
+import { executeProductionCleanup, CleanupReport } from '../utils/productionCleanup';
 import { SUPABASE_PROJECT_REF, DEFAULT_SUPABASE_URL, supabaseUrl, isSupabaseConfigured } from '../lib/supabase';
 
 interface SystemSettingsModuleProps {
@@ -32,6 +35,19 @@ export const SystemSettingsModule: React.FC<SystemSettingsModuleProps> = ({
   const [savedBanner, setSavedBanner] = useState(false);
   const [copiedCli, setCopiedCli] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [isCleaning, setIsCleaning] = useState(false);
+  const [cleanupReport, setCleanupReport] = useState<CleanupReport | null>(null);
+
+  const handleRunProductionCleanup = async (fullReset: boolean) => {
+    setIsCleaning(true);
+    try {
+      const report = await executeProductionCleanup({ fullReset });
+      setCleanupReport(report);
+      setTimeout(() => setCleanupReport(null), 6000);
+    } finally {
+      setIsCleaning(false);
+    }
+  };
 
   const handleCopyCli = () => {
     const cliCommands = [
@@ -62,6 +78,9 @@ export const SystemSettingsModule: React.FC<SystemSettingsModuleProps> = ({
     const updated = saveSystemSettings(formData);
     setFormData(updated);
     if (updated.adminPassword && updated.adminPassword.trim().length >= 6) {
+      try {
+        localStorage.setItem('gloryday_admin_custom_password', updated.adminPassword.trim());
+      } catch {}
       try {
         await fetch('/api/auth/admin-password', {
           method: 'PUT',
@@ -320,6 +339,57 @@ export const SystemSettingsModule: React.FC<SystemSettingsModuleProps> = ({
           <div>supabase link --project-ref {SUPABASE_PROJECT_REF}</div>
           <div>supabase db push</div>
         </div>
+      </div>
+
+      {/* 3B. PRODUCTION CLEAN SLATE & DEMO PURGE */}
+      <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-rose-600" />
+              <span>Nettoyage de Production & État Vierge (Lancement)</span>
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Purgez les commandes fictives de démonstration, les journaux d'audit de test et les notifications résiduelles pour garantir un état 100 % vierge en production (le catalogue de produits médicaux et vos tarifs sont intégralement conservés).
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              disabled={isCleaning}
+              onClick={() => handleRunProductionCleanup(false)}
+              className="py-2 px-3.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-slate-500" />
+              <span>Purger Données Démo</span>
+            </button>
+            <button
+              type="button"
+              disabled={isCleaning}
+              onClick={() => handleRunProductionCleanup(true)}
+              className="py-2 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>{isCleaning ? 'Nettoyage en cours...' : 'Réinitialiser Commandes & Logs (État Vierge)'}</span>
+            </button>
+          </div>
+        </div>
+
+        {cleanupReport && (
+          <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs font-semibold flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>
+                État vierge de production activé : <strong>{cleanupReport.removedOrdersCount}</strong> commande(s),{' '}
+                <strong>{cleanupReport.removedLogsCount}</strong> log(s) d'audit et{' '}
+                <strong>{cleanupReport.removedNotificationsCount}</strong> notification(s) supprimés.
+              </span>
+            </div>
+            <span className="text-[11px] font-mono text-emerald-700">
+              {cleanupReport.serverCleaned ? 'Serveur & Client synchronisés' : 'Stockage local purgé'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* 4. LOGISTICS & WHATSAPP AUTOMATION */}

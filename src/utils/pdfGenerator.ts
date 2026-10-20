@@ -18,18 +18,32 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
 
   // Top header banner
   doc.setFillColor(blueDark[0], blueDark[1], blueDark[2]);
-  doc.rect(0, 0, pageWidth, 28, 'F');
+  doc.rect(0, 0, pageWidth, 30, 'F');
 
-  // Header Title
+  // Official Gloryday Pharma Vector Emblem in PDF Header (Shield + Medical Cross)
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(14, 6, 17, 17, 3.5, 3.5, 'F');
+  doc.setDrawColor(13, 68, 232);
+  doc.setLineWidth(0.6);
+  doc.roundedRect(15.4, 7.4, 14.2, 14.2, 2.5, 2.5, 'S');
+  // Inner Cobalt Medical Cross
+  doc.setFillColor(blueDark[0], blueDark[1], blueDark[2]);
+  doc.roundedRect(21.1, 9.5, 2.8, 10, 0.8, 0.8, 'F');
+  doc.roundedRect(17.5, 13.1, 10, 2.8, 0.8, 0.8, 'F');
+  // Center white point
+  doc.setFillColor(255, 255, 255);
+  doc.circle(22.5, 14.5, 0.9, 'F');
+
+  // Header Title & Official Brand Lockup
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(20);
+  doc.setFontSize(19);
   doc.setFont('helvetica', 'bold');
-  doc.text('GLORYDAY PHARMA', 14, 15);
-  doc.setFontSize(9);
+  doc.text('GLORYDAY PHARMA GABON', 35, 14.5);
+  doc.setFontSize(8.5);
   doc.setFont('helvetica', 'normal');
-  doc.text('Distribution Médicale, Consommables & Équipements Hospitaliers', 14, 21);
+  doc.text('Distribution Médicale, Consommables & Équipements Hospitaliers Certifiés', 35, 20.5);
   doc.setFontSize(8);
-  doc.text('Libreville - GABON | Tél: +241 77 003 004 / +241 66 240 399', pageWidth - 14, 21, { align: 'right' });
+  doc.text('Libreville - GABON | Tél: +241 77 003 004 / +241 66 240 399', pageWidth - 14, 25.5, { align: 'right' });
 
   // Sub-header / Order Badge
   doc.setTextColor(graphite[0], graphite[1], graphite[2]);
@@ -191,14 +205,21 @@ export async function generateInternalPurchaseOrderPdf(
   doc.setFillColor(30, 41, 59); // Slate-800
   doc.rect(0, 0, pageWidth, 28, 'F');
 
+  // Official Gloryday Pharma Vector Emblem in Internal Order PDF Header
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(14, 5.5, 16, 16, 3, 3, 'F');
+  doc.setFillColor(blueDark[0], blueDark[1], blueDark[2]);
+  doc.roundedRect(20.6, 8.5, 2.8, 10, 0.8, 0.8, 'F');
+  doc.roundedRect(17, 12.1, 10, 2.8, 0.8, 0.8, 'F');
+
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(16);
+  doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text('FICHE DE DEMANDE D\'ENGAGEMENT & VISA INTERNE', 14, 14);
+  doc.text('FICHE DE DEMANDE D\'ENGAGEMENT & VISA INTERNE', 34, 13);
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'normal');
-  doc.text('Gloryday Pharma Gabon · Circuit de Validation Hiérarchique Clinique & Hôpital', 14, 21);
-  doc.text(`Réf : ${order.reference}`, pageWidth - 14, 21, { align: 'right' });
+  doc.text('Gloryday Pharma Gabon · Circuit de Validation Hiérarchique Clinique & Hôpital', 34, 19.5);
+  doc.text(`Réf : ${order.reference}`, pageWidth - 14, 19.5, { align: 'right' });
 
   // Établissement & Service Demandeur Box
   doc.setFillColor(248, 250, 252);
