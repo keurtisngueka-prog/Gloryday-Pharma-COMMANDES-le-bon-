@@ -47,6 +47,11 @@ export interface Product {
   isPromotion?: boolean;
   originalPrice?: number;
   discountPercentage?: number;
+  quantityAvailable?: number;
+  stockQuantity?: number;
+  alertThreshold?: number;
+  lowStockAlertThreshold?: number;
+  purchasePrice?: number;
 }
 
 export interface PackItem {
@@ -120,6 +125,7 @@ export interface CustomerInfo {
 export interface OrderItem {
   productId: string;
   productName: string;
+  category?: string;
   variant: string;
   price: number;
   quantity: number;
@@ -138,6 +144,45 @@ export interface CourierInfo {
   matricule: string;
   currentZone?: string;
   estimatedTime?: string;
+}
+
+export interface Courier extends CourierInfo {
+  id: string;
+  active: boolean;
+  assignedOrdersCount?: number;
+}
+
+export interface PaymentInstallment {
+  id: string;
+  type: 'acompte' | 'solde';
+  amount: number;
+  paymentMethod: 'especes' | 'airtel_money' | 'moov_money' | 'virement';
+  transactionReference?: string;
+  status: 'en_attente' | 'valide' | 'rejete';
+  paidAt: string;
+  validatedBy?: string;
+}
+
+export interface InvoiceRecord {
+  id: string;
+  orderId: string;
+  orderReference: string;
+  type: 'facture' | 'avoir';
+  number: string;
+  issueDate: string;
+  clientFacilityName: string;
+  tvaRate: number;
+  tvaAmount: number;
+  totalHT: number;
+  totalTTC: number;
+  reason?: string;
+}
+
+export interface DeliveryProof {
+  receivedBy: string;
+  signatureUrl?: string;
+  photoUrl?: string;
+  timestamp: string;
 }
 
 export interface OrderDraft {
@@ -166,6 +211,12 @@ export interface Order {
   status: OrderStatus;
   cancellationReason?: string;
   isPaid: boolean;
+  amountPaid?: number;
+  installments?: PaymentInstallment[];
+  invoices?: InvoiceRecord[];
+  deliveryProof?: DeliveryProof;
+  isPartialDelivery?: boolean;
+  partialDeliveryNotes?: string;
   pdfUrl?: string;
   assignedCommercialId?: string;
   mobilePayment?: MobilePaymentDetails;
@@ -191,6 +242,73 @@ export interface WhatsAppNotificationLog {
   triggeredBy: string;
 }
 
+export type JobTitle = 'directeur' | 'docteur' | 'charge_commandes' | 'pharmacien' | 'autre';
+export type DirectorApprovalStatus = 'pending' | 'approved' | 'rejected';
+export type ClientAccountStatus = 'actif' | 'en_attente' | 'suspendu' | 'bloque';
+export type PaymentTerms = 'comptant' | '15_jours' | '30_jours' | '60_jours';
+
+export interface HealthcareStructure {
+  id: string;
+  name: string;
+  type: FacilityType;
+  maxAccounts: number;
+  city: string;
+  deliveryAddress?: string;
+  createdAt: string;
+  directorName?: string;
+  directorPhone?: string;
+  directorUserId?: string;
+}
+
+export interface StockBatch {
+  id: string;
+  productId: string;
+  lotNumber: string;
+  expiryDate: string;
+  quantity: number;
+  initialQuantity?: number;
+  purchasePrice?: number;
+  supplierName?: string;
+  receivedDate: string;
+  isArchived?: boolean;
+}
+
+export interface StockMovement {
+  id: string;
+  productId: string;
+  productName: string;
+  lotNumber?: string;
+  type: 'entree' | 'sortie_commande' | 'perte_casse' | 'ajustement' | 'retour';
+  quantity: number;
+  previousQuantity: number;
+  newQuantity: number;
+  reason: string;
+  date: string;
+  performedBy: string;
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  contactPerson: string;
+  phone: string;
+  email?: string;
+  country: string;
+  leadTimeDays?: number;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  reference: string;
+  supplierId: string;
+  supplierName: string;
+  createdAt: string;
+  expectedDeliveryDate?: string;
+  status: 'brouillon' | 'commande' | 'recu' | 'annule';
+  items: { productId: string; productName: string; quantity: number; unitPrice: number }[];
+  totalAmount: number;
+}
+
 export interface User {
   id: string;
   phone: string;
@@ -203,6 +321,15 @@ export interface User {
   email?: string;
   avatarUrl?: string;
   authProvider?: 'credentials' | 'google';
+  jobTitle?: JobTitle;
+  directorApprovalStatus?: DirectorApprovalStatus;
+  structureId?: string;
+  accountStatus?: ClientAccountStatus;
+  creditLimit?: number;
+  outstandingBalance?: number;
+  paymentTerms?: PaymentTerms;
+  notes?: string;
+  isMergedInto?: string;
   assignedToCommercialId?: string;
   assignedToCommercialName?: string;
   coordinates?: Coordinates;

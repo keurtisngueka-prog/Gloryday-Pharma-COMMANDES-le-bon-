@@ -1,90 +1,77 @@
-# Plan d'Implémentation : Intégration des Modules d'Audit, Réassort Stocks & Paramètres Système dans le Tableau de Bord Administrateur
+# Plan de Mise en Production & Sécurisation Avant Déploiement
 
-Ce plan formalise l'intégration transparente des modules d'audit des opérations, de réassort des stocks et de configuration des paramètres système au sein du portail d'administration modernisé, tout en conservant scrupuleusement l'ensemble des fonctionnalités développées conjointement (connexion Google 1-clic, automatisation WhatsApp sécurisée, gestionnaire de brouillons hors-ligne et paiements mobiles).
-
----
-
-## 1. Synthèse du Projet & Intentions Validées
-
-### A. Respect des choix utilisateurs
-1. **Périmètre des modules à réintégrer** :
-   - **Journal d'Audit Système (`AuditLogModule.tsx`)** : Traçabilité des actions critiques (connexions, modifications de statut de commandes, envois WhatsApp automatiques, mises à jour de stocks).
-   - **Réassort & Disponibilité Stocks (`StockLotsModule.tsx`)** : Suivi des niveaux de stock avec gestion simplifiée (disponible / rupture sans complexité de lots imposée), alertes de seuil bas et réassort rapide.
-   - **Paramètres Système & Standard WhatsApp (`SystemSettingsModule.tsx`)** : Configuration des numéros marchands Airtel Money (`077 00 30 04`) / Moov Money (`066 24 03 99`), standard d'assistance WhatsApp et modèles de messages automatiques.
-2. **Organisation ergonomique** :
-   - Intégration sous forme de **sous-onglets thématiques harmonieux** dans `AdminDashboard.tsx`, sans alourdir la vue d'ensemble principale.
-3. **Conservation intégrale des acquis** :
-   - Authentification Google 1-clic avec complétion clinique (`AuthModal.tsx`).
-   - Tableau de bord client modernisé avec KPIs et suivi direct live (`ClientDashboard.tsx`).
-   - Automatisation WhatsApp en arrière-plan à chaque étape de livraison (`DeliveryTrackingModal.tsx` & `api.ts`).
-   - Gestionnaire de brouillons et commandes hors-ligne (`DraftsManagerModal.tsx`).
+Ce plan détaille les opérations de verrouillage sécuritaire, de nettoyage des données de démonstration et d'activation du serveur backend centralisé afin que l'application **Gloryday Pharma Gabon** soit prête pour un déploiement immédiat en production.
 
 ---
 
-## 2. Architecture & Navigation dans le Portail Administrateur
+## 1. Synthèse des Corrections de Production Validées
 
-### A. Schéma d'Architecture des Onglets
+1. **Verrouillage des accès Administrateur & Clients (`AuthModal.tsx` & `api.ts`)** :
+   - Suppression intégrale de l'encadré affichant les identifiants administrateur en clair dans la fenêtre de connexion.
+   - Suppression des boutons de connexion rapide de démonstration (*Clinique Sainte-Marie*, *Pharmacie du Bord de Mer*) sur l'écran de connexion client.
+   - Remplacement de l'adresse Google codée en dur (`chidisstore3@gmail.com`) par une saisie d'adresse Google propre à chaque praticien.
+   - Mise en place d'un mot de passe administrateur robuste (`Gloryday@2026!`) modifiable à tout moment depuis l'onglet **Paramètres Système** du portail Direction.
+
+2. **Purge des Données Fictives (État Vierge de Production)** :
+   - Suppression des commandes fictives pré-chargées (`GP-2026-0089`, `GP-2026-0042`) pour qu'aucun établissement client ne voie de commandes étrangères.
+   - Suppression des entrées fictives dans le **Journal d'Audit** (`DEFAULT_SEED_LOGS`) pour ne tracer que les opérations réelles.
+   - Remplacement des chiffres d'affaires fictifs par un calcul dynamique en temps réel basé exclusivement sur les vraies commandes passées.
+
+3. **Activation du Serveur Backend Centralisé (`server.ts`)** :
+   - Mise en place d'un serveur **Express + Vite** sur le port `3000` avec stockage persistant côté serveur (`data/store.json`).
+   - Centralisation en temps réel :
+     - Des commandes clients, statuts, étapes de livraison (`DeliveryStage`) et historiques d'envois WhatsApp.
+     - Du catalogue officiel de produits et des bascules de stock (`Disponible` / `En rupture`).
+     - Des comptes établissements inscrits (téléphone ou Google) et des devis commerciaux.
+     - Des KPIs financiers et logistiques du portail Direction (`/api/admin/stats`).
+
+---
+
+## 2. Architecture Cible de Production
+
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│             Portail Direction & Logistique (AdminDashboard)            │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-    ┌──────────────┬────────────────┼──────────────┬──────────────┐
-    ▼              ▼                ▼              ▼              ▼
-[ Vue KPIs ]  [ Commandes ]    [ Stocks & ]   [ Journal ]   [ Paramètres ]
-  Chiffres      Expéditions     Réassort       d'Audit       Système
-  Affaires,     & WhatsApp      Alertes        Actions       Numéros
-  Tendances     Automatique     Ruptures       Opérateurs    Paiement / WA
+┌──────────────────────────────────────────────────────────────────────────┐
+│                     Clients (Cliniques, Hôpitaux, Pharmacies)            │
+│   • Catalogue & Panier  • Connexion Google / Tél  • Suivi Direct Live    │
+└────────────────────────────────────┬─────────────────────────────────────┘
+                                     │ Requêtes REST (/api/*)
+                                     ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                  Serveur Backend Express (server.ts - Port 3000)         │
+│   • /api/products & /api/packs (Catalogue & Ruptures synchronisées)      │
+│   • /api/orders (Commandes, Mobile Money, Étapes Livraison, WhatsApp)    │
+│   • /api/auth/* (Authentification Client, Google & Admin sécurisé)       │
+│   • /api/admin/stats (KPIs calculés sur les ventes réelles)              │
+└────────────────────────────────────┬─────────────────────────────────────┘
+                                     │
+                                     ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│             Portail Direction & Logistique (AdminDashboard)              │
+│   • KPIs Réels  • Expéditions & WhatsApp Auto  • Réassort  • Audit       │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-### B. Détail des Nouveaux Modules Intégrés
+---
 
-1. **Module Journal d'Audit & Sécurité (`src/components/AuditLogModule.tsx`)** :
-   - Consultation chronologique de toutes les actions enregistrées dans l'application.
-   - Filtres par type d'action : Commandes, Livraisons, Stocks, Authentifications, WhatsApp.
-   - Recherche textuelle par référence, utilisateur ou date.
-   - Bouton d'exportation du journal au format JSON / CSV.
+## 3. Fichiers Créés & Modifiés
 
-2. **Module Réassort & Disponibilité Stocks (`src/components/StockLotsModule.tsx`)** :
-   - Vue dédiée au pilotage des approvisionnements du dépôt central de Libreville.
-   - Filtrage rapide des articles en rupture de stock nécessitant une commande fournisseur.
-   - Calcul instantané des besoins de réapprovisionnement par catégorie.
-   - Bascule immédiate entre état disponible et rupture avec historique des ajustements.
-
-3. **Module Paramètres Système & Standard (`src/components/SystemSettingsModule.tsx`)** :
-   - Gestion des coordonnées opérationnelles de Gloryday Pharma Gabon :
-     - Numéro Airtel Money marchand : `077 00 30 04`
-     - Numéro Moov Money marchand : `066 24 03 99`
-     - Ligne d'urgence WhatsApp 24/7 : `+241 77 003 004`
-   - Personnalisation des modèles de messages WhatsApp automatiques pour chaque étape de livraison.
-   - Persistance des réglages dans le stockage local et synchronisation automatique.
+- **`server.ts` (Nouveau)** : Serveur Express complet gérant toutes les routes `/api/*`, la persistance des données de production dans `data/store.json`, le middleware Vite en développement et le service des fichiers statiques `dist/` en production.
+- **`package.json`** : Configuration des scripts `"dev": "tsx server.ts"` et `"start": "tsx server.ts"` pour le déploiement full-stack.
+- **`src/components/AuthModal.tsx`** :
+  - Retrait de tous les indices de mots de passe et boutons de démonstration.
+  - Saisie propre de l'email Google professionnel lors de la connexion Google en 1-clic.
+- **`src/components/SystemSettingsModule.tsx` & `src/utils/systemSettingsStorage.ts`** :
+  - Ajout d'une section sécurisée permettant au Super-Admin de modifier son mot de passe administrateur de production.
+- **`src/api.ts` & `src/utils/auditLogger.ts`** :
+  - Connexion directe aux routes `/api/auth/*`, `/api/orders/*`, `/api/products/*` et `/api/admin/stats`.
+  - Suppression des commandes, clients et journaux d'audit fictifs.
+  - Ajout d'une purge automatique des anciennes clés de démonstration du navigateur lors de la mise en production.
 
 ---
 
-## 3. Plan Technique & Flux de Données
+## 4. Plan de Vérification Avant Déploiement
 
-### A. Fichiers & Composants Impactés
-- `src/components/AuditLogModule.tsx` : Création du module d'audit haute lisibilité.
-- `src/components/StockLotsModule.tsx` : Création du module de pilotage des réassorts et ruptures.
-- `src/components/SystemSettingsModule.tsx` : Création du panneau de configuration des intégrations et paiements.
-- `src/components/AdminDashboard.tsx` :
-  - Ajout des nouveaux sous-onglets dans la barre de navigation : `audit`, `lots`, `settings`.
-  - Conditionnement de l'accès selon les rôles (ex: `Super-Admin` pour audit et paramètres, `Gestionnaire Catalogue` pour réassort stocks).
-- `src/utils/auditLogger.ts` : Helper léger pour centraliser l'horodatage des événements dans `localStorage`.
-- `src/utils/systemSettingsStorage.ts` : Helper pour stocker et charger les paramètres globaux (Airtel/Moov/WhatsApp).
-
----
-
-## 4. Points de Vérification & Tests
-
-1. **Vérification de la conservation des fonctionnalités existantes** :
-   - Connexion Google en 1-clic opérationnelle avec affichage du profil et complétion clinique.
-   - Tableau de bord client moderne avec KPIs, suivi coursier direct et téléchargement PDF.
-   - Sécurisation stricte de l'ordre de mission coursier (masqué pour les clients).
-   - Brouillons hors-ligne toujours accessibles et synchronisables.
-2. **Vérification des nouveaux modules dans le portail Admin** :
-   - Accéder à l'onglet « Journal d'Audit » : vérifier la présence des logs récents et le filtrage.
-   - Accéder à l'onglet « Réassort & Stocks » : vérifier la détection des ruptures et la mise à jour des disponibilités.
-   - Accéder à l'onglet « Paramètres Système » : tester la modification et la sauvegarde des numéros marchands.
-3. **Validation TypeScript & Build** :
-   - Exécution de `lint_applet` et `compile_applet` sans aucune erreur ni régression.
+1. **Contrôle de sécurité** : Vérifier qu'aucun mot de passe ni compte de démonstration n'apparaît dans `AuthModal`.
+2. **Contrôle de l'état initial** : Vérifier que les compteurs de commandes et le journal d'audit démarrent à `0` (hors catalogue de produits officiel).
+3. **Synchronisation Backend** : Vérifier que la création d'une commande ou le passage d'un produit en rupture est immédiatement enregistré par `/api/*`.
+4. **Validation Build & TypeScript** : Exécuter `lint_applet`, `compile_applet` et redémarrer le serveur full-stack sans erreur.

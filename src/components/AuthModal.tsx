@@ -276,27 +276,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 >
                   <GoogleIcon className="w-5 h-5 shrink-0" />
                   <span>Continuer avec Google</span>
-                  <span className="hidden sm:inline-block text-[11px] text-slate-400 font-normal">
-                    ({googleProfile.email})
-                  </span>
+                  {googleProfile.email && (
+                    <span className="hidden sm:inline-block text-[11px] text-slate-400 font-normal">
+                      ({googleProfile.email})
+                    </span>
+                  )}
                 </button>
 
                 <div className="flex items-center justify-between text-[11px] px-1 text-slate-500">
-                  <span>⚡ 1-Clic rapide & sécurisé</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowCustomGoogleInput(!showCustomGoogleInput)}
-                    className="text-[#0d44e8] hover:underline font-semibold"
-                  >
-                    {showCustomGoogleInput ? 'Masquer' : 'Autre compte Google ?'}
-                  </button>
+                  <span>⚡ Authentification rapide & sécurisée</span>
+                  {googleProfile.email && (
+                    <button
+                      type="button"
+                      onClick={() => setShowCustomGoogleInput(!showCustomGoogleInput)}
+                      className="text-[#0d44e8] hover:underline font-semibold"
+                    >
+                      {showCustomGoogleInput ? 'Masquer' : 'Changer de compte Google'}
+                    </button>
+                  )}
                 </div>
 
-                {showCustomGoogleInput && (
+                {(showCustomGoogleInput || !googleProfile.email) && (
                   <div className="pt-2 border-t border-blue-100 flex gap-2">
                     <input
                       type="email"
-                      placeholder="votre.email@gmail.com"
+                      placeholder="Saisissez votre adresse Gmail professionnelle..."
                       value={googleCustomEmail}
                       onChange={(e) => setGoogleCustomEmail(e.target.value)}
                       className="flex-1 p-2 rounded-lg border border-slate-300 text-xs bg-white"
@@ -307,7 +311,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       disabled={!googleCustomEmail.trim()}
                       className="px-3 py-2 rounded-lg bg-[#0d44e8] hover:bg-[#0b3ac7] text-white text-xs font-bold disabled:opacity-50 cursor-pointer"
                     >
-                      Valider
+                      Continuer
                     </button>
                   </div>
                 )}
@@ -373,11 +377,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {mode === 'google_complete' && (
             <form onSubmit={handleCompleteGoogleProfile} className="space-y-3.5 text-xs">
               <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 flex items-center gap-3">
-                <img
-                  src={googleProfile.avatarUrl}
-                  alt={googleProfile.name}
-                  className="w-12 h-12 rounded-full border-2 border-white shadow-xs object-cover"
-                />
+                <div className="w-11 h-11 rounded-full bg-white border border-blue-200 flex items-center justify-center shrink-0 shadow-2xs">
+                  <GoogleIcon className="w-5 h-5" />
+                </div>
                 <div>
                   <div className="flex items-center gap-1.5">
                     <span className="font-bold text-slate-900 text-sm">{googleProfile.name}</span>
@@ -523,12 +525,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               {/* Direct Google Button in Login Form */}
               <button
                 type="button"
-                onClick={() => handleGoogleSignIn()}
+                onClick={() => { setMode('guest_choice'); setShowCustomGoogleInput(true); setError(null); }}
                 disabled={loading}
                 className="w-full py-2.5 px-3 rounded-xl border border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs shadow-2xs transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <GoogleIcon className="w-4 h-4 shrink-0" />
-                <span>Connexion directe en 1-Clic avec Google</span>
+                <span>Connexion directe avec Google</span>
               </button>
 
               <div className="relative py-1 flex items-center justify-center">
@@ -564,43 +566,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <input
                     type="password"
                     required
+                    placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#0d44e8]"
                   />
-                </div>
-              </div>
-
-              {/* Pre-configured Demo Accounts Helper */}
-              <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 space-y-1.5">
-                <span className="font-bold text-slate-800 uppercase tracking-wider text-[10px] block">
-                  Comptes de test enregistrés :
-                </span>
-                <div className="flex flex-col gap-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPhone('+24177001122');
-                      setPassword('client123');
-                      setError(null);
-                    }}
-                    className="text-left py-1 px-2 rounded-lg bg-white border border-slate-200 hover:border-blue-400 hover:text-blue-700 transition-colors flex items-center justify-between cursor-pointer"
-                  >
-                    <span className="font-semibold text-slate-800">Clinique Ste-Marie</span>
-                    <span className="text-[10px] font-mono text-slate-500">+24177001122 / client123</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPhone('+24166334455');
-                      setPassword('pharma123');
-                      setError(null);
-                    }}
-                    className="text-left py-1 px-2 rounded-lg bg-white border border-slate-200 hover:border-blue-400 hover:text-blue-700 transition-colors flex items-center justify-between cursor-pointer"
-                  >
-                    <span className="font-semibold text-slate-800">Pharmacie du Bord de Mer</span>
-                    <span className="text-[10px] font-mono text-slate-500">+24166334455 / pharma123</span>
-                  </button>
                 </div>
               </div>
 
@@ -767,7 +737,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <Lock className="w-3.5 h-3.5 text-purple-700" />
                   Espace Réservé : Collaborateurs & Direction Gloryday
                 </div>
-                Identifiez-vous pour accéder au back-office, à la gestion des commandes, des devis et aux droits opérationnels.
+                Authentification sécurisée requise pour accéder au portail d'administration, aux expéditions et aux paramètres.
               </div>
 
               <div>
@@ -777,7 +747,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="admin ou admin@glorydaypharma.ga"
+                  placeholder="direction@glorydaypharma.ga"
                   value={adminIdentifier}
                   onChange={(e) => setAdminIdentifier(e.target.value)}
                   className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-purple-600 focus:outline-none"
@@ -786,12 +756,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
               <div>
                 <label className="block font-bold text-slate-700 uppercase mb-1">
-                  Mot de passe Administrateur
+                  Mot de passe de sécurité
                 </label>
                 <input
                   type="password"
                   required
-                  placeholder="Mot de passe (admin)"
+                  placeholder="••••••••••••"
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
                   className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-purple-600 focus:outline-none"
@@ -812,10 +782,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <option value="Gestionnaire Catalogue">Gestionnaire Catalogue (Produits & Stocks)</option>
                   <option value="Logistique">Logistique (Expéditions & Livraisons)</option>
                 </select>
-              </div>
-
-              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-[10px] text-slate-600">
-                💡 <strong>Accès par défaut :</strong> Identifiant <code className="bg-white px-1 py-0.5 rounded border border-slate-300 font-mono text-purple-900 font-bold">admin</code> (ou <code className="bg-white px-1 py-0.5 rounded border border-slate-300 font-mono text-purple-900 font-bold">admin@glorydaypharma.ga</code>) · Mot de passe : <code className="bg-white px-1 py-0.5 rounded border border-slate-300 font-mono text-purple-900 font-bold">admin</code>
               </div>
 
               <button

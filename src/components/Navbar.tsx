@@ -26,6 +26,8 @@ interface NavbarProps {
   onOpenNotifications: () => void;
   onToggleSidebar: () => void;
   onLogoClick?: () => void;
+  onOpenDraftsModal?: () => void;
+  draftsCount?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({

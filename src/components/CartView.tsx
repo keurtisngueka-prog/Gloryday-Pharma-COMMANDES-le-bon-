@@ -34,6 +34,9 @@ interface CartViewProps {
   onClearCart: () => void;
   onProceedToPreview: (customerInfo: CustomerInfo) => void;
   onContinueShopping: () => void;
+  onOpenDraftsModal?: () => void;
+  draftsCount?: number;
+  initialCustomerInfo?: Partial<CustomerInfo>;
 }
 
 export const CartView: React.FC<CartViewProps> = ({

@@ -1,75 +1,92 @@
-import { AuditEntry, AuditActionType, AppRole, User } from '../types';
+export type AuditCategory = 'order' | 'delivery' | 'whatsapp' | 'stock' | 'auth' | 'settings';
 
-const AUDIT_STORAGE_KEY = 'gloryday_audit_log_v1';
-
-function getClientDeviceInfo(): string {
-  if (typeof window === 'undefined' || !window.navigator) {
-    return 'Serveur / Environnement API';
-  }
-  const ua = window.navigator.userAgent;
-  let os = 'Inconnu';
-  if (ua.includes('Win')) os = 'Windows';
-  else if (ua.includes('Mac')) os = 'macOS';
-  else if (ua.includes('Android')) os = 'Android';
-  else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
-  else if (ua.includes('Linux')) os = 'Linux';
-
-  let browser = 'Navigateur';
-  if (ua.includes('Chrome') && !ua.includes('Edg')) browser = 'Chrome';
-  else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
-  else if (ua.includes('Firefox')) browser = 'Firefox';
-  else if (ua.includes('Edg')) browser = 'Edge';
-
-  const screenResolution = `${window.screen?.width || 0}x${window.screen?.height || 0}`;
-  return `${os} · ${browser} (${screenResolution})`;
+export interface AuditLogEntry {
+  id: string;
+  timestamp: string;
+  category: AuditCategory;
+  action: string;
+  actorName: string;
+  actorRole: string;
+  targetReference?: string;
+  details: string;
+  status: 'success' | 'warning' | 'error';
 }
 
-export function getAuditLogs(): AuditEntry[] {
+const AUDIT_STORAGE_KEY = 'gloryday_system_audit_logs';
+
+export function getAuditLogs(): AuditLogEntry[] {
   try {
     const raw = localStorage.getItem(AUDIT_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (err) {
-    console.error('Erreur lecture audit log:', err);
+    if (!raw) {
+      return [];
+    }
+    const parsed: AuditLogEntry[] = JSON.parse(raw);
+    // Automatically strip any legacy demo seed entries (aud-seed-*)
+    const cleaned = Array.isArray(parsed) ? parsed.filter(l => !l.id.startsWith('aud-seed-')) : [];
+    if (cleaned.length !== parsed.length) {
+      localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(cleaned));
+    }
+    return cleaned;
+  } catch {
     return [];
   }
 }
 
-export function logAuditEvent(
-  user: { id?: string; contactName?: string; facilityName?: string; role?: AppRole } | null,
-  actionType: AuditActionType,
-  targetEntity: string,
-  targetId: string,
-  details: string,
-  previousState?: string,
-  newState?: string
-): AuditEntry {
-  const currentLogs = getAuditLogs();
-  
-  const entry: AuditEntry = {
-    id: `AUDIT-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-    timestamp: new Date().toISOString(),
-    userId: user?.id || 'ANONYMOUS',
-    userName: user?.contactName || user?.facilityName || 'Utilisateur Système',
-    userRole: user?.role || 'client',
-    actionType,
-    targetEntity,
-    targetId,
-    deviceInfo: getClientDeviceInfo(),
-    details,
-    previousState,
-    newState
+export function recordAuditLog(entry: Omit<AuditLogEntry, 'id' | 'timestamp'>): AuditLogEntry {
+  const newEntry: AuditLogEntry = {
+    ...entry,
+    id: `aud-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    timestamp: new Date().toISOString()
   };
 
-  // Add in front (most recent first) and persist.
-  // Note: Entries are immutable and cannot be edited or deleted through UI.
-  const updated = [entry, ...currentLogs].slice(0, 1000); // preserve up to 1000 actions
   try {
+    const existing = getAuditLogs();
+    const updated = [newEntry, ...existing].slice(0, 300);
     localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(updated));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('gloryday_audit_updated'));
+    }
   } catch (e) {
-    console.warn('Erreur écriture audit log:', e);
+    console.error('Failed to record audit log', e);
   }
 
-  return entry;
+  return newEntry;
+}
+
+export function clearAuditLogs(): void {
+  try {
+    localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify([]));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('gloryday_audit_updated'));
+    }
+  } catch (e) {
+    console.error('Failed to clear audit logs', e);
+  }
+}
+
+export function logAuditEvent(
+  user: { contactName?: string; facilityName?: string; role?: string } | null | undefined,
+  actionType: string,
+  entityName: string,
+  targetReference: string,
+  details: string,
+  _previousValue?: string,
+  _newValue?: string
+): AuditLogEntry {
+  const categoryMap: Record<string, AuditCategory> = {
+    mouvement_stock: 'stock',
+    validation_paiement: 'order',
+    export_donnees: 'order',
+    statut_commande: 'delivery',
+    statut_client: 'auth'
+  };
+  return recordAuditLog({
+    category: categoryMap[actionType] || 'order',
+    action: `${entityName}`,
+    actorName: user?.contactName || user?.facilityName || 'Opérateur',
+    actorRole: user?.role || 'Super-Admin',
+    targetReference,
+    details,
+    status: 'success'
+  });
 }

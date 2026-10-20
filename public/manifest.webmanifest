@@ -1,0 +1,31 @@
+{
+  "id": "/",
+  "name": "Gloryday Pharma - Commande Médicale",
+  "short_name": "Gloryday",
+  "description": "Plateforme mobile de commande de consommables et dispositifs médicaux pour cliniques et pharmacies.",
+  "theme_color": "#0d44e8",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "start_url": "/",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 {
-  "summary": "Plan d'implémentation pour l'intégration des modules d'audit, de réassort stocks et de paramètres système dans le tableau de bord administrateur modernisé, tout en préservant l'ensemble des fonctionnalités existantes (connexion Google, WhatsApp automatique, brouillons hors-ligne).",
-  "updatedAt": "2026-10-19T09:52:56.148299943Z",
+  "summary": "Plan de mise en production et sécurisation avant déploiement : suppression des identifiants et données de démonstration, mot de passe administrateur secret configurable, et activation du serveur backend Express centralisé.",
+  "updatedAt": "2026-10-19T10:50:11.690383144Z",
   "requestFeedback": true,
   "userFacing": true
 }

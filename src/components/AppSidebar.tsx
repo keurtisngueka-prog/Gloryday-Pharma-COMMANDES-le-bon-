@@ -34,6 +34,9 @@ interface AppSidebarProps {
   onOpenAuth: () => void;
   onOpenCreateProduct?: () => void;
   onLogoClick?: () => void;
+  onSwitchRole?: (role: AppRole) => void;
+  onOpenDraftsModal?: () => void;
+  draftsCount?: number;
 }
 
 export const AppSidebar: React.FC<AppSidebarProps> = ({

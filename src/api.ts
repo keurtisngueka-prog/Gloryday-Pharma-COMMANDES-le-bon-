@@ -18,6 +18,7 @@ import { INITIAL_PRODUCTS, INITIAL_PACKS } from './data/initialProducts';
 import { getEstimatedDeliveryText, detectNeighborhoodFromAddress } from './data/librevilleZones';
 import { calculateCartVolumeSummary, calculateItemVolumePrice } from './utils/volumeDiscount';
 import { generateWhatsAppMessageForStage } from './utils/whatsappNotifications';
+import { recordAuditLog } from './utils/auditLogger';
 
 const TOKEN_KEY = 'gloryday_auth_token';
 const GUEST_ORDERS_KEY = 'gloryday_guest_orders';
@@ -33,72 +34,25 @@ export function normalizePhone(p: string): string {
   return (p || '').replace(/[\s\-\.\(\)]/g, '').toLowerCase();
 }
 
-const DEFAULT_ACCOUNTS: StoredAccount[] = [
-  {
-    user: {
-      id: 'usr-ste-marie',
-      phone: '+24177001122',
-      facilityName: 'Clinique Sainte-Marie',
-      contactName: 'Dr. Jeanne Ndong',
-      facilityType: 'Clinique',
-      role: 'client',
-      deliveryAddress: 'Quartier Louis, Libreville, Gabon',
-      coordinates: { lat: 0.4022, lng: 9.4442 },
-      createdAt: '2026-01-10T08:00:00Z'
-    },
-    passwordHash: 'client123'
-  },
-  {
-    user: {
-      id: 'usr-pharma-mer',
-      phone: '+24166334455',
-      facilityName: 'Pharmacie du Bord de Mer',
-      contactName: 'Dr. Obame',
-      facilityType: 'Pharmacie',
-      role: 'client',
-      deliveryAddress: 'Boulevard Triomphal, Libreville, Gabon',
-      coordinates: { lat: 0.3920, lng: 9.4530 },
-      createdAt: '2026-01-15T09:30:00Z'
-    },
-    passwordHash: 'pharma123'
-  },
-  {
-    user: {
-      id: 'usr-rapha',
-      phone: '+24174001122',
-      facilityName: 'Polyclinique El Rapha',
-      contactName: 'Dr. Mengue (Major de Bloc)',
-      facilityType: 'Polyclinique',
-      role: 'client',
-      deliveryAddress: 'Batterie 4, Libreville, Gabon',
-      coordinates: { lat: 0.418, lng: 9.432 },
-      createdAt: '2026-01-20T10:15:00Z'
-    },
-    passwordHash: 'rapha123'
-  }
-];
+const DEMO_ACCOUNT_IDS = new Set(['usr-ste-marie', 'usr-pharma-mer', 'usr-rapha']);
+const DEMO_ORDER_IDS = new Set(['ord-demo-01', 'ord-demo-02']);
 
 export function getRegisteredAccounts(): StoredAccount[] {
   try {
     const raw = localStorage.getItem(REGISTERED_USERS_KEY);
     if (!raw) {
-      localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(DEFAULT_ACCOUNTS));
-      return DEFAULT_ACCOUNTS;
+      return [];
     }
     const accounts: StoredAccount[] = JSON.parse(raw);
-    let modified = false;
-    for (const def of DEFAULT_ACCOUNTS) {
-      if (!accounts.some(a => normalizePhone(a.user.phone) === normalizePhone(def.user.phone))) {
-        accounts.push(def);
-        modified = true;
-      }
+    const cleaned = Array.isArray(accounts)
+      ? accounts.filter(a => a?.user && !DEMO_ACCOUNT_IDS.has(a.user.id))
+      : [];
+    if (cleaned.length !== accounts.length) {
+      localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(cleaned));
     }
-    if (modified) {
-      localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(accounts));
-    }
-    return accounts;
+    return cleaned;
   } catch {
-    return DEFAULT_ACCOUNTS;
+    return [];
   }
 }
 
@@ -134,109 +88,17 @@ export function setStoredCustomerInfo(info: any) {
 export function getLocalGuestOrders(): Order[] {
   try {
     const raw = localStorage.getItem(GUEST_ORDERS_KEY);
-    if (raw) {
-      return JSON.parse(raw);
+    if (!raw) {
+      return [];
     }
-    // Default mock orders with active delivery tracking for demonstration
-    const defaultOrders: Order[] = [
-      {
-        id: 'ord-demo-01',
-        reference: 'GP-2026-0089',
-        createdAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-        customer: {
-          facilityName: 'Polyclinique El Rapha',
-          facilityType: 'Polyclinique',
-          contactName: 'Dr. Mengue (Major de Bloc)',
-          phone: '+24177001122',
-          deliveryAddress: 'Batterie 4, Libreville, Gabon',
-          deliveryMode: 'livraison',
-          paymentMethod: 'airtel_money',
-          coordinates: { lat: 0.418, lng: 9.432 }
-        },
-        items: [
-          {
-            productId: 'c-ser-01',
-            productName: 'Seringue 2 ml 3 pièces avec aiguille',
-            variant: 'Boîte de 100 unités (21G)',
-            price: 7500,
-            quantity: 3,
-            total: 22500,
-            isQuote: false
-          },
-          {
-            productId: 'c-gant-01',
-            productName: "Gants d'examen latex poudrés",
-            variant: 'Boîte de 100 gants - Taille M',
-            price: 4500,
-            quantity: 5,
-            total: 22500,
-            isQuote: false
-          },
-          {
-            productId: 'c-cath-01',
-            productName: 'Cathéter court intraveineux (Cathlon)',
-            variant: 'Boîte de 50 (20G Rose)',
-            price: 11000,
-            quantity: 2,
-            total: 22000,
-            isQuote: false
-          }
-        ],
-        estimatedTotal: 67000,
-        hasQuoteItems: false,
-        status: 'En préparation',
-        isPaid: true,
-        deliveryStage: 'in_transit',
-        courier: {
-          name: 'Alexandre Moundounga',
-          phone: '+24177003004',
-          vehicle: 'Moto Express Honda GP-04',
-          matricule: 'COUR-LBV-04',
-          currentZone: 'En cours d’acheminement : Axe Boulevard Triomphal ➔ Batterie 4',
-          estimatedTime: '20-30 min'
-        }
-      },
-      {
-        id: 'ord-demo-02',
-        reference: 'GP-2026-0042',
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 26).toISOString(),
-        customer: {
-          facilityName: 'Pharmacie du Bord de Mer',
-          facilityType: 'Pharmacie',
-          contactName: 'Dr. Obame',
-          phone: '+24166334455',
-          deliveryAddress: 'Boulevard de la Mer, Libreville',
-          deliveryMode: 'livraison',
-          paymentMethod: 'especes'
-        },
-        items: [
-          {
-            productId: 'c-perf-01',
-            productName: 'Perfuseur de précision avec régulateur',
-            variant: 'Carton de 25 unités',
-            price: 18500,
-            quantity: 2,
-            total: 37000,
-            isQuote: false
-          }
-        ],
-        estimatedTotal: 37000,
-        hasQuoteItems: false,
-        status: 'Livrée',
-        isPaid: true,
-        deliveryStage: 'delivered',
-        courier: {
-          name: 'Jean-Marc Nze',
-          phone: '+24177003004',
-          vehicle: 'Pick-up Isuzu GP-Log',
-          matricule: 'LOG-LBV-02',
-          currentZone: 'Livré et émargé au comptoir pharmacie',
-          estimatedTime: 'Livré'
-        }
-      }
-    ];
-    localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(defaultOrders));
-    return defaultOrders;
+    const parsed: Order[] = JSON.parse(raw);
+    const cleaned = Array.isArray(parsed)
+      ? parsed.filter(o => o && !DEMO_ORDER_IDS.has(o.id))
+      : [];
+    if (cleaned.length !== parsed.length) {
+      localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(cleaned));
+    }
+    return cleaned;
   } catch {
     return [];
   }
@@ -903,6 +765,16 @@ export const api = {
         orders[idx].whatsappLogs = [logEntry, ...orders[idx].whatsappLogs];
         orders[idx].lastWhatsAppNotifiedStage = deliveryStage;
 
+        recordAuditLog({
+          category: 'delivery',
+          action: `Transition Logistique : ${STAGE_LABELS[deliveryStage] || deliveryStage}`,
+          actorName: 'Équipe Logistique Gloryday',
+          actorRole: 'Logistique',
+          targetReference: orders[idx].reference,
+          details: `Mise à jour de l'étape de livraison et déclenchement automatique WhatsApp vers ${orders[idx].customer?.facilityName} (${orders[idx].customer?.phone}).`,
+          status: 'success'
+        });
+
         localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(orders));
         return orders[idx];
       }
@@ -927,6 +799,15 @@ export const api = {
             orders[idx].mobilePayment.validatedAt = new Date().toISOString();
           }
         }
+        recordAuditLog({
+          category: 'order',
+          action: isPaid ? 'Validation Encaissement Commande' : 'Annulation Statut Paiement',
+          actorName: 'Direction Générale Gloryday',
+          actorRole: 'Super-Admin',
+          targetReference: orders[idx].reference,
+          details: `Statut de paiement de la commande ${orders[idx].reference} (${orders[idx].customer?.facilityName}) passé à : ${isPaid ? 'PAYÉE' : 'NON PAYÉE'}.`,
+          status: isPaid ? 'success' : 'warning'
+        });
         localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(orders));
         return orders[idx];
       }
@@ -960,24 +841,28 @@ export const api = {
     try {
       return await request<AdminStats>('/api/admin/stats');
     } catch {
+      const orders = getLocalGuestOrders();
+      const validOrders = orders.filter(o => o.status !== 'Annulée');
+      const totalRevenue = validOrders.reduce((s, o) => s + o.estimatedTotal, 0);
+      const ordersToConfirm = orders.filter(o => o.status === 'À confirmer').length;
       return {
-        totalRevenue: 1250000,
-        ordersToConfirm: 3,
-        monthOrdersCount: 18,
-        averageBasket: 69400,
-        totalClients: 8,
-        pendingPaymentAmount: 320000,
+        totalRevenue,
+        ordersToConfirm,
+        monthOrdersCount: validOrders.length,
+        averageBasket: validOrders.length > 0 ? Math.round(totalRevenue / validOrders.length) : 0,
+        totalClients: getRegisteredAccounts().length,
+        pendingPaymentAmount: validOrders.filter(o => !o.isPaid).reduce((s, o) => s + o.estimatedTotal, 0),
         salesLast14Days: [],
         ordersByStatus: {
-          'À confirmer': 3,
-          'Confirmée': 5,
-          'En préparation': 4,
-          'Livrée': 12,
-          'Annulée': 1
+          'À confirmer': orders.filter(o => o.status === 'À confirmer').length,
+          'Confirmée': orders.filter(o => o.status === 'Confirmée').length,
+          'En préparation': orders.filter(o => o.status === 'En préparation').length,
+          'Livrée': orders.filter(o => o.status === 'Livrée').length,
+          'Annulée': orders.filter(o => o.status === 'Annulée').length
         },
         topProducts: [],
-        priorityOrders: [],
-        inactiveClientsCount: 2
+        priorityOrders: orders.filter(o => o.status === 'À confirmer').slice(0, 5),
+        inactiveClientsCount: 0
       };
     }
   },

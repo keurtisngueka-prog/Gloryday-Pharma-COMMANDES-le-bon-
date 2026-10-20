@@ -637,19 +637,18 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         <MobilePaymentModal
           isOpen={true}
           onClose={() => setSelectedPaymentOrder(null)}
-          orderTotal={selectedPaymentOrder.estimatedTotal}
-          orderReference={selectedPaymentOrder.reference}
-          facilityName={selectedPaymentOrder.customer.facilityName}
-          initialProvider={
-            selectedPaymentOrder.mobilePayment?.provider || 
-            (selectedPaymentOrder.customer.paymentMethod === 'moov_money' ? 'moov_money' : 'airtel_money')
-          }
-          initialDetails={selectedPaymentOrder.mobilePayment || {
-            provider: selectedPaymentOrder.customer.paymentMethod === 'moov_money' ? 'moov_money' : 'airtel_money',
-            merchantPhone: selectedPaymentOrder.customer.paymentMethod === 'moov_money' ? '066240399' : '077003004',
-            senderPhone: selectedPaymentOrder.customer.phone
+          order={selectedPaymentOrder}
+          allOrders={orders}
+          onPaymentConfirmed={async (transactionId, operator, status) => {
+            await handleSaveMobilePayment({
+              provider: operator,
+              merchantPhone: operator === 'moov_money' ? '066240399' : '077003004',
+              transactionReference: transactionId,
+              senderPhone: selectedPaymentOrder.customer.phone,
+              status: status || 'submitted',
+              validatedAt: new Date().toISOString()
+            });
           }}
-          onSavePayment={handleSaveMobilePayment}
         />
       )}
     </div>

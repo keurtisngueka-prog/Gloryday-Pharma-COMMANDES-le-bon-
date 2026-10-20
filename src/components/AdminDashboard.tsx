@@ -23,7 +23,8 @@ import {
   Layers,
   MapPin,
   Calendar,
-  Check
+  Check,
+  Settings
 } from 'lucide-react';
 import { Order, OrderStatus, AdminStats, Pack, Product, User, AppRole, DeliveryStage, AppNotification } from '../types';
 import { ProductFormModal } from './ProductFormModal';
@@ -31,7 +32,12 @@ import { BestClientsModule } from './BestClientsModule';
 import { DirectMessagingModal } from './DirectMessagingModal';
 import { ClientPurchasesStatsModule } from './ClientPurchasesStatsModule';
 import { DataExportModule } from './DataExportModule';
+import { AuditLogModule } from './AuditLogModule';
+import { StockLotsModule } from './StockLotsModule';
+import { SystemSettingsModule } from './SystemSettingsModule';
 import { generateWhatsAppMessageForStage } from '../utils/whatsappNotifications';
+
+export type AdminSubTab = 'kpi' | 'orders' | 'packs' | 'stock' | 'lots' | 'clients' | 'stats-achats' | 'audit' | 'settings' | 'export-deploy';
 
 interface AdminDashboardProps {
   stats: AdminStats | null;
@@ -50,7 +56,7 @@ interface AdminDashboardProps {
   onProductSaved: (product: Product) => void;
   onToggleProductStock: (productId: string, currentStatus: 'disponible' | 'rupture') => Promise<void>;
   onRefresh: () => void;
-  defaultSubTab?: 'kpi' | 'orders' | 'packs' | 'stock' | 'clients' | 'stats-achats' | 'export-deploy';
+  defaultSubTab?: AdminSubTab;
   onOpenDeliveryModal?: (order: Order) => void;
 }
 
@@ -79,7 +85,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const isGestionnaire = role === 'Gestionnaire Catalogue' || isSuperAdmin;
   const isLogistique = role === 'Logistique' || isSuperAdmin;
 
-  const [activeTab, setActiveTab] = useState<'kpi' | 'orders' | 'packs' | 'stock' | 'clients' | 'stats-achats' | 'export-deploy'>(defaultSubTab);
+  const [activeTab, setActiveTab] = useState<AdminSubTab>(defaultSubTab);
   const [searchQuery, setSearchQuery] = useState('');
   const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | 'to_confirm' | 'confirmed' | 'preparation' | 'delivered' | 'cancelled'>('all');
   const [stockSearchQuery, setStockSearchQuery] = useState('');
@@ -218,12 +224,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }`}
           >
             <Package className="w-3.5 h-3.5" />
-            <span>Catalogue & Stocks</span>
+            <span>Catalogue & Produits</span>
             <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
               activeTab === 'stock' ? 'bg-white text-emerald-800' : 'bg-slate-200 text-slate-700'
             }`}>
               {products.length}
             </span>
+          </button>
+        )}
+        {isGestionnaire && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('lots')}
+            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'lots' ? 'bg-amber-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Réassort & Disponibilité</span>
+            {outOfStockCount > 0 && (
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                activeTab === 'lots' ? 'bg-white text-amber-800' : 'bg-rose-100 text-rose-800'
+              }`}>
+                {outOfStockCount}
+              </span>
+            )}
           </button>
         )}
         {isSuperAdmin && (
@@ -234,7 +259,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               activeTab === 'stats-achats' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <Layers className="w-3.5 h-3.5" />
+            <TrendingUp className="w-3.5 h-3.5" />
             <span>Statistiques Établissements</span>
           </button>
         )}
@@ -248,6 +273,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           >
             <Users className="w-3.5 h-3.5" />
             <span>Cliniques & Contacts ({clients.length})</span>
+          </button>
+        )}
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('audit')}
+            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'audit' ? 'bg-indigo-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Journal d'Audit</span>
+          </button>
+        )}
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('settings')}
+            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'settings' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Settings className="w-3.5 h-3.5" />
+            <span>Paramètres Système</span>
           </button>
         )}
         {isSuperAdmin && (
@@ -315,6 +364,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
               <div className="text-[10px] text-rose-700 mt-1 font-medium">Articles en rupture</div>
             </div>
+          </div>
+
+          {/* Quick Thematic Navigation Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+            <button
+              type="button"
+              onClick={() => setActiveTab('lots')}
+              className="p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-amber-400 text-left transition-all shadow-2xs flex items-start gap-3 cursor-pointer"
+            >
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
+                <Layers className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Réassort & Disponibilité Stocks</h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Gérez les états Disponible / Rupture et copiez la liste de réapprovisionnement fournisseur.
+                </p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('audit')}
+              className="p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-indigo-400 text-left transition-all shadow-2xs flex items-start gap-3 cursor-pointer"
+            >
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Journal d'Audit & Traçabilité</h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Historique certifié des notifications WhatsApp automatiques, validations et connexions.
+                </p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('settings')}
+              className="p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-blue-400 text-left transition-all shadow-2xs flex items-start gap-3 cursor-pointer"
+            >
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#0d44e8] flex items-center justify-center shrink-0">
+                <Settings className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Paramètres Système & Mobile Money</h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Configurez les comptes Airtel/Moov Money, les seuils de livraison et les modèles WhatsApp.
+                </p>
+              </div>
+            </button>
           </div>
         </div>
       )}
@@ -614,6 +714,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
+      {/* 5B. TAB: STOCK LOTS & RESTOCK AVAILABILITY */}
+      {activeTab === 'lots' && isGestionnaire && (
+        <StockLotsModule
+          products={products}
+          onToggleProductStock={onToggleProductStock}
+          actorName={currentUser.contactName || currentUser.facilityName}
+          actorRole={role}
+        />
+      )}
+
       {/* 6. TAB 4: CLIENT PURCHASES STATS */}
       {activeTab === 'stats-achats' && isSuperAdmin && (
         <ClientPurchasesStatsModule orders={orders} clients={clients} products={products} />
@@ -648,6 +758,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             ))}
           </div>
         </div>
+      )}
+
+      {/* 7B. TAB: AUDIT LOGS */}
+      {activeTab === 'audit' && isSuperAdmin && (
+        <AuditLogModule orders={orders} />
+      )}
+
+      {/* 7C. TAB: SYSTEM SETTINGS */}
+      {activeTab === 'settings' && isSuperAdmin && (
+        <SystemSettingsModule
+          actorName={currentUser.contactName || currentUser.facilityName}
+          actorRole={role}
+        />
       )}
 
       {/* 8. TAB 6: EXPORT & CLOUD BACKUP */}
