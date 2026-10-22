@@ -338,7 +338,19 @@ export class SupabaseStorePersistence {
       messages: mergeById(remoteMessages, local.messages, (item) => item.id),
       notifications: mergeById(remoteNotifications, local.notifications, (item) => item.id),
     };
-    this.baseline = clone(rawMerged);
+    // Keep the comparison baseline limited to what was actually loaded from
+    // Supabase. Local seed data must remain a change so the first persist can
+    // upsert it into the database instead of silently treating it as synced.
+    this.baseline = clone({
+      products: remoteProducts,
+      packs: remotePacks,
+      orders: remoteOrders,
+      accounts: remoteAccounts,
+      staffAccounts: remoteStaffAccounts,
+      quotes: remoteQuotes,
+      messages: remoteMessages,
+      notifications: remoteNotifications,
+    });
     const cleanedMerged: PersistentServerStore = {
       ...rawMerged,
       products: rawMerged.products.filter((item) => !LEGACY_DEMO_PRODUCT_IDS.has(item.id)),

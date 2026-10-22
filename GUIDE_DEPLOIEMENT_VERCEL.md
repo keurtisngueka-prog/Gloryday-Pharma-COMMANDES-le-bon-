@@ -10,13 +10,17 @@ Ce guide prépare le déploiement, mais ne publie pas le projet et ne modifie pa
 
 Dans le SQL Editor du projet Supabase de production, appliquer les migrations dans cet ordre :
 
-1. `supabase/migrations/20261020000002_supabase_app_persistence.sql`
-2. `supabase/migrations/20261021000001_staff_accounts.sql`
-3. `supabase/migrations/20261021000002_delivery_location_points.sql`
-4. `supabase/migrations/20261021000003_admin_simple_role.sql`
-5. `supabase/migrations/20261021000004_app_sessions.sql`
+1. `supabase/migrations/20261019000001_initial_schema.sql`
+2. `supabase/migrations/20261019000002_rls_policies.sql`
+3. `supabase/migrations/20261019000003_seed_admin_and_catalog.sql`
+4. `supabase/migrations/20261020000002_supabase_app_persistence.sql`
+5. `supabase/migrations/20261021000001_staff_accounts.sql`
+6. `supabase/migrations/20261021000002_delivery_location_points.sql`
+7. `supabase/migrations/20261021000003_admin_simple_role.sql`
+8. `supabase/migrations/20261021000004_app_sessions.sql`
+9. `supabase/migrations/20261022000001_staff_permissions_and_runtime_settings.sql`
 
-Ne rejouez pas les anciennes migrations de création sur une base déjà utilisée. Vérifiez que l’URL et la clé privée du projet de production sont celles que vous voulez raccorder.
+Sur une base déjà utilisée, n’exécutez que les migrations qui lui manquent : ne rejouez pas les migrations de création ou de données. Vérifiez que l’URL et la clé privée du projet de production sont celles que vous voulez raccorder.
 
 ## 2. Importer le dépôt dans Vercel
 
