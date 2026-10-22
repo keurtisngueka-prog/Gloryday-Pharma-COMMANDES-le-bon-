@@ -282,7 +282,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* 2. SUB-TABS NAVIGATION WITH DYNAMIC BADGES */}
-      <nav aria-label="Sections du tableau de bord" className="flex items-center gap-1.5 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1.5 pb-1 text-xs font-bold shadow-sm scrollbar-none">
+      <nav aria-label="Sections du tableau de bord" className="flex gap-1.5 overflow-x-auto border-b border-slate-200 pb-1 text-xs font-bold scrollbar-none">
         {(isSuperAdmin || isSimpleAdmin) && (
           <button
             type="button"
