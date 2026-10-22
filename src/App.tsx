@@ -218,14 +218,59 @@ export default function App() {
     }, 4500);
   };
 
-  const getOrderSubmissionKey = (customer: CustomerInfo, items: CartItem[]): string => {
-    const fingerprint = JSON.stringify({ userId: currentUser?.id, customer, items });
+  const getOrderSubmissionKey = async (items: CartItem[]): Promise<string> => {
+    // Match retries to the same account and cart, even if delivery details are re-entered after a refresh.
+    const fingerprintSource = JSON.stringify({
+      userId: currentUser?.id,
+      items: items.map(({ productId, variant, quantity, isQuote }) => ({ productId, variant, quantity, isQuote }))
+    });
+    let fingerprint: string;
+    try {
+      const digest = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(fingerprintSource));
+      fingerprint = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+    } catch {
+      let hash = 2166136261;
+      for (let index = 0; index < fingerprintSource.length; index += 1) {
+        hash = Math.imul(hash ^ fingerprintSource.charCodeAt(index), 16777619);
+      }
+      fingerprint = (hash >>> 0).toString(36);
+    }
+
     const activeSubmission = orderSubmissionKeyRef.current;
     if (activeSubmission?.fingerprint === fingerprint) return activeSubmission.key;
 
+    const storageKey = `gloryday_order_submission_${currentUser?.id || 'guest'}`;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null') as { fingerprint?: unknown; key?: unknown } | null;
+      if (
+        saved?.fingerprint === fingerprint &&
+        typeof saved.key === 'string' &&
+        /^[A-Za-z0-9_-]{8,128}$/.test(saved.key)
+      ) {
+        orderSubmissionKeyRef.current = { fingerprint, key: saved.key };
+        return saved.key;
+      }
+    } catch {
+      // Storage may be unavailable in private browsing; the in-memory guard still prevents rapid repeats.
+    }
+
     const key = `order-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
     orderSubmissionKeyRef.current = { fingerprint, key };
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify({ fingerprint, key }));
+    } catch {
+      // The order can still be submitted when session storage is unavailable.
+    }
     return key;
+  };
+
+  const clearOrderSubmissionKey = (clearInMemory = true) => {
+    try {
+      sessionStorage.removeItem(`gloryday_order_submission_${currentUser?.id || 'guest'}`);
+    } catch {
+      // Storage may be unavailable in private browsing.
+    }
+    if (clearInMemory) orderSubmissionKeyRef.current = null;
   };
 
   // Sync drafts count on mount, user change, or storage / custom events
@@ -589,8 +634,14 @@ export default function App() {
     try {
       setIsSubmittingOrder(true);
       // createOrder resolves only after the API has returned its saved order; PDF work starts after that confirmation.
-      const idempotencyKey = getOrderSubmissionKey(pendingCustomerInfo, cartItems);
+      const idempotencyKey = await getOrderSubmissionKey(cartItems);
       const newOrder = await api.createOrder(pendingCustomerInfo, cartItems, idempotencyKey);
+      try {
+        localStorage.setItem(getCartStorageKey(currentUser), JSON.stringify([]));
+      } catch {
+        // The server has accepted the order; do not prevent the success screen if local storage is unavailable.
+      }
+      clearOrderSubmissionKey(false);
       setCartItems([]);
       setIsPreviewModalOpen(false);
       setConfirmedOrder(newOrder);
@@ -654,9 +705,10 @@ export default function App() {
     setIsSubmittingOrder(true);
     try {
       // Keep the draft until the API confirms persistence, then prepare its PDF.
-      const idempotencyKey = getOrderSubmissionKey(completeCustomerInfo, draft.items);
+      const idempotencyKey = await getOrderSubmissionKey(draft.items);
       const newOrder = await api.createOrder(completeCustomerInfo, draft.items, idempotencyKey);
       deleteDraft(draft.id, currentUser?.phone);
+      clearOrderSubmissionKey(false);
       setDraftsCount(getStoredDrafts(currentUser?.phone).length);
       setIsDraftsModalOpen(false);
       setConfirmedOrder(newOrder);
@@ -887,7 +939,7 @@ export default function App() {
             pdfStorageFailed={confirmedPdfStorageFailed}
             onRetryPdf={() => { void prepareConfirmedOrderPdf(confirmedOrder); }}
             onNewOrder={() => {
-              orderSubmissionKeyRef.current = null;
+              clearOrderSubmissionKey();
               setConfirmedOrder(null);
               setConfirmedPdfDataUrl(undefined);
               setConfirmedPdfFailed(false);
@@ -895,7 +947,7 @@ export default function App() {
               setActiveTab('catalog');
             }}
             onViewDashboard={() => {
-              orderSubmissionKeyRef.current = null;
+              clearOrderSubmissionKey();
               setConfirmedOrder(null);
               setConfirmedPdfStorageFailed(false);
               setActiveTab('dashboard');
