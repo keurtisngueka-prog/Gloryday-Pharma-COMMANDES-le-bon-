@@ -174,32 +174,33 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
 
         {/* Actions */}
         <div className="p-4 bg-white border-t border-slate-100 flex flex-col-reverse sm:flex-row items-center justify-between gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={onBackToEdit}
-            disabled={isSubmitting}
-            className="w-full sm:w-auto h-11 px-4 rounded-xl border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-50 transition-colors cursor-pointer"
-          >
-            Modifier le panier
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={isSubmitting}
-            className="w-full sm:w-auto h-11 px-6 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md cursor-pointer disabled:opacity-50"
-            style={{
-              boxShadow: 'rgba(4, 24, 85, 0.28) 0px 2px 6px -1px, rgba(66, 174, 247, 0.48) 0px 6px 14px 0px inset'
-            }}
-          >
-            {isSubmitting ? (
-              <span>Génération du bon...</span>
-            ) : (
-              <>
+          {isSubmitting ? (
+            <div role="status" aria-live="polite" className="w-full min-h-11 flex items-center justify-center gap-2 rounded-xl bg-blue-50 px-4 text-center text-xs font-bold text-[#0d44e8]">
+              <span className="w-4 h-4 rounded-full border-2 border-blue-200 border-t-[#0d44e8] animate-spin" />
+              <span>Commande en cours d’enregistrement. Ne validez pas à nouveau.</span>
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onBackToEdit}
+                className="w-full sm:w-auto h-11 px-4 rounded-xl border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-50 transition-colors cursor-pointer"
+              >
+                Modifier le panier
+              </button>
+              <button
+                type="button"
+                onClick={onConfirm}
+                className="w-full sm:w-auto h-11 px-6 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md cursor-pointer"
+                style={{
+                  boxShadow: 'rgba(4, 24, 85, 0.28) 0px 2px 6px -1px, rgba(66, 174, 247, 0.48) 0px 6px 14px 0px inset'
+                }}
+              >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>Enregistrer la commande et préparer le bon PDF</span>
-              </>
-            )}
-          </button>
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

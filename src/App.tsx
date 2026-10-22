@@ -205,6 +205,8 @@ export default function App() {
   const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
   const [pendingCustomerInfo, setPendingCustomerInfo] = useState<CustomerInfo | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const orderSubmissionInFlightRef = useRef(false);
+  const orderSubmissionKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const [previewPdfOrder, setPreviewPdfOrder] = useState<{ order: Order; dataUrl: string } | null>(null);
   const [showZipDownloadBar, setShowZipDownloadBar] = useState(true);
   const [toastBanner, setToastBanner] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
@@ -214,6 +216,16 @@ export default function App() {
     setTimeout(() => {
       setToastBanner(current => (current?.message === message ? null : current));
     }, 4500);
+  };
+
+  const getOrderSubmissionKey = (customer: CustomerInfo, items: CartItem[]): string => {
+    const fingerprint = JSON.stringify({ userId: currentUser?.id, customer, items });
+    const activeSubmission = orderSubmissionKeyRef.current;
+    if (activeSubmission?.fingerprint === fingerprint) return activeSubmission.key;
+
+    const key = `order-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
+    orderSubmissionKeyRef.current = { fingerprint, key };
+    return key;
   };
 
   // Sync drafts count on mount, user change, or storage / custom events
@@ -572,10 +584,13 @@ export default function App() {
       setIsAuthModalOpen(true);
       return;
     }
+    if (orderSubmissionInFlightRef.current) return;
+    orderSubmissionInFlightRef.current = true;
     try {
       setIsSubmittingOrder(true);
       // createOrder resolves only after the API has returned its saved order; PDF work starts after that confirmation.
-      const newOrder = await api.createOrder(pendingCustomerInfo, cartItems);
+      const idempotencyKey = getOrderSubmissionKey(pendingCustomerInfo, cartItems);
+      const newOrder = await api.createOrder(pendingCustomerInfo, cartItems, idempotencyKey);
       setCartItems([]);
       setIsPreviewModalOpen(false);
       setConfirmedOrder(newOrder);
@@ -587,6 +602,7 @@ export default function App() {
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : 'Erreur réseau ou serveur lors de la confirmation. Vérifiez « Mes commandes » avant de réessayer.', 'error');
     } finally {
+      orderSubmissionInFlightRef.current = false;
       setIsSubmittingOrder(false);
     }
   };
@@ -633,10 +649,13 @@ export default function App() {
       notes: draft.notes || ''
     };
 
+    if (orderSubmissionInFlightRef.current) return;
+    orderSubmissionInFlightRef.current = true;
     setIsSubmittingOrder(true);
     try {
       // Keep the draft until the API confirms persistence, then prepare its PDF.
-      const newOrder = await api.createOrder(completeCustomerInfo, draft.items);
+      const idempotencyKey = getOrderSubmissionKey(completeCustomerInfo, draft.items);
+      const newOrder = await api.createOrder(completeCustomerInfo, draft.items, idempotencyKey);
       deleteDraft(draft.id, currentUser?.phone);
       setDraftsCount(getStoredDrafts(currentUser?.phone).length);
       setIsDraftsModalOpen(false);
@@ -649,6 +668,7 @@ export default function App() {
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : 'Erreur réseau ou serveur. Le brouillon est conservé; vérifiez « Mes commandes » avant de réessayer.', 'error');
     } finally {
+      orderSubmissionInFlightRef.current = false;
       setIsSubmittingOrder(false);
     }
   };
@@ -867,6 +887,7 @@ export default function App() {
             pdfStorageFailed={confirmedPdfStorageFailed}
             onRetryPdf={() => { void prepareConfirmedOrderPdf(confirmedOrder); }}
             onNewOrder={() => {
+              orderSubmissionKeyRef.current = null;
               setConfirmedOrder(null);
               setConfirmedPdfDataUrl(undefined);
               setConfirmedPdfFailed(false);
@@ -874,6 +895,7 @@ export default function App() {
               setActiveTab('catalog');
             }}
             onViewDashboard={() => {
+              orderSubmissionKeyRef.current = null;
               setConfirmedOrder(null);
               setConfirmedPdfStorageFailed(false);
               setActiveTab('dashboard');

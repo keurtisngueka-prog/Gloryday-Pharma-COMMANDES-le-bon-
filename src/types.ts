@@ -232,6 +232,7 @@ export interface OrderDraft {
 export interface Order {
   id: string;
   reference: string; // GP-2026-00001
+  idempotencyKey?: string;
   createdAt: string;
   userId?: string;
   customer: CustomerInfo;

@@ -1374,6 +1374,21 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(400).json({ error: 'Informations client et articles requis.' });
       return;
     }
+    const rawIdempotencyKey = req.body?.idempotencyKey;
+    const idempotencyKey = typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey.trim() : '';
+    if (rawIdempotencyKey !== undefined && (!idempotencyKey || !/^[A-Za-z0-9_-]{8,128}$/.test(idempotencyKey))) {
+      res.status(400).json({ error: 'Identifiant de validation invalide. Actualisez la page avant de réessayer.' });
+      return;
+    }
+    if (idempotencyKey) {
+      const existingOrder = store.orders.find(order =>
+        order.userId === account.user.id && order.idempotencyKey === idempotencyKey
+      );
+      if (existingOrder) {
+        res.status(200).json(existingOrder);
+        return;
+      }
+    }
     if (account.user.accountStatus && account.user.accountStatus !== 'actif') {
       res.status(403).json({ error: 'Ce compte ne peut pas encore passer commande. Contactez Gloryday Pharma.' });
       return;
@@ -1513,6 +1528,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const newOrder: Order = {
       id: `ord-${randomUUID()}`,
       reference,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
       createdAt: createdNow.toISOString(),
       userId: account.user.id,
       assignedCommercialId: account.user.assignedToCommercialId,

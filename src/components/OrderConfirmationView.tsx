@@ -82,7 +82,7 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
         Commande enregistrée
       </h1>
       <p className="text-xs text-slate-500 max-w-sm mx-auto mb-5">
-        Votre demande a été enregistrée et reste en attente de confirmation par Gloryday Pharma.
+        Votre commande est enregistrée sous la référence <strong className="text-slate-700">{order.reference}</strong>. Vous n’avez pas besoin de la valider à nouveau.
       </p>
 
       {/* Reference Card */}
@@ -211,7 +211,7 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
               Message prêt à envoyer par WhatsApp
             </h3>
             <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
-              Cliquez ci-dessous pour ouvrir le message préformaté dans WhatsApp et valider l'envoi auprès de notre service commercial.
+              Votre commande est déjà enregistrée. Ce bouton ouvre WhatsApp pour transmettre son récapitulatif au service commercial ; il ne crée pas une autre commande.
             </p>
           </div>
         </div>
@@ -249,7 +249,7 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
           className="w-full h-12 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-all text-center"
         >
           <MessageCircle className="w-4 h-4" />
-          <span>Envoyer la commande sur WhatsApp</span>
+          <span>Transmettre le récapitulatif sur WhatsApp</span>
         </a>
 
         <div className="mt-2.5 flex items-center gap-1 text-[11px] text-emerald-800 font-medium">

@@ -377,11 +377,11 @@ export const api = {
     return request<DirectMessage[]>('/api/messages');
   },
 
-  async createOrder(customer: Order['customer'], items: CartItem[]): Promise<Order> {
+  async createOrder(customer: Order['customer'], items: CartItem[], idempotencyKey: string): Promise<Order> {
     try {
       return await request<Order>('/api/orders', {
         method: 'POST',
-        body: JSON.stringify({ customer, items })
+        body: JSON.stringify({ customer, items, idempotencyKey })
       });
     } catch (error) {
       const requestStatus = (error as Error & { status?: number }).status;
