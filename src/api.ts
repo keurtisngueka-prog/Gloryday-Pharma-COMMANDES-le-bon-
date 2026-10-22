@@ -14,7 +14,10 @@ import {
   CourierInfo,
   DeliveryProof,
   DeliveryLocationPoint,
-  CourierTrackingInfo
+  CourierTrackingInfo,
+  StaffPermission,
+  VolumeDiscountSettings,
+  StaffActivityStats
 } from './types';
 
 export type StaffRole = Extract<AppRole, 'Admin simple' | 'Commercial' | 'Gestionnaire Catalogue' | 'Logistique'>;
@@ -24,10 +27,15 @@ export interface StaffAccountSummary {
   identifier: string;
   name: string;
   role: StaffRole;
+  permissions?: StaffPermission[];
   active: boolean;
   createdAt: string;
   updatedAt: string;
   source: 'managed' | 'environment';
+  isOnline?: boolean;
+  lastSeenAt?: string;
+  lastLoginAt?: string;
+  stats?: StaffActivityStats;
 }
 
 export function clearLocalDraftsAndCaches(): void {
@@ -139,12 +147,31 @@ export const api = {
     await request(`/api/products/${id}`, { method: 'DELETE' });
   },
 
-  async updateProductStatus(id: string, status: 'disponible' | 'rupture'): Promise<Product> {
+  async updateProductStatus(id: string, status: 'disponible' | 'rupture', quantityAvailable?: number): Promise<Product> {
     const res = await request<{ success: boolean; product: Product }>(`/api/products/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status })
+      body: JSON.stringify({ status, ...(typeof quantityAvailable === 'number' ? { quantityAvailable } : {}) })
     });
     return res.product;
+  },
+
+  async updateProductStock(id: string, quantityAvailable: number, status?: 'disponible' | 'rupture'): Promise<Product> {
+    const res = await request<{ success: boolean; product: Product }>(`/api/products/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: status || 'disponible', quantityAvailable })
+    });
+    return res.product;
+  },
+
+  async getVolumeDiscountSettings(): Promise<VolumeDiscountSettings> {
+    return request<VolumeDiscountSettings>('/api/settings/volume-discounts');
+  },
+
+  async updateVolumeDiscountSettings(settings: VolumeDiscountSettings): Promise<VolumeDiscountSettings> {
+    return request<VolumeDiscountSettings>('/api/admin/settings/volume-discounts', {
+      method: 'PUT',
+      body: JSON.stringify(settings)
+    });
   },
 
   async uploadMediaImage(file: File, tags?: string[]): Promise<MediaItem> {
@@ -275,14 +302,14 @@ export const api = {
     return request<StaffAccountSummary[]>('/api/admin/staff');
   },
 
-  async createStaffAccount(input: { identifier: string; name: string; role: StaffRole; password: string }): Promise<StaffAccountSummary> {
+  async createStaffAccount(input: { identifier: string; name: string; role: StaffRole; password: string; permissions?: StaffPermission[] }): Promise<StaffAccountSummary> {
     return request<StaffAccountSummary>('/api/admin/staff', {
       method: 'POST',
       body: JSON.stringify(input)
     });
   },
 
-  async updateStaffAccount(id: string, input: { identifier?: string; name?: string; role?: StaffRole; active?: boolean; password?: string }): Promise<StaffAccountSummary> {
+  async updateStaffAccount(id: string, input: { identifier?: string; name?: string; role?: StaffRole; active?: boolean; password?: string; permissions?: StaffPermission[] }): Promise<StaffAccountSummary> {
     return request<StaffAccountSummary>(`/api/admin/staff/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(input)
@@ -415,8 +442,12 @@ export const api = {
     };
   },
 
-  async getCourierTrackingStatus(orderId: string): Promise<{ active: boolean; expiresAt?: string }> {
-    return request<{ active: boolean; expiresAt?: string }>(`/api/orders/${encodeURIComponent(orderId)}/tracking-link`);
+  async getCourierTrackingStatus(orderId: string): Promise<{ active: boolean; expiresAt?: string; token?: string; url?: string }> {
+    const result = await request<{ active: boolean; expiresAt?: string; token?: string }>(`/api/orders/${encodeURIComponent(orderId)}/tracking-link`);
+    return {
+      ...result,
+      url: result.token ? new URL(`/courier-track/${encodeURIComponent(result.token)}`, window.location.origin).href : undefined,
+    };
   },
 
   async revokeCourierTracking(orderId: string): Promise<void> {
@@ -445,6 +476,13 @@ export const api = {
     return request<Order>(`/api/orders/${orderId}/mobile-payment`, {
       method: 'PATCH',
       body: JSON.stringify({ mobilePayment })
+    });
+  },
+
+  async updateOrderExpectedDelivery(orderId: string, expectedDeliveryDate: string, expectedDeliverySlot?: string): Promise<Order> {
+    return request<Order>(`/api/orders/${encodeURIComponent(orderId)}/expected-delivery`, {
+      method: 'PATCH',
+      body: JSON.stringify({ expectedDeliveryDate, expectedDeliverySlot })
     });
   },
 

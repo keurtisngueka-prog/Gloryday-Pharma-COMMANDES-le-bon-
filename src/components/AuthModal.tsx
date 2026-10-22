@@ -61,7 +61,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [locating, setLocating] = useState(false);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [adminIdentifier, setAdminIdentifier] = useState('admin');
+  const [adminIdentifier, setAdminIdentifier] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -983,8 +983,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[11px] text-slate-500 gap-1">
-                <span>Rôle attribué par le compte configuré.</span>
-                <span className="text-purple-700 font-medium">Compte initial : admin / GlorydayAdmin2026!</span>
+                <span>Accès strictement réservé au personnel autorisé.</span>
               </div>
 
               <button

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Trash2, 
   Plus, 
@@ -13,10 +13,13 @@ import {
   HelpCircle,
   Clock,
   Compass,
-  ShieldCheck
+  ShieldCheck,
+  TrendingDown,
+  CheckCircle2
 } from 'lucide-react';
 import { CartItem, Coordinates, CustomerInfo, User } from '../types';
 import { PhoneNumberInput } from './PhoneNumberInput';
+import { calculateCartVolumeSummary, calculateItemVolumePrice } from '../utils/volumeDiscount';
 import { 
   LIBREVILLE_ZONE_GROUPS, 
   getNeighborhoodById, 
@@ -63,6 +66,9 @@ export const CartView: React.FC<CartViewProps> = ({
   const [gpsMessage, setGpsMessage] = useState('');
   const [isLocatingGps, setIsLocatingGps] = useState(false);
 
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const facilityInputRef = useRef<HTMLInputElement | null>(null);
+
   useEffect(() => {
     if (currentUser) {
       if (currentUser.facilityName) setFacilityName(currentUser.facilityName);
@@ -89,15 +95,13 @@ export const CartView: React.FC<CartViewProps> = ({
     }
   }, [currentUser]);
 
-  const fixedItems = items.filter(it => !it.isQuote);
   const quoteItems = items.filter(it => it.isQuote);
-  const itemsSubtotal = fixedItems.reduce((acc, it) => acc + it.price * it.quantity, 0);
+  const deferredStockItems = items.filter(it => !it.isQuote && it.isDeferredStock);
+  const volumeSummary = calculateCartVolumeSummary(items);
+  const itemsSubtotal = volumeSummary.netTotal;
 
   const selectedNeighborhood = getNeighborhoodById(neighborhoodId);
   const deliveryWindow = computeDeliveryTimeWindow(neighborhoodId);
-  const deliveryDelayText = deliveryMode === 'retrait' 
-    ? 'Prêt sous 20 à 30 min (Dépôt Central Oloumi)'
-    : (selectedNeighborhood ? `${selectedNeighborhood.estimatedText} (${deliveryWindow.timeWindow})` : '45 à 60 minutes');
 
   // Free delivery for orders >= 50,000 FCFA or for pickup
   const baseDeliveryFee = deliveryMode === 'retrait' ? 0 : (selectedNeighborhood?.baseDeliveryFee || 0);
@@ -158,15 +162,24 @@ export const CartView: React.FC<CartViewProps> = ({
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const triggerOrderConfirmation = () => {
     setError(null);
     if (items.length === 0) {
       setError('Votre panier est vide.');
       return;
     }
+    if (!currentUser && onOpenAuth) {
+      onOpenAuth();
+      return;
+    }
+    if (currentUser && currentUser.role !== 'client') {
+      setError('La validation de commande est réservée aux comptes Établissements / Clients.');
+      return;
+    }
     if (!facilityName.trim() || !phone.trim()) {
-      setError('Veuillez remplir le nom de l\'établissement et le téléphone WhatsApp.');
+      setError('Veuillez vérifier le nom de l\'établissement et le téléphone WhatsApp ci-dessous.');
+      facilityInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      facilityInputRef.current?.focus();
       return;
     }
 
@@ -189,6 +202,11 @@ export const CartView: React.FC<CartViewProps> = ({
     };
 
     onProceedToPreview(customerInfo);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    triggerOrderConfirmation();
   };
 
   if (items.length === 0) {
@@ -216,45 +234,55 @@ export const CartView: React.FC<CartViewProps> = ({
   }
 
   return (
-    <div className="max-w-4xl mx-auto pb-24 px-2 sm:px-0">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-4 border-b border-slate-200 mb-6">
+    <div className="max-w-6xl mx-auto pb-36 lg:pb-24 px-2 sm:px-0">
+      {/* Header with Immediate Top CTA so the user never has to scroll */}
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200 mb-5">
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-[#161618] tracking-tight">
-            Mon panier
+            Mon panier & Bon de commande
           </h1>
           <p className="text-xs text-[#6a6a6b] mt-0.5">
-            {items.length} ligne(s) · estimation sans TVA
+            {items.length} ligne(s) · Total estimé : <strong className="text-slate-900">{estimatedTotal.toLocaleString('fr-FR')} FCFA</strong> (sans TVA)
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onClearCart}
-          className="text-xs text-rose-600 hover:text-rose-800 font-semibold flex items-center gap-1 cursor-pointer"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          Vider
-        </button>
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={onClearCart}
+            className="px-3 py-2 rounded-xl border border-rose-200 text-xs text-rose-600 hover:bg-rose-50 font-bold flex items-center gap-1 cursor-pointer"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Vider
+          </button>
+          <button
+            type="button"
+            onClick={triggerOrderConfirmation}
+            className="px-4 py-2.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-extrabold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span>Confirmer le bon de commande</span>
+          </button>
+        </div>
       </div>
 
       {/* Session / Account Attribution Notice */}
       <div className={`p-3 rounded-xl mb-4 text-xs flex items-center justify-between border ${
         currentUser
           ? 'bg-blue-50/70 border-blue-200 text-blue-900'
-          : 'bg-slate-50 border-slate-200 text-slate-700'
+          : 'bg-amber-50 border-amber-200 text-amber-950'
       }`}>
         <div className="flex items-center gap-2.5">
-          <Building2 className={`w-4 h-4 shrink-0 ${currentUser ? 'text-[#0d44e8]' : 'text-slate-500'}`} />
+          <Building2 className={`w-4 h-4 shrink-0 ${currentUser ? 'text-[#0d44e8]' : 'text-amber-700'}`} />
           <div>
             <span className="font-bold">
               {currentUser
                 ? `Panier attribué à : ${currentUser.facilityName}`
-                : 'Panier Visiteur Invité (Session Temporaire)'}
+                : 'Connexion requise pour enregistrer et générer le Bon de Commande PDF'}
             </span>
-            <p className="text-[11px] text-slate-500 mt-0.5">
+            <p className="text-[11px] text-slate-600 mt-0.5">
               {currentUser
-                ? `Enregistré sous votre compte (${currentUser.phone}) · Totalement indépendant et isolé des autres sessions.`
-                : 'Articles conservés temporairement sur ce navigateur. Connectez-vous pour enregistrer votre panier.'}
+                ? `Compte actif (${currentUser.phone}) · Vos coordonnées sont pré-remplies automatiquement.`
+                : 'Connectez-vous ou créez votre compte établissement en 30 secondes. Votre panier actuel est conservé.'}
             </p>
           </div>
         </div>
@@ -262,98 +290,118 @@ export const CartView: React.FC<CartViewProps> = ({
           <button
             type="button"
             onClick={onOpenAuth}
-            className="px-2.5 py-1 rounded-lg bg-[#0d44e8] text-white font-bold text-[11px] hover:bg-blue-700 transition-colors shrink-0 cursor-pointer shadow-xs ml-2"
+            className="px-3 py-1.5 rounded-xl bg-[#0d44e8] text-white font-bold text-xs hover:bg-blue-700 transition-colors shrink-0 cursor-pointer shadow-xs ml-2"
           >
-            Se connecter
+            Se connecter / S'inscrire
           </button>
         )}
       </div>
 
       {error && (
-        <div className="mb-6 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
+        <div className="mb-5 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
           <span>{error}</span>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Items */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: Cart Items */}
         <div className="lg:col-span-7 space-y-3">
           <div className="bg-white rounded-2xl border border-slate-200/80 divide-y divide-slate-100 overflow-hidden shadow-2xs">
-            {items.map((item, index) => (
-              <div key={`${item.productId}-${item.variant}-${index}`} className="p-4 flex items-center justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <span className="text-[10px] text-[#6a6a6b] font-medium block truncate">
-                    {item.category}
-                  </span>
-                  <h4 className="font-bold text-slate-900 text-xs sm:text-sm truncate">
-                    {item.productName}
-                  </h4>
-                  {item.variant && item.variant !== 'Standard' && (
-                    <p className="text-[11px] text-slate-500 truncate">
-                      {item.variant}
-                    </p>
-                  )}
-                  <div className="mt-1 text-xs">
-                    {item.isQuote ? (
-                      <span className="text-[11px] font-bold text-amber-700">Tarif sur devis</span>
-                    ) : (
-                      <span className="text-slate-600 font-medium">
-                        {item.price.toLocaleString('fr-FR')} FCFA l'unité
+            {items.map((item, index) => {
+              const calc = calculateItemVolumePrice(item.price, item.quantity, item.isQuote);
+              return (
+                <div key={`${item.productId}-${item.variant}-${index}`} className="p-4 flex items-center justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] text-[#6a6a6b] font-medium truncate">
+                        {item.category}
                       </span>
+                      {item.isDeferredStock && !item.isQuote && (
+                        <span className="text-[9px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                          Sur commande / Devis auto
+                        </span>
+                      )}
+                      {calc.discountPercent > 0 && (
+                        <span className="text-[9px] font-extrabold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                          Remise -{calc.discountPercent}%
+                        </span>
+                      )}
+                    </div>
+                    <h4 className="font-bold text-slate-900 text-xs sm:text-sm truncate mt-0.5">
+                      {item.productName}
+                    </h4>
+                    {item.variant && item.variant !== 'Standard' && (
+                      <p className="text-[11px] text-slate-500 truncate">
+                        {item.variant}
+                      </p>
                     )}
-                  </div>
-                </div>
-
-                {/* Stepper & Price */}
-                <div className="flex flex-col items-end gap-2 shrink-0">
-                  <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50 p-0.5">
-                    <button
-                      type="button"
-                      onClick={() => onUpdateQuantity(index, item.quantity - 1)}
-                      className="w-7 h-7 flex items-center justify-center text-slate-600 hover:text-slate-900 rounded"
-                    >
-                      <Minus className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="w-8 text-center font-bold text-xs tabular-nums text-slate-900">
-                      {item.quantity}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => onUpdateQuantity(index, item.quantity + 1)}
-                      className="w-7 h-7 flex items-center justify-center text-slate-600 hover:text-slate-900 rounded"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="mt-1 text-xs">
+                      {item.isQuote ? (
+                        <span className="text-[11px] font-bold text-amber-700">Tarif sur devis</span>
+                      ) : (
+                        <span className="text-slate-600 font-medium">
+                          {calc.discountedUnitPrice.toLocaleString('fr-FR')} FCFA l'unité
+                          {calc.discountPercent > 0 && (
+                            <span className="text-[10px] text-slate-400 line-through ml-1.5">
+                              {item.price.toLocaleString('fr-FR')} F
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {!item.isQuote ? (
-                      <span className="font-bold text-xs sm:text-sm text-slate-900 tabular-nums">
-                        {(item.price * item.quantity).toLocaleString('fr-FR')} FCFA
+                  {/* Stepper & Price */}
+                  <div className="flex flex-col items-end gap-2 shrink-0">
+                    <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50 p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => onUpdateQuantity(index, item.quantity - 1)}
+                        className="w-7 h-7 flex items-center justify-center text-slate-600 hover:text-slate-900 rounded cursor-pointer"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="w-8 text-center font-bold text-xs tabular-nums text-slate-900">
+                        {item.quantity}
                       </span>
-                    ) : (
-                      <span className="text-[11px] font-bold text-amber-700">À chiffrer</span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => onRemoveItem(index)}
-                      className="text-slate-400 hover:text-rose-600 p-1"
-                      title="Retirer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateQuantity(index, item.quantity + 1)}
+                        className="w-7 h-7 flex items-center justify-center text-slate-600 hover:text-slate-900 rounded cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {!item.isQuote ? (
+                        <span className="font-bold text-xs sm:text-sm text-slate-900 tabular-nums">
+                          {calc.totalWithDiscount.toLocaleString('fr-FR')} FCFA
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-bold text-amber-700">À chiffrer</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onRemoveItem(index)}
+                        className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer"
+                        title="Retirer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
-          {quoteItems.length > 0 && (
+          {(quoteItems.length > 0 || deferredStockItems.length > 0) && (
             <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs leading-relaxed flex items-start gap-2">
               <HelpCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div>
-                <strong>{quoteItems.length} article(s) sur devis :</strong> Les tarifs définitifs de ces équipements seront confirmés directement par Gloryday Pharma.
+                <strong>Conversion automatique en Bon de Commande / Devis :</strong> Votre sélection inclut des articles sur devis ou en réapprovisionnement (stock à 0). Votre bon de commande PDF sera généré immédiatement et transmis au service commercial pour confirmation.
               </div>
             </div>
           )}
@@ -367,46 +415,95 @@ export const CartView: React.FC<CartViewProps> = ({
           </button>
         </div>
 
-        {/* Right Column: Order Form */}
-        <div className="lg:col-span-5">
-          <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-slate-200/80 p-5 space-y-4 shadow-2xs">
-            <h3 className="font-bold text-sm text-[#161618] flex items-center gap-2 pb-2 border-b border-slate-100">
-              <FileText className="w-4 h-4 text-[#0d44e8]" />
+        {/* Right Column: Sticky Summary + Compact Confirmation Form */}
+        <div className="lg:col-span-5 lg:sticky lg:top-20">
+          <form ref={formRef} onSubmit={handleSubmit} className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 space-y-4 shadow-sm">
+            {/* TOP CONFIRMATION SUMMARY CARD (No scrolling required to see total & confirm button) */}
+            <div className="p-3.5 rounded-2xl bg-slate-900 text-white space-y-2.5">
+              <div className="flex items-center justify-between text-xs text-slate-300">
+                <span>Sous-total articles</span>
+                <span className="font-bold tabular-nums text-white">{volumeSummary.grossTotal.toLocaleString('fr-FR')} FCFA</span>
+              </div>
+              {volumeSummary.totalSavings > 0 && (
+                <div className="flex items-center justify-between text-xs text-emerald-400 font-bold">
+                  <span className="flex items-center gap-1">
+                    <TrendingDown className="w-3.5 h-3.5" />
+                    Remise sur volume appliquée
+                  </span>
+                  <span>-{volumeSummary.totalSavings.toLocaleString('fr-FR')} FCFA</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between text-[11px] text-slate-300">
+                <span>
+                  {deliveryMode === 'livraison'
+                    ? `Livraison (${selectedNeighborhood?.name || 'Libreville'})`
+                    : 'Retrait Dépôt Oloumi'}
+                </span>
+                <span className="font-semibold text-emerald-300">
+                  {deliveryMode === 'retrait' || deliveryFee === 0
+                    ? 'Offert'
+                    : `${deliveryFee.toLocaleString('fr-FR')} FCFA`}
+                </span>
+              </div>
+              <div className="border-t border-slate-700 pt-2 flex items-baseline justify-between">
+                <span className="font-bold text-xs text-slate-200">Total net estimé (Sans TVA)</span>
+                <div className="text-right">
+                  <span className="text-xl font-black text-white tabular-nums">
+                    {estimatedTotal.toLocaleString('fr-FR')}
+                  </span>
+                  <span className="text-xs font-bold text-slate-300 ml-1">FCFA</span>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full h-11 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] active:scale-[0.98] text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer mt-1"
+              >
+                <span>Vérifier & Confirmer le bon de commande</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            <h3 className="font-bold text-xs uppercase tracking-wider text-slate-500 flex items-center gap-2 pt-1">
+              <FileText className="w-3.5 h-3.5 text-[#0d44e8]" />
               Coordonnées de l'établissement
             </h3>
 
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                Nom de l'établissement *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Clinique, Pharmacie, Hôpital..."
-                value={facilityName}
-                onChange={(e) => setFacilityName(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#0d44e8]"
-              />
-            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="sm:col-span-2">
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                  Nom de l'établissement *
+                </label>
+                <input
+                  ref={facilityInputRef}
+                  type="text"
+                  required
+                  placeholder="Clinique, Pharmacie, Hôpital..."
+                  value={facilityName}
+                  onChange={(e) => setFacilityName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#0d44e8]"
+                />
+              </div>
 
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                Responsable / Contact
-              </label>
-              <input
-                type="text"
-                placeholder="Dr. / Responsable approvisionnement"
-                value={contactName}
-                onChange={(e) => setContactName(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#0d44e8]"
-              />
-            </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                  Responsable / Contact
+                </label>
+                <input
+                  type="text"
+                  placeholder="Dr. / Approvisionnement"
+                  value={contactName}
+                  onChange={(e) => setContactName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#0d44e8]"
+                />
+              </div>
 
-            <div>
-              <label htmlFor="checkout-phone" className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                Téléphone WhatsApp *
-              </label>
-              <PhoneNumberInput id="checkout-phone" required value={phone} onChange={setPhone} placeholder="77 00 30 04" className="text-xs" />
+              <div>
+                <label htmlFor="checkout-phone" className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                  Téléphone WhatsApp *
+                </label>
+                <PhoneNumberInput id="checkout-phone" required value={phone} onChange={setPhone} placeholder="77 00 30 04" className="text-xs" />
+              </div>
             </div>
 
             <div>
@@ -442,17 +539,12 @@ export const CartView: React.FC<CartViewProps> = ({
             </div>
 
             {deliveryMode === 'livraison' ? (
-              <div className="space-y-3 p-3.5 rounded-2xl bg-slate-50/80 border border-slate-200">
+              <div className="space-y-2.5 p-3 rounded-2xl bg-slate-50/80 border border-slate-200">
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-bold text-slate-800 uppercase flex items-center gap-1">
-                      <MapPin className="w-3.5 h-3.5 text-[#0d44e8]" />
-                      <span>Quartier de Libreville & Environs *</span>
-                    </label>
-                    <span className="text-[10px] text-blue-700 font-semibold bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                      Calcul automatique du délai
-                    </span>
-                  </div>
+                  <label className="text-[11px] font-bold text-slate-800 uppercase flex items-center gap-1 mb-1">
+                    <MapPin className="w-3.5 h-3.5 text-[#0d44e8]" />
+                    <span>Quartier de Libreville & Environs *</span>
+                  </label>
                   <select
                     value={neighborhoodId}
                     onChange={(e) => handleNeighborhoodChange(e.target.value)}
@@ -470,44 +562,15 @@ export const CartView: React.FC<CartViewProps> = ({
                   </select>
                 </div>
 
-                {/* Real-time Delivery Delay Card */}
                 {selectedNeighborhood && (
-                  <div className="p-3.5 rounded-xl bg-blue-50/90 border border-blue-200 space-y-2 text-xs text-blue-950">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold flex items-center gap-1.5 text-[#0d44e8]">
-                        <Clock className="w-4 h-4 text-[#0d44e8] shrink-0" />
-                        <span>Délai d'acheminement : <strong>{selectedNeighborhood.estimatedText}</strong></span>
-                      </span>
-                      <span className="text-[10px] uppercase font-bold text-blue-800 bg-white px-2 py-0.5 rounded-md border border-blue-200">
-                        {selectedNeighborhood.zone}
-                      </span>
-                    </div>
-
-                    {/* Precise Time Window Badge */}
-                    <div className="p-2.5 rounded-xl bg-white border border-blue-200/90 flex items-center justify-between text-xs shadow-2xs">
-                      <div className="flex items-center gap-2">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                        </span>
-                        <span className="text-slate-600 font-medium">Heure d'arrivée prévue :</span>
-                        <strong className="text-blue-900 font-black">{deliveryWindow.timeWindow}</strong>
-                      </div>
-                      <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">Heure Libreville (WAT)</span>
-                    </div>
-
-                    <div className="text-[11px] text-slate-600 flex items-start gap-1.5 pt-0.5">
-                      <Compass className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                      <span>Repère conseillé : <em className="text-slate-800 not-italic font-medium">{selectedNeighborhood.landmarkExample}</em></span>
-                    </div>
-                    <div className="text-[11px] text-emerald-800 flex items-center gap-1 pt-0.5 font-medium">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>
-                        {itemsSubtotal >= 50000 
-                          ? 'Livraison offerte (commande > 50 000 FCFA)' 
-                          : `Frais standard : ${baseDeliveryFee > 0 ? baseDeliveryFee.toLocaleString('fr-FR') + ' FCFA' : 'Inclus'}`}
-                      </span>
-                    </div>
+                  <div className="p-2.5 rounded-xl bg-blue-50/90 border border-blue-200 flex items-center justify-between text-xs text-blue-950">
+                    <span className="font-bold flex items-center gap-1.5 text-[#0d44e8]">
+                      <Clock className="w-3.5 h-3.5 shrink-0" />
+                      <span>Arrivée estimée : <strong>{deliveryWindow.timeWindow}</strong></span>
+                    </span>
+                    <span className="text-[10px] font-bold text-emerald-800">
+                      {itemsSubtotal >= 50000 ? 'Livraison offerte' : `${baseDeliveryFee.toLocaleString('fr-FR')} F`}
+                    </span>
                   </div>
                 )}
 
@@ -518,139 +581,66 @@ export const CartView: React.FC<CartViewProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="Ex: Face Clinique Chambrier, 1er étage, Service Bloc..."
+                    placeholder="Ex: Face Clinique Chambrier, 1er étage..."
                     value={addressDetails}
                     onChange={(e) => handleAddressDetailsChange(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white focus:ring-2 focus:ring-[#0d44e8]"
                   />
                 </div>
 
-                <section aria-label="Position GPS de cette livraison" className="rounded-2xl border border-blue-200 bg-white p-3.5 shadow-sm">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h4 className="flex items-center gap-2 text-xs font-black text-slate-900">
-                        <MapPin className="h-4 w-4 text-[#0d44e8]" />
-                        GPS de cette commande
-                      </h4>
-                      <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
-                        Relevez le point à l’établissement à livrer. Il sera enregistré uniquement pour cette commande.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={captureDeliveryGps}
-                      disabled={isLocatingGps}
-                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#0d44e8] px-3 py-2 text-[11px] font-extrabold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-wait disabled:opacity-60"
-                    >
-                      <MapPin className={`h-3.5 w-3.5 ${isLocatingGps ? 'animate-pulse' : ''}`} />
-                      {isLocatingGps ? 'Recherche du GPS…' : deliveryCoordinates ? 'Actualiser le GPS' : 'Localiser l’adresse'}
-                    </button>
-                  </div>
-                  <p aria-live="polite" className="mt-2 text-[10px] leading-relaxed text-slate-500">{gpsMessage}</p>
-                  {deliveryCoordinates ? (
-                    <div className="mt-3 grid grid-cols-1 gap-2 rounded-xl bg-blue-50 p-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-                      <div>
-                        <div className="text-[9px] font-bold uppercase tracking-wider text-blue-700">Latitude</div>
-                        <div className="mt-0.5 font-mono text-sm font-black tabular-nums text-slate-950">{deliveryCoordinates.lat.toFixed(6)}</div>
-                      </div>
-                      <div>
-                        <div className="text-[9px] font-bold uppercase tracking-wider text-blue-700">Longitude</div>
-                        <div className="mt-0.5 font-mono text-sm font-black tabular-nums text-slate-950">{deliveryCoordinates.lng.toFixed(6)}</div>
-                      </div>
-                      <div className="text-[10px] font-semibold text-slate-600">
-                        {Number.isFinite(deliveryCoordinates.accuracy) ? `Précision appareil ±${Math.round(deliveryCoordinates.accuracy!)} m` : 'Précision du relevé inconnue'}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-[10px] font-semibold leading-relaxed text-amber-900">
-                      Sans point GPS, l’équipe utilisera le quartier et l’adresse écrite ; la carte ne pourra pas placer un repère exact pour cette commande.
-                    </div>
-                  )}
-                  {gpsError && <p role="alert" className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-[10px] font-semibold text-rose-800">{gpsError}</p>}
-                </section>
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <span className="text-[11px] text-slate-600">
+                    {deliveryCoordinates
+                      ? `✓ Point GPS relevé (${deliveryCoordinates.lat.toFixed(4)}, ${deliveryCoordinates.lng.toFixed(4)})`
+                      : 'Point GPS optionnel pour le livreur'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={captureDeliveryGps}
+                    disabled={isLocatingGps}
+                    className="px-2.5 py-1.5 rounded-lg bg-white border border-blue-300 text-[#0d44e8] font-bold text-[11px] hover:bg-blue-50 cursor-pointer shrink-0"
+                  >
+                    {isLocatingGps ? 'Recherche GPS…' : deliveryCoordinates ? 'Actualiser GPS' : '📍 Relever GPS'}
+                  </button>
+                </div>
+                {gpsError && <p role="alert" className="text-[10px] font-semibold text-rose-700">{gpsError}</p>}
               </div>
             ) : (
-              <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200 text-xs text-amber-900 space-y-1">
+              <div className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200 text-xs text-amber-900">
                 <div className="font-bold flex items-center gap-1.5 text-amber-950">
                   <Building2 className="w-4 h-4 text-amber-700" />
-                  <span>Retrait au Dépôt Central Gloryday Pharma</span>
+                  <span>Retrait Dépôt Central Oloumi (20-30 min · Sans frais)</span>
                 </div>
-                <p className="text-[11px] text-amber-800">
-                  Zone Industrielle Oloumi, Libreville · Prêt sous <strong>20 à 30 minutes</strong> après confirmation.
-                </p>
-                <p className="text-[10px] text-emerald-700 font-bold">
-                  ✓ Aucun frais de livraison appliqué.
-                </p>
               </div>
             )}
 
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                Mode de règlement prévu
-              </label>
-              <select
-                value={paymentMethod}
-                onChange={(e: any) => setPaymentMethod(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-medium"
-              >
-                <option value="especes">Espèces à la livraison</option>
-                <option value="airtel_money">Airtel Money (+241 77 003 004)</option>
-                <option value="moov_money">Moov Money (+241 66 240 399)</option>
-                <option value="virement">Virement bancaire professionnel</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                Remarques (facultatif)
-              </label>
-              <textarea
-                rows={2}
-                placeholder="Ex. : livraison urgente avant 12 h"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
-              />
-            </div>
-
-            {/* Financial Summary */}
-            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5 text-xs">
-              <div className="flex justify-between text-slate-600">
-                <span>Articles à prix fixe</span>
-                <span className="font-bold tabular-nums text-slate-900">{estimatedTotal.toLocaleString('fr-FR')} FCFA</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                  Mode de règlement
+                </label>
+                <select
+                  value={paymentMethod}
+                  onChange={(e: any) => setPaymentMethod(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-medium bg-white"
+                >
+                  <option value="especes">Espèces à la livraison</option>
+                  <option value="airtel_money">Airtel Money (+241 77 003 004)</option>
+                  <option value="moov_money">Moov Money (+241 66 240 399)</option>
+                  <option value="virement">Virement bancaire</option>
+                </select>
               </div>
-              {quoteItems.length > 0 && (
-                <div className="flex justify-between text-amber-700">
-                  <span>Articles sur devis</span>
-                  <span className="font-bold">{quoteItems.length} à chiffrer</span>
-                </div>
-              )}
-              <div className="flex justify-between text-slate-600 text-[11px]">
-                <span>
-                  {deliveryMode === 'livraison' 
-                    ? `Frais d'acheminement (${selectedNeighborhood?.name || 'Libreville'})` 
-                    : 'Retrait Dépôt Oloumi'}
-                </span>
-                <span className="font-semibold">
-                  {deliveryMode === 'retrait' 
-                    ? 'Offert' 
-                    : deliveryFee === 0 
-                      ? <span className="text-emerald-700 font-bold">Offert (&gt; 50 000 F)</span> 
-                      : `${deliveryFee.toLocaleString('fr-FR')} FCFA`}
-                </span>
-              </div>
-              <div className="flex justify-between text-slate-500 italic text-[11px]">
-                <span>TVA</span>
-                <span>Non soumis</span>
-              </div>
-              <div className="border-t border-slate-200 pt-2 flex items-baseline justify-between">
-                <span className="font-bold text-slate-900">Total estimé</span>
-                <div className="text-right">
-                  <span className="text-xl font-black text-[#000000] tabular-nums">
-                    {estimatedTotal.toLocaleString('fr-FR')}
-                  </span>
-                  <span className="text-xs font-bold text-slate-500 ml-1">FCFA</span>
-                </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                  Remarques (facultatif)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: Urgent avant 12h"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
+                />
               </div>
             </div>
 
@@ -664,10 +654,29 @@ export const CartView: React.FC<CartViewProps> = ({
               <span>Vérifier le bon de commande</span>
               <ArrowRight className="w-4 h-4" />
             </button>
-            <p className="text-[11px] text-center text-slate-400">
-              Étape suivante : aperçu du bon de commande PDF avant l'envoi sur WhatsApp.
-            </p>
           </form>
+        </div>
+      </div>
+
+      {/* MOBILE FIXED BOTTOM CONFIRMATION BAR (Always visible without scrolling) */}
+      <div className="fixed bottom-14 left-0 right-0 z-30 lg:hidden bg-white/95 backdrop-blur-md border-t border-slate-200 px-3.5 py-2.5 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+        <div className="max-w-xl mx-auto flex items-center justify-between gap-3">
+          <div>
+            <span className="text-[10px] font-bold uppercase text-slate-400 block leading-none">
+              Total estimé ({items.length} réf.)
+            </span>
+            <span className="text-base font-black text-slate-900 tabular-nums">
+              {estimatedTotal.toLocaleString('fr-FR')} <span className="text-xs font-bold text-slate-500">FCFA</span>
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={triggerOrderConfirmation}
+            className="px-4 py-2.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] active:scale-95 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+          >
+            <span>Vérifier le bon de commande</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </div>

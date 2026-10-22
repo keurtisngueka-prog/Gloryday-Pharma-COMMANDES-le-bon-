@@ -5,9 +5,15 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
-import { INITIAL_PRODUCTS, INITIAL_PACKS } from './src/data/initialProducts.js';
-import { getEstimatedDeliveryText, getNeighborhoodById } from './src/data/librevilleZones.js';
-import { calculateCartVolumeSummary, calculateItemVolumePrice } from './src/utils/volumeDiscount.js';
+import { INITIAL_PRODUCTS, INITIAL_PACKS, LEGACY_DEMO_PRODUCT_IDS, LEGACY_DEMO_PACK_IDS } from './src/data/initialProducts.js';
+import { getEstimatedDeliveryText, getNeighborhoodById, resolveOrderDestinationCoordinates } from './src/data/librevilleZones.js';
+import {
+  calculateCartVolumeSummary,
+  calculateItemVolumePrice,
+  DEFAULT_VOLUME_DISCOUNT_SETTINGS,
+  sanitizeVolumeDiscountSettings,
+  setActiveVolumeDiscountSettings
+} from './src/utils/volumeDiscount.js';
 import {
   createSupabaseStorePersistence,
   type ManagedStaffAccount,
@@ -29,7 +35,10 @@ import type {
   AppRole,
   DeliveryStage,
   OrderStatus,
-  DeliveryLocationPoint
+  DeliveryLocationPoint,
+  StaffPermission,
+  VolumeDiscountSettings,
+  StaffActivityStats
 } from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -43,7 +52,7 @@ const SESSION_COOKIE = 'gloryday_session';
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const STAFF_ROLES: StaffRole[] = ['Admin simple', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'];
 type SessionEntry = { user: User; expiresAt: number };
-type StoredDeliveryTrackingSession = { tokenHash: string; expiresAt: string; createdAt: string; revokedAt?: string };
+type StoredDeliveryTrackingSession = { token?: string; tokenHash: string; expiresAt: string; createdAt: string; revokedAt?: string };
 type ServerStore = PersistentServerStore & {
   deliveryLocations?: Record<string, DeliveryLocationPoint[]>;
   deliveryTrackingSessions?: Record<string, StoredDeliveryTrackingSession>;
@@ -102,13 +111,82 @@ function environmentStaffAccounts(): Array<{ identifier: string; name: string; r
   });
 }
 
-function staffAccountSummary(account: ManagedStaffAccount) {
+const ALL_STAFF_PERMISSIONS: StaffPermission[] = [
+  'catalog_stock',
+  'orders_view',
+  'orders_manage',
+  'quotes_manage',
+  'clients_manage',
+  'logistics_manage',
+  'stats_view',
+  'settings_manage'
+];
+
+function getDefaultPermissionsForRole(role: StaffRole): StaffPermission[] {
+  switch (role) {
+    case 'Admin simple':
+      return ['orders_view', 'orders_manage', 'clients_manage', 'logistics_manage', 'stats_view'];
+    case 'Commercial':
+      return ['orders_view', 'orders_manage', 'quotes_manage', 'clients_manage'];
+    case 'Gestionnaire Catalogue':
+      return ['catalog_stock', 'orders_view'];
+    case 'Logistique':
+      return ['orders_view', 'logistics_manage'];
+    default:
+      return ['orders_view'];
+  }
+}
+
+function sanitizePermissions(input: unknown, fallbackRole: StaffRole): StaffPermission[] {
+  if (!Array.isArray(input)) {
+    return getDefaultPermissionsForRole(fallbackRole);
+  }
+  const valid = input.filter((p): p is StaffPermission => ALL_STAFF_PERMISSIONS.includes(p as StaffPermission));
+  return valid.length > 0 ? Array.from(new Set(valid)) : getDefaultPermissionsForRole(fallbackRole);
+}
+
+function computeStaffStats(accountId: string, accountName: string, store: ServerStore, lastLoginAt?: string): StaffActivityStats {
+  const normName = (accountName || '').trim().toLowerCase();
+  const ordersProcessed = store.orders.filter(o =>
+    o.assignedCommercialId === accountId ||
+    (normName && o.courier?.name?.trim().toLowerCase() === normName)
+  ).length;
+  const quotesManaged = store.quotes.filter(q =>
+    q.commercialId === accountId ||
+    (normName && q.commercialName?.trim().toLowerCase() === normName)
+  ).length;
+  const deliveriesHandled = store.orders.filter(o =>
+    o.status === 'Livrée' && (
+      o.assignedCommercialId === accountId ||
+      (normName && o.courier?.name?.trim().toLowerCase() === normName)
+    )
+  ).length;
+  return {
+    ordersProcessed,
+    quotesManaged,
+    deliveriesHandled,
+    lastLoginAt,
+  };
+}
+
+function staffAccountSummary(account: ManagedStaffAccount, store?: ServerStore, activeUserIds?: Set<string>) {
+  const permissions = account.permissions && account.permissions.length > 0
+    ? account.permissions
+    : getDefaultPermissionsForRole(account.role);
+  const lastSeenMs = account.lastSeenAt ? Date.parse(account.lastSeenAt) : 0;
+  const isRecentlySeen = Number.isFinite(lastSeenMs) && (Date.now() - lastSeenMs) < 5 * 60 * 1000;
+  const isOnline = Boolean(account.active && ((activeUserIds && activeUserIds.has(account.id)) || isRecentlySeen));
   return {
     id: account.id,
     identifier: account.identifier,
     name: account.name,
     role: account.role,
     active: account.active,
+    permissions,
+    isOnline,
+    lastSeenAt: account.lastSeenAt || account.lastLoginAt || account.updatedAt,
+    lastLoginAt: account.lastLoginAt,
+    stats: store ? computeStaffStats(account.id, account.name, store, account.lastLoginAt) : undefined,
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,
     source: 'managed' as const,
@@ -131,15 +209,33 @@ function loadStore(): ServerStore {
     if (fs.existsSync(STORE_PATH)) {
       const raw = fs.readFileSync(STORE_PATH, 'utf-8');
       const parsed = JSON.parse(raw);
-      return {
-        products: Array.isArray(parsed.products) && parsed.products.length > 0 ? parsed.products : (process.env.NODE_ENV === 'production' ? [] : INITIAL_PRODUCTS),
-        packs: Array.isArray(parsed.packs) && parsed.packs.length > 0 ? parsed.packs : (process.env.NODE_ENV === 'production' ? [] : INITIAL_PACKS),
+      const rawProducts: Product[] = Array.isArray(parsed.products) ? parsed.products : [];
+      const rawPacks: Pack[] = Array.isArray(parsed.packs) ? parsed.packs : [];
+      const cleanedProducts = rawProducts.filter(p => p && typeof p.id === 'string' && !LEGACY_DEMO_PRODUCT_IDS.has(p.id));
+      const cleanedPacks = rawPacks.filter(pk => pk && typeof pk.id === 'string' && !LEGACY_DEMO_PACK_IDS.has(pk.id));
+
+      // Merge official catalog products while preserving any existing stock/price overrides
+      const existingProductMap = new Map<string, Product>();
+      for (const p of cleanedProducts) {
+        if (p && p.id) existingProductMap.set(p.id, p);
+      }
+      for (const initialProduct of INITIAL_PRODUCTS) {
+        if (!existingProductMap.has(initialProduct.id)) {
+          existingProductMap.set(initialProduct.id, { ...initialProduct });
+        }
+      }
+      const syncedProducts = Array.from(existingProductMap.values());
+
+      const loadedStore: ServerStore = {
+        products: syncedProducts,
+        packs: cleanedPacks,
         orders: Array.isArray(parsed.orders) ? parsed.orders : [],
         accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
         staffAccounts: Array.isArray(parsed.staffAccounts) ? parsed.staffAccounts : [],
         quotes: Array.isArray(parsed.quotes) ? parsed.quotes : [],
         messages: Array.isArray(parsed.messages) ? parsed.messages : [],
         notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
+        volumeDiscounts: sanitizeVolumeDiscountSettings(parsed.volumeDiscounts),
         deliveryLocations: parsed.deliveryLocations && typeof parsed.deliveryLocations === 'object' && !Array.isArray(parsed.deliveryLocations)
           ? parsed.deliveryLocations
           : {},
@@ -147,6 +243,11 @@ function loadStore(): ServerStore {
           ? parsed.deliveryTrackingSessions
           : {}
       };
+      setActiveVolumeDiscountSettings(loadedStore.volumeDiscounts);
+      if (syncedProducts.length !== rawProducts.length || cleanedPacks.length !== rawPacks.length) {
+        saveStoreLocal(loadedStore);
+      }
+      return loadedStore;
     }
   } catch (err) {
     console.error('Error loading store.json, initializing fresh store:', err);
@@ -156,17 +257,19 @@ function loadStore(): ServerStore {
   }
 
   const initialStore: ServerStore = {
-    products: process.env.NODE_ENV === 'production' ? [] : INITIAL_PRODUCTS,
-    packs: process.env.NODE_ENV === 'production' ? [] : INITIAL_PACKS,
+    products: INITIAL_PRODUCTS,
+    packs: INITIAL_PACKS,
     orders: [],
     accounts: [],
     staffAccounts: [],
     quotes: [],
     messages: [],
     notifications: [],
+    volumeDiscounts: { ...DEFAULT_VOLUME_DISCOUNT_SETTINGS },
     deliveryLocations: {},
     deliveryTrackingSessions: {}
   };
+  setActiveVolumeDiscountSettings(initialStore.volumeDiscounts);
   saveStoreLocal(initialStore);
   return initialStore;
 }
@@ -179,15 +282,24 @@ function getTrackedProductStock(product: Product): number | undefined {
 }
 
 function getEffectiveProductStatus(product: Product): Product['status'] {
-  const stock = getTrackedProductStock(product);
-  return product.status === 'disponible' && (stock === undefined || stock === 0)
-    ? 'rupture'
-    : product.status;
+  return product.status === 'rupture' ? 'rupture' : 'disponible';
+}
+
+function enrichProductWithStockState(product: Product): Product {
+  const stock = getTrackedProductStock(product) ?? 0;
+  return {
+    ...product,
+    quantityAvailable: stock,
+    stockQuantity: stock,
+    hasPhysicalStock: stock > 0 && product.status !== 'rupture',
+    status: getEffectiveProductStatus(product)
+  };
 }
 
 function setTrackedProductStock(product: Product, quantity: number): void {
   product.quantityAvailable = quantity;
   product.stockQuantity = quantity;
+  product.hasPhysicalStock = quantity > 0 && product.status !== 'rupture';
 }
 
 function saveStoreLocal(store: ServerStore): void {
@@ -259,10 +371,23 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   if (persistence) {
     try {
       store = await persistence.hydrate(store);
+      await saveStore(store, persistence);
     } catch (error) {
       console.warn('⚠️ Hydratation Supabase partielle ou table non migrée, utilisation du cache local :', error instanceof Error ? error.message : error);
     }
   }
+  const existingIds = new Set(store.products.map(p => p.id));
+  let addedAny = false;
+  for (const initProd of INITIAL_PRODUCTS) {
+    if (!existingIds.has(initProd.id)) {
+      store.products.push({ ...initProd });
+      addedAny = true;
+    }
+  }
+  if (addedAny) {
+    await saveStore(store, persistence);
+  }
+  await migrateLegacyPasswords(store);
   store.deliveryLocations ||= {};
   store.deliveryTrackingSessions ||= {};
   const clearDeliveryLocations = async (orderId: string) => {
@@ -278,19 +403,59 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     delete store.deliveryLocations?.[orderId];
     const trackingSession = store.deliveryTrackingSessions?.[orderId];
     if (trackingSession) trackingSession.revokedAt = new Date().toISOString();
+    const order = store.orders.find(item => item.id === orderId);
+    if (order) {
+      order.courierTrackingToken = undefined;
+      order.courierTrackingExpiresAt = undefined;
+    }
     saveStoreLocal(store);
+  };
+  const issueCourierTrackingSession = async (order: Order, actorId = 'system'): Promise<{ token: string; expiresAt: string }> => {
+    const token = randomBytes(32).toString('base64url');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const createdAt = new Date();
+    const expiresAt = new Date(createdAt.getTime() + 24 * 60 * 60 * 1000).toISOString();
+    if (persistence) {
+      try {
+        await persistence.createDeliveryTrackingSession(order.id, tokenHash, expiresAt, actorId);
+      } catch (error) {
+        if (!isDeliveryLocationsMigrationError(error)) {
+          console.warn('Session GPS livreur conservée localement :', error instanceof Error ? error.message : error);
+        }
+      }
+    }
+    store.deliveryTrackingSessions ||= {};
+    store.deliveryTrackingSessions[order.id] = { token, tokenHash, expiresAt, createdAt: createdAt.toISOString() };
+    order.courierTrackingToken = token;
+    order.courierTrackingExpiresAt = expiresAt;
+    saveStoreLocal(store);
+    return { token, expiresAt };
   };
   const resolveCourierTrackingToken = async (token: string) => {
     const tokenHash = createHash('sha256').update(token).digest('hex');
-    const session = persistence
-      ? await persistence.getDeliveryTrackingSession(tokenHash)
-      : (() => {
-          const entry = Object.entries(store.deliveryTrackingSessions || {}).find(([, item]) => item.tokenHash === tokenHash);
-          return entry ? { ...entry[1], orderId: entry[0] } : null;
-        })();
-    if (!session || session.revokedAt || Date.parse(session.expiresAt) <= Date.now()) return null;
-    const order = store.orders.find(item => item.id === session.orderId);
-    if (!order || order.status === 'Livrée' || order.status === 'Annulée' || !['picked_up', 'in_transit'].includes(order.deliveryStage || 'preparation')) return null;
+    const localEntry = Object.entries(store.deliveryTrackingSessions || {}).find(([, item]) => item.tokenHash === tokenHash);
+    const localSession = localEntry ? { ...localEntry[1], orderId: localEntry[0] } : null;
+    let session: { orderId: string; expiresAt: string; revokedAt?: string } | null = localSession;
+    if (!session && persistence) {
+      try {
+        session = await persistence.getDeliveryTrackingSession(tokenHash);
+      } catch (error) {
+        if (!isDeliveryLocationsMigrationError(error)) throw error;
+      }
+    }
+    if (!session || session.revokedAt || Date.parse(session.expiresAt) <= Date.now()) {
+      const orderWithToken = store.orders.find(item => item.courierTrackingToken === token);
+      if (orderWithToken && orderWithToken.courierTrackingExpiresAt && Date.parse(orderWithToken.courierTrackingExpiresAt) > Date.now()) {
+        session = {
+          orderId: orderWithToken.id,
+          expiresAt: orderWithToken.courierTrackingExpiresAt,
+        };
+      } else {
+        return null;
+      }
+    }
+    const order = store.orders.find(item => item.id === session!.orderId);
+    if (!order || order.status === 'Livrée' || order.status === 'Annulée' || !['preparation', 'picked_up', 'in_transit'].includes(order.deliveryStage || 'preparation')) return null;
     return { session, order };
   };
 
@@ -380,7 +545,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   };
 
   const isPublicApi = (req: express.Request) =>
-    (['GET', 'HEAD'].includes(req.method) && ['/products', '/packs', '/auth/session', '/download-project-zip'].includes(req.path)) ||
+    (['GET', 'HEAD'].includes(req.method) && ['/products', '/packs', '/auth/session', '/download-project-zip', '/settings/volume-discounts'].includes(req.path)) ||
     (req.method === 'POST' && ['/auth/register', '/auth/login', '/auth/admin', '/auth/google', '/auth/google/complete', '/auth/recovery-request', '/auth/logout'].includes(req.path)) ||
     (['GET', 'POST'].includes(req.method) && /^\/courier-tracking\/[A-Za-z0-9_-]{32,64}$/.test(req.path));
 
@@ -418,6 +583,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         res.status(401).json({ error: 'Connexion requise.' });
         return;
       }
+
+      // Update staff online heartbeat and sync latest granular permissions
+      const managedStaff = store.staffAccounts.find(s => s.id === user.id);
+      if (managedStaff) {
+        managedStaff.lastSeenAt = new Date().toISOString();
+        user.permissions = managedStaff.permissions && managedStaff.permissions.length > 0
+          ? managedStaff.permissions
+          : getDefaultPermissionsForRole(managedStaff.role);
+      }
+
       (req as AuthenticatedRequest).authenticatedUser = user;
 
     const role = user.role;
@@ -428,38 +603,46 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const isCatalogManager = role === 'Gestionnaire Catalogue';
     const isCommercial = role === 'Commercial';
     const isLogistics = role === 'Logistique';
+    const hasPerm = (perm: StaffPermission) => isSuperAdmin || Boolean(user.permissions?.includes(perm));
     let allowed = false;
 
     if (/^\/products(?:\/|$)/.test(route) || /^\/packs(?:\/|$)/.test(route)) {
-      allowed = method === 'GET' || isSuperAdmin || isCatalogManager;
+      allowed = method === 'GET' || isSuperAdmin || isCatalogManager || hasPerm('catalog_stock');
     } else if (route === '/clients' || route.startsWith('/clients/')) {
-      allowed = method === 'GET' ? isSuperAdmin || isSimpleAdmin || isCommercial : isSuperAdmin;
+      allowed = method === 'GET'
+        ? isSuperAdmin || isSimpleAdmin || isCommercial || hasPerm('clients_manage')
+        : isSuperAdmin || hasPerm('clients_manage');
     } else if (route.startsWith('/quotes')) {
-      allowed = isSuperAdmin || isCommercial;
+      allowed = isSuperAdmin || isCommercial || hasPerm('quotes_manage');
     } else if (route.startsWith('/messages')) {
-      allowed = method === 'GET' ? isSuperAdmin || isCommercial || role === 'client' : isSuperAdmin || isCommercial || role === 'client';
+      allowed = method === 'GET'
+        ? isSuperAdmin || isCommercial || role === 'client' || hasPerm('clients_manage')
+        : isSuperAdmin || isCommercial || role === 'client' || hasPerm('clients_manage');
     } else if (route.startsWith('/orders')) {
-      if (route.endsWith('/upload-pdf')) allowed = role === 'client' || isSuperAdmin;
-      else if (route.endsWith('/delivery-stage')) allowed = isSuperAdmin || isSimpleAdmin || isLogistics;
+      if (route.endsWith('/upload-pdf')) allowed = role === 'client' || isSuperAdmin || hasPerm('orders_manage');
+      else if (route.endsWith('/delivery-stage')) allowed = isSuperAdmin || isSimpleAdmin || isLogistics || hasPerm('logistics_manage');
       else if (route.endsWith('/live-location')) {
         allowed = method === 'GET'
-          ? role === 'client' || isSuperAdmin || isSimpleAdmin || isLogistics
-          : isSuperAdmin || isSimpleAdmin || isLogistics;
+          ? role === 'client' || isSuperAdmin || isSimpleAdmin || isLogistics || hasPerm('logistics_manage')
+          : isSuperAdmin || isSimpleAdmin || isLogistics || hasPerm('logistics_manage');
       }
-      else if (route.endsWith('/tracking-link')) allowed = isSuperAdmin || isSimpleAdmin || isLogistics;
-      else if (route.endsWith('/payment')) allowed = isSuperAdmin || isSimpleAdmin;
-      else if (route.endsWith('/mobile-payment')) allowed = role === 'client' || isSuperAdmin;
-      else if (route.endsWith('/status')) allowed = isSuperAdmin || isSimpleAdmin || isCommercial || role === 'client';
-      else if (method === 'GET') allowed = role === 'client' || isSuperAdmin || isSimpleAdmin || isCommercial || isLogistics;
+      else if (route.endsWith('/tracking-link')) allowed = isSuperAdmin || isSimpleAdmin || isLogistics || hasPerm('logistics_manage');
+      else if (route.endsWith('/payment')) allowed = isSuperAdmin || isSimpleAdmin || hasPerm('orders_manage');
+      else if (route.endsWith('/mobile-payment')) allowed = role === 'client' || isSuperAdmin || hasPerm('orders_manage');
+      else if (route.endsWith('/expected-delivery')) allowed = role === 'client' || isSuperAdmin || isSimpleAdmin || isLogistics || hasPerm('logistics_manage');
+      else if (route.endsWith('/status')) allowed = isSuperAdmin || isSimpleAdmin || isCommercial || role === 'client' || hasPerm('orders_manage');
+      else if (method === 'GET') allowed = role === 'client' || isSuperAdmin || isSimpleAdmin || isCommercial || isLogistics || hasPerm('orders_view') || hasPerm('orders_manage');
       else if (method === 'POST') allowed = role === 'client';
     } else if (route === '/events') {
       allowed = method === 'GET';
     } else if (route === '/events/announcement') {
-      allowed = method === 'POST' && isSuperAdmin;
+      allowed = method === 'POST' && (isSuperAdmin || hasPerm('clients_manage'));
     } else if (route === '/events/read') {
       allowed = method === 'POST';
     } else if (route === '/admin/stats') {
-      allowed = isSuperAdmin || isSimpleAdmin;
+      allowed = isSuperAdmin || isSimpleAdmin || hasPerm('stats_view');
+    } else if (route === '/admin/settings/volume-discounts') {
+      allowed = isSuperAdmin || hasPerm('settings_manage') || hasPerm('catalog_stock');
     } else if (route.startsWith('/admin/staff') || route === '/supabase/migration-sql' || route === '/auth/admin-password') {
       allowed = isSuperAdmin;
     }
@@ -479,23 +662,41 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   // ==========================================
   // 1. PRODUCTS & STOCKS ROUTES
   // ==========================================
+  app.get('/api/settings/volume-discounts', (_req, res) => {
+    const settings = sanitizeVolumeDiscountSettings(store.volumeDiscounts);
+    store.volumeDiscounts = settings;
+    setActiveVolumeDiscountSettings(settings);
+    res.json(settings);
+  });
+
+  app.put('/api/admin/settings/volume-discounts', asyncHandler(async (req, res) => {
+    const updated = sanitizeVolumeDiscountSettings(req.body);
+    store.volumeDiscounts = updated;
+    setActiveVolumeDiscountSettings(updated);
+    await saveStore(store, persistence);
+    res.json(updated);
+  }));
+
   app.get('/api/products', asyncHandler(async (_req, res) => {
     const user = await readSession(_req);
-    if (user && ['Super-Admin', 'Gestionnaire Catalogue'].includes(user.role)) {
-      res.json(store.products.map(product => ({ ...product, status: getEffectiveProductStatus(product) })));
+    if (user && (['Super-Admin', 'Gestionnaire Catalogue'].includes(user.role) || user.permissions?.includes('catalog_stock'))) {
+      res.json(store.products.map(product => enrichProductWithStockState(product)));
       return;
     }
     res.json(store.products.map((product) => {
-      const { purchasePrice, stockQuantity, alertThreshold, lowStockAlertThreshold, quantityAvailable, ...publicProduct } = product;
-      return {
-        ...publicProduct,
-        status: getEffectiveProductStatus(product)
-      };
+      const enriched = enrichProductWithStockState(product);
+      const { purchasePrice, alertThreshold, lowStockAlertThreshold, ...publicProduct } = enriched;
+      return publicProduct;
     }));
   }));
 
   app.post('/api/products', asyncHandler(async (req, res) => {
     const productData = req.body || {};
+    const initialStock = typeof productData.quantityAvailable === 'number'
+      ? Math.max(0, Math.round(productData.quantityAvailable))
+      : typeof productData.stockQuantity === 'number'
+        ? Math.max(0, Math.round(productData.stockQuantity))
+        : 0;
     const newProduct: Product = {
       id: productData.id || `prod-${Date.now()}`,
       name: productData.name || 'Nouveau Produit Médical',
@@ -513,15 +714,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       isPromotion: productData.isPromotion,
       originalPrice: productData.originalPrice,
       discountPercentage: productData.discountPercentage,
-      quantityAvailable: productData.quantityAvailable,
-      stockQuantity: productData.stockQuantity,
+      quantityAvailable: initialStock,
+      stockQuantity: initialStock,
+      hasPhysicalStock: initialStock > 0,
       alertThreshold: productData.alertThreshold,
       lowStockAlertThreshold: productData.lowStockAlertThreshold,
       purchasePrice: productData.purchasePrice
     };
     store.products.unshift(newProduct);
     await saveStore(store, persistence);
-    res.status(201).json(newProduct);
+    res.status(201).json(enrichProductWithStockState(newProduct));
   }));
 
   app.put('/api/products/:id', asyncHandler(async (req, res) => {
@@ -531,20 +733,32 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(404).json({ error: 'Produit introuvable' });
       return;
     }
-    store.products[idx] = { ...store.products[idx], ...req.body, id };
+    const merged: Product = { ...store.products[idx], ...req.body, id };
+    if (typeof req.body?.quantityAvailable === 'number') {
+      setTrackedProductStock(merged, Math.max(0, Math.round(req.body.quantityAvailable)));
+    } else if (typeof req.body?.stockQuantity === 'number') {
+      setTrackedProductStock(merged, Math.max(0, Math.round(req.body.stockQuantity)));
+    }
+    store.products[idx] = enrichProductWithStockState(merged);
     await saveStore(store, persistence);
     res.json(store.products[idx]);
   }));
 
   app.patch('/api/products/:id/status', asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, quantityAvailable } = req.body || {};
     const idx = store.products.findIndex(p => p.id === id);
     if (idx === -1) {
       res.status(404).json({ error: 'Produit introuvable' });
       return;
     }
-    store.products[idx].status = status === 'rupture' ? 'rupture' : 'disponible';
+    if (typeof quantityAvailable === 'number' && Number.isFinite(quantityAvailable)) {
+      setTrackedProductStock(store.products[idx], Math.max(0, Math.round(quantityAvailable)));
+    }
+    if (status !== undefined) {
+      store.products[idx].status = status === 'rupture' ? 'rupture' : 'disponible';
+    }
+    store.products[idx] = enrichProductWithStockState(store.products[idx]);
     await saveStore(store, persistence);
     res.json({ success: true, product: store.products[idx] });
   }));
@@ -768,7 +982,22 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const managedStaff = store.staffAccounts.find(item => item.identifier === normalizedIdentifier);
     const validManagedPassword = await verifyPassword(password, managedStaff?.passwordHash || 'scrypt$00112233445566778899aabbccddeeff$00');
     if (managedStaff?.active && validManagedPassword) {
-      const user: User = { id: managedStaff.id, phone: '', facilityName: 'Direction Générale Gloryday', contactName: managedStaff.name, role: managedStaff.role, createdAt: managedStaff.createdAt };
+      const now = new Date().toISOString();
+      managedStaff.lastLoginAt = now;
+      managedStaff.lastSeenAt = now;
+      saveStoreLocal(store);
+      const permissions = managedStaff.permissions && managedStaff.permissions.length > 0
+        ? managedStaff.permissions
+        : getDefaultPermissionsForRole(managedStaff.role);
+      const user: User = {
+        id: managedStaff.id,
+        phone: '',
+        facilityName: 'Direction Générale Gloryday',
+        contactName: managedStaff.name,
+        role: managedStaff.role,
+        permissions,
+        createdAt: managedStaff.createdAt
+      };
       const token = await issueSession(res, user);
       loginAttempts.delete(key);
       res.json({ user, token });
@@ -778,17 +1007,30 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   }));
 
   app.get('/api/admin/staff', (_req, res) => {
-    const fromEnvironment = environmentStaffAccounts().map((account) => ({
-      id: `environment-${Buffer.from(account.identifier).toString('hex').slice(0, 24)}`,
-      identifier: account.identifier,
-      name: account.name,
-      role: account.role,
-      active: true,
-      createdAt: '',
-      updatedAt: '',
-      source: 'environment' as const,
-    }));
-    const managed = store.staffAccounts.map(staffAccountSummary);
+    const activeUserIds = new Set<string>();
+    const nowMs = Date.now();
+    for (const [, session] of sessions) {
+      if (session.expiresAt > nowMs && session.user?.id) {
+        activeUserIds.add(session.user.id);
+      }
+    }
+    const fromEnvironment = environmentStaffAccounts().map((account) => {
+      const envId = `environment-${Buffer.from(account.identifier).toString('hex').slice(0, 24)}`;
+      return {
+        id: envId,
+        identifier: account.identifier,
+        name: account.name,
+        role: account.role,
+        active: true,
+        permissions: getDefaultPermissionsForRole(account.role),
+        isOnline: activeUserIds.has(envId),
+        stats: computeStaffStats(envId, account.name, store),
+        createdAt: '',
+        updatedAt: '',
+        source: 'environment' as const,
+      };
+    });
+    const managed = store.staffAccounts.map(acc => staffAccountSummary(acc, store, activeUserIds));
     res.json([...fromEnvironment, ...managed].sort((a, b) => a.name.localeCompare(b.name, 'fr')));
   });
 
@@ -816,11 +1058,13 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       return;
     }
     const now = new Date().toISOString();
+    const permissions = sanitizePermissions(req.body?.permissions, role);
     const account: ManagedStaffAccount = {
       id: `staff-${randomUUID()}`,
       identifier,
       name,
       role,
+      permissions,
       passwordHash: await hashPassword(password),
       active: true,
       createdAt: now,
@@ -837,7 +1081,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       }
       throw error;
     }
-    res.status(201).json(staffAccountSummary(account));
+    res.status(201).json(staffAccountSummary(account, store));
   }));
 
   app.patch('/api/admin/staff/:id', asyncHandler(async (req, res) => {
@@ -866,11 +1110,15 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(409).json({ error: 'Cet identifiant est déjà utilisé. Choisissez-en un autre.' });
       return;
     }
+    const permissions = req.body?.permissions !== undefined
+      ? sanitizePermissions(req.body.permissions, role)
+      : (current.permissions && current.permissions.length > 0 ? current.permissions : getDefaultPermissionsForRole(role));
     const updated: ManagedStaffAccount = {
       ...current,
       identifier,
       name,
       role,
+      permissions,
       active,
       passwordHash: password ? await hashPassword(password) : current.passwordHash,
       updatedAt: new Date().toISOString(),
@@ -887,10 +1135,21 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       throw error;
     }
     for (const [sessionId, session] of sessions) {
-      if (session.user.id === current.id) sessions.delete(sessionId);
+      if (session.user.id === current.id) {
+        if (!active || password) {
+          sessions.delete(sessionId);
+        } else {
+          session.user = {
+            ...session.user,
+            contactName: updated.name,
+            role: updated.role,
+            permissions: updated.permissions,
+          };
+        }
+      }
     }
-    if (persistence) await persistence.revokeAppSessionsForUser(current.id);
-    res.json(staffAccountSummary(updated));
+    if (persistence && (!active || password)) await persistence.revokeAppSessionsForUser(current.id);
+    res.json(staffAccountSummary(updated, store));
   }));
 
   app.put('/api/auth/admin-password', (_req, res) => {
@@ -1125,10 +1384,11 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       const product = store.products.find(p => p.id === String(requested?.productId || ''));
       const variant = product?.variants?.find(v => v.label === String(requested?.variant || ''));
       const quantity = Number(requested?.quantity);
-      if (!product || !variant || product.status !== 'disponible' || !Number.isInteger(quantity) || quantity < 1 || quantity > 10000) {
+      if (!product || !variant || !Number.isInteger(quantity) || quantity < 1 || quantity > 10000) {
         res.status(400).json({ error: 'Un article, son format ou sa quantité n’est plus valide. Actualisez le catalogue.' });
         return;
       }
+      const isQuoteItem = Number(variant.price) === 0 || Boolean(product.isQuote);
       items.push({
         productId: product.id,
         productName: product.name,
@@ -1136,31 +1396,34 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         variant: variant.label,
         price: Number(variant.price) || 0,
         quantity,
-        isQuote: Number(variant.price) === 0
+        isQuote: isQuoteItem
       });
     }
 
     const requestedByProduct = new Map<string, number>();
     for (const item of items) {
+      if (item.isQuote || item.price === 0) continue;
       requestedByProduct.set(item.productId, (requestedByProduct.get(item.productId) || 0) + item.quantity);
     }
     const stockUpdates: Array<{ product: Product; remaining: number }> = [];
+    let hasDeferredZeroStockItems = false;
     for (const [productId, requestedQuantity] of requestedByProduct) {
       const product = store.products.find(candidate => candidate.id === productId)!;
-      const availableQuantity = getTrackedProductStock(product);
-      if (availableQuantity === undefined) {
-        res.status(409).json({ error: `Le stock de « ${product.name} » n’est pas renseigné. Contactez Gloryday Pharma avant de commander.` });
-        return;
+      const availableQuantity = getTrackedProductStock(product) ?? 0;
+      if (product.status === 'rupture' || availableQuantity < requestedQuantity) {
+        // Automatic conversion to quote / proforma request when stock is 0 or insufficient
+        hasDeferredZeroStockItems = true;
+        for (const item of items) {
+          if (item.productId === productId) {
+            item.isDeferredStock = true;
+          }
+        }
+        if (availableQuantity > 0 && product.status === 'disponible') {
+          stockUpdates.push({ product, remaining: 0 });
+        }
+      } else {
+        stockUpdates.push({ product, remaining: availableQuantity - requestedQuantity });
       }
-      if (product.status !== 'disponible') {
-        res.status(409).json({ error: `« ${product.name} » n’est pas actuellement disponible à la commande.` });
-        return;
-      }
-      if (availableQuantity < requestedQuantity) {
-        res.status(409).json({ error: `Stock insuffisant pour « ${product.name} » : ${availableQuantity} disponible(s), ${requestedQuantity} demandé(s).` });
-        return;
-      }
-      stockUpdates.push({ product, remaining: availableQuantity - requestedQuantity });
     }
 
     const neighborhood = customerInput.deliveryMode === 'retrait' ? undefined : getNeighborhoodById(String(customerInput.neighborhoodId || ''));
@@ -1178,12 +1441,22 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(400).json({ error: 'Coordonnées GPS de livraison invalides. Relevez à nouveau la position.' });
       return;
     }
-    const orderCoordinates = customerInput.deliveryMode === 'livraison' && coordinatesAreValid ? {
-      lat: requestedCoordinates.lat,
-      lng: requestedCoordinates.lng,
-      ...(typeof requestedCoordinates.accuracy === 'number' ? { accuracy: requestedCoordinates.accuracy } : {}),
-      source: 'checkout' as const,
-    } : undefined;
+    const orderCoordinates = customerInput.deliveryMode === 'livraison'
+      ? (coordinatesAreValid
+          ? {
+              lat: requestedCoordinates.lat,
+              lng: requestedCoordinates.lng,
+              ...(typeof requestedCoordinates.accuracy === 'number' ? { accuracy: requestedCoordinates.accuracy } : {}),
+              source: 'checkout' as const,
+            }
+          : neighborhood?.defaultCoordinates
+            ? {
+                lat: neighborhood.defaultCoordinates.lat,
+                lng: neighborhood.defaultCoordinates.lng,
+                source: 'neighborhood' as const,
+              }
+            : undefined)
+      : undefined;
     const customer = {
       facilityName: account.user.facilityName,
       facilityType: account.user.facilityType,
@@ -1216,19 +1489,36 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const zoneName = neighborhood?.name || 'Retrait au dépôt';
     const estimatedTime = getEstimatedDeliveryText(customer.neighborhoodId, customer.deliveryAddress);
 
-    const volumeSummary = calculateCartVolumeSummary(items);
+    const activeDiscountSettings = sanitizeVolumeDiscountSettings(store.volumeDiscounts);
+    const volumeSummary = calculateCartVolumeSummary(items, activeDiscountSettings);
     const deliveryFee = customer.deliveryMode === 'retrait' || volumeSummary.netTotal >= 50000 ? 0 : neighborhood?.baseDeliveryFee || 0;
     const finalTotal = volumeSummary.netTotal + deliveryFee;
     customer.deliveryFee = deliveryFee;
 
+    const createdNow = new Date();
+    const isAfterHours = createdNow.getHours() >= 18 || createdNow.getHours() < 7;
+    const defaultExpectedDate = new Date(createdNow);
+    if (isAfterHours) {
+      defaultExpectedDate.setDate(defaultExpectedDate.getDate() + 1);
+    }
+    const expectedDeliveryDate = `${defaultExpectedDate.getFullYear()}-${String(defaultExpectedDate.getMonth() + 1).padStart(2, '0')}-${String(defaultExpectedDate.getDate()).padStart(2, '0')}`;
+    const expectedDeliverySlot = customer.deliveryMode === 'retrait'
+      ? 'Retrait Dépôt Oloumi (20-30 min)'
+      : isAfterHours
+        ? 'Matin · 08h30 - 10h00 (1ère tournée)'
+        : estimatedTime;
+
+    const hasQuoteOrDeferred = items.some((it: any) => it.isQuote || it.isDeferredStock) || hasDeferredZeroStockItems;
+
     const newOrder: Order = {
       id: `ord-${randomUUID()}`,
       reference,
-      createdAt: new Date().toISOString(),
+      createdAt: createdNow.toISOString(),
       userId: account.user.id,
+      assignedCommercialId: account.user.assignedToCommercialId,
       customer,
       items: items.map((it: any) => {
-        const calc = calculateItemVolumePrice(it.price, it.quantity, it.isQuote);
+        const calc = calculateItemVolumePrice(it.price, it.quantity, it.isQuote, activeDiscountSettings);
         return {
           productId: it.productId,
           productName: it.productName,
@@ -1238,25 +1528,52 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
           quantity: it.quantity,
           total: it.isQuote ? 0 : calc.totalWithDiscount,
           isQuote: it.isQuote,
+          isDeferredStock: Boolean(it.isDeferredStock),
           discountPercent: calc.discountPercent,
           savings: calc.savings
         };
       }),
       estimatedTotal: finalTotal,
-      hasQuoteItems: items.some((it: any) => it.isQuote),
+      hasQuoteItems: hasQuoteOrDeferred,
       status: 'À confirmer',
       isPaid: false,
       mobilePayment: customer.mobilePayment,
       deliveryStage: 'preparation',
-      stockReserved: true,
+      stockReserved: !hasDeferredZeroStockItems,
       deliveryZone: zoneName,
       deliveryEstimated: estimatedTime,
+      expectedDeliveryDate,
+      expectedDeliverySlot,
       deliveryFee,
       whatsappLogs: []
     };
 
     for (const update of stockUpdates) setTrackedProductStock(update.product, update.remaining);
     store.orders.unshift(newOrder);
+
+    if (hasQuoteOrDeferred) {
+      const quoteNum = String(store.quotes.length + 1).padStart(4, '0');
+      const validUntil = new Date(createdNow.getTime() + 15 * 24 * 60 * 60 * 1000).toISOString();
+      const autoQuote: CommercialQuote = {
+        id: `qte-${randomUUID()}`,
+        reference: `DEV-${year}-${quoteNum}`,
+        createdAt: createdNow.toISOString(),
+        validUntil,
+        commercialId: account.user.assignedToCommercialId || 'staff-super-admin',
+        commercialName: account.user.assignedToCommercialName || 'Service Commercial Gloryday',
+        customerId: account.user.id,
+        customer,
+        items: newOrder.items,
+        subtotal: volumeSummary.grossTotal,
+        discountType: 'amount',
+        discountValue: volumeSummary.totalSavings,
+        discountAmount: volumeSummary.totalSavings,
+        finalTotal,
+        status: 'Transmis',
+        notes: `Demande de devis / proforma liée au bon de commande ${newOrder.reference}${hasDeferredZeroStockItems ? ' (conversion automatique stock à 0)' : ''}.`
+      };
+      store.quotes.unshift(autoQuote);
+    }
 
     const staffOrderNotificationRoles: AppRole[] = ['Super-Admin', 'Admin simple', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'];
     const staffOrderNotifications: AppNotification[] = staffOrderNotificationRoles.map(targetRole => ({
@@ -1324,11 +1641,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       return;
     }
     const { order, session } = tracking;
+    const resolvedDest = order.customer.coordinates
+      ? { lat: order.customer.coordinates.lat, lng: order.customer.coordinates.lng }
+      : resolveOrderDestinationCoordinates(order.customer.neighborhoodId, order.customer.deliveryAddress);
     res.json({
       orderReference: order.reference,
       courierName: order.courier?.name || 'Coursier Gloryday Pharma',
       facilityName: order.customer.facilityName,
       deliveryAddress: order.customer.deliveryAddress,
+      neighborhoodName: order.customer.neighborhoodName || order.deliveryZone,
+      destinationCoordinates: { lat: resolvedDest.lat, lng: resolvedDest.lng },
       contactName: order.customer.contactName,
       contactPhone: order.customer.phone,
       expiresAt: session.expiresAt,
@@ -1380,7 +1702,11 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
           return;
         }
         if (isDeliveryLocationsMigrationError(error)) {
-          res.status(503).json({ error: 'Le suivi GPS n’est pas activé. Contactez la logistique Gloryday Pharma.' });
+          store.deliveryLocations ||= {};
+          const existing = store.deliveryLocations[tracking.order.id] || [];
+          store.deliveryLocations[tracking.order.id] = [...existing, point].slice(-400);
+          saveStoreLocal(store);
+          res.json({ success: true, point });
           return;
         }
         throw error;
@@ -1401,15 +1727,32 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       return;
     }
     try {
-      const status = persistence
-        ? await persistence.getDeliveryTrackingStatus(order.id)
-        : (() => {
-            const session = store.deliveryTrackingSessions?.[order.id];
-            return {
-              active: Boolean(session && !session.revokedAt && Date.parse(session.expiresAt) > Date.now()),
-              expiresAt: session?.expiresAt,
-            };
-          })();
+      const localSession = store.deliveryTrackingSessions?.[order.id];
+      const localActive = Boolean(localSession && !localSession.revokedAt && Date.parse(localSession.expiresAt) > Date.now());
+      let status: { active: boolean; expiresAt?: string; token?: string } = {
+        active: localActive,
+        expiresAt: localSession?.expiresAt || order.courierTrackingExpiresAt,
+        token: localActive ? (localSession?.token || order.courierTrackingToken) : undefined,
+      };
+      if (!status.active && persistence) {
+        try {
+          const remoteStatus = await persistence.getDeliveryTrackingStatus(order.id);
+          status = {
+            active: remoteStatus.active,
+            expiresAt: remoteStatus.expiresAt || order.courierTrackingExpiresAt,
+            token: remoteStatus.active ? order.courierTrackingToken : undefined,
+          };
+        } catch (err) {
+          if (!isDeliveryLocationsMigrationError(err)) throw err;
+        }
+      }
+      const isActiveDelivery = order.status !== 'Livrée' && order.status !== 'Annulée' && order.customer.deliveryMode !== 'retrait';
+      if ((!status.active || !status.token) && isActiveDelivery && order.courier?.name) {
+        const user = (req as AuthenticatedRequest).authenticatedUser;
+        const issued = await issueCourierTrackingSession(order, user?.id || 'system');
+        await saveStore(store, persistence);
+        status = { active: true, expiresAt: issued.expiresAt, token: issued.token };
+      }
       res.json(status);
     } catch (error) {
       if (isDeliveryLocationsMigrationError(error)) {
@@ -1427,31 +1770,15 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       return;
     }
     const currentStage = order.status === 'Livrée' ? 'delivered' : order.deliveryStage || 'preparation';
-    if (order.status === 'Annulée' || currentStage === 'delivered' || !['picked_up', 'in_transit'].includes(currentStage) ||
+    if (order.status === 'Annulée' || currentStage === 'delivered' ||
         !order.courier || order.customer.deliveryMode === 'retrait') {
-      res.status(409).json({ error: 'Affectez un coursier et confirmez sa prise en charge avant de créer le lien GPS.' });
+      res.status(409).json({ error: 'Affectez d’abord un coursier à cette commande pour générer le lien GPS.' });
       return;
     }
-    const token = randomBytes(32).toString('base64url');
-    const tokenHash = createHash('sha256').update(token).digest('hex');
-    const createdAt = new Date();
-    const expiresAt = new Date(createdAt.getTime() + 24 * 60 * 60 * 1000).toISOString();
     const user = (req as AuthenticatedRequest).authenticatedUser!;
-    if (persistence) {
-      try {
-        await persistence.createDeliveryTrackingSession(order.id, tokenHash, expiresAt, user.id);
-      } catch (error) {
-        if (isDeliveryLocationsMigrationError(error)) {
-          res.status(503).json({ error: 'Les liens GPS ne sont pas activés : appliquez la migration Supabase 20261021000002_delivery_location_points.sql.' });
-          return;
-        }
-        throw error;
-      }
-    }
-    store.deliveryTrackingSessions ||= {};
-    store.deliveryTrackingSessions[order.id] = { tokenHash, expiresAt, createdAt: createdAt.toISOString() };
-    saveStoreLocal(store);
-    res.json({ token, expiresAt });
+    const issued = await issueCourierTrackingSession(order, user.id);
+    await saveStore(store, persistence);
+    res.json(issued);
   }));
 
   app.delete('/api/orders/:id/tracking-link', asyncHandler(async (req, res) => {
@@ -1722,7 +2049,21 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         order.stockReserved = false;
       }
     }
-    if (stage === 'delivered') await clearDeliveryLocations(order.id);
+    if (stage === 'delivered') {
+      await clearDeliveryLocations(order.id);
+    } else if (order.customer.deliveryMode !== 'retrait' && order.courier?.name) {
+      const existingSession = store.deliveryTrackingSessions?.[order.id];
+      const hasValidSession = Boolean(
+        existingSession &&
+        !existingSession.revokedAt &&
+        Date.parse(existingSession.expiresAt) > Date.now() &&
+        (existingSession.token || order.courierTrackingToken)
+      );
+      if (courierChanged || !hasValidSession) {
+        const actorId = (req as AuthenticatedRequest).authenticatedUser?.id || 'system';
+        await issueCourierTrackingSession(order, actorId);
+      }
+    }
 
     const stageLabel: Record<DeliveryStage, string> = {
       preparation: 'préparation',
@@ -1747,13 +2088,13 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
 
     if (courierChanged && courierToSave) {
-      const assignmentMessage = `${courierToSave.name} (${courierToSave.phone}) est affecté à la commande ${order.reference}. Transmettez-lui son ordre de mission et son lien GPS.`;
+      const assignmentMessage = `${courierToSave.name} (${courierToSave.phone}) est affecté à la commande ${order.reference}. Le lien GPS de suivi en direct a été généré automatiquement.`;
       const dispatchRoles: AppRole[] = ['Super-Admin', 'Admin simple', 'Logistique'];
       const dispatchNotifications: AppNotification[] = dispatchRoles.map(targetRole => ({
         id: `notif-${randomUUID()}`,
         timestamp: new Date().toISOString(),
         type: 'status_changed',
-        title: 'Coursier affecté · action requise',
+        title: 'Coursier affecté · Lien GPS prêt',
         orderId: order.id,
         orderReference: order.reference,
         message: assignmentMessage,
@@ -1863,6 +2204,37 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         userId: store.orders[idx].userId,
         read: false
       });
+    }
+    await saveStore(store, persistence);
+    res.json(store.orders[idx]);
+  }));
+
+  app.patch('/api/orders/:id/expected-delivery', asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { expectedDeliveryDate, expectedDeliverySlot } = req.body || {};
+    const idx = store.orders.findIndex(o => o.id === id || o.reference === id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Commande introuvable' });
+      return;
+    }
+    const user = (req as AuthenticatedRequest).authenticatedUser!;
+    if (user.role === 'client' && store.orders[idx].userId !== user.id) {
+      res.status(403).json({ error: 'Cette commande ne vous appartient pas.' });
+      return;
+    }
+    if (store.orders[idx].status === 'Annulée' || store.orders[idx].status === 'Livrée') {
+      res.status(409).json({ error: 'Impossible de modifier la date de livraison d’une commande déjà livrée ou annulée.' });
+      return;
+    }
+    const cleanDate = String(expectedDeliveryDate || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) {
+      res.status(400).json({ error: 'Format de date de livraison invalide (AAAA-MM-JJ requis).' });
+      return;
+    }
+    const cleanSlot = String(expectedDeliverySlot || '').trim().slice(0, 120);
+    store.orders[idx].expectedDeliveryDate = cleanDate;
+    if (cleanSlot) {
+      store.orders[idx].expectedDeliverySlot = cleanSlot;
     }
     await saveStore(store, persistence);
     res.json(store.orders[idx]);
@@ -2037,6 +2409,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     if (process.env.NODE_ENV !== 'production') {
       const { createServer: createViteServer } = await import('vite');
       const vite = await createViteServer({
+        root: __dirname,
         server: { middlewareMode: true },
         appType: 'spa'
       });

@@ -18,7 +18,7 @@ import {
   TrendingDown
 } from 'lucide-react';
 import { Product, ProductVariant } from '../types';
-import { calculateItemVolumePrice } from '../utils/volumeDiscount';
+import { calculateItemVolumePrice, getActiveVolumeDiscountSettings } from '../utils/volumeDiscount';
 
 interface ProductCardProps {
   product: Product;
@@ -39,9 +39,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
-  const isOutOfStock = product.status === 'rupture';
   const selectedVariant = product.variants[selectedVariantIndex] || product.variants[0];
-  const isQuote = selectedVariant?.price === 0;
+  const isQuote = selectedVariant?.price === 0 || Boolean(product.isQuote);
+  const isOutOfStock = !isQuote && product.status === 'rupture';
+  const stockQty = product.quantityAvailable ?? product.stockQuantity ?? 0;
+  const hasPhysicalStock = Boolean(product.hasPhysicalStock || (stockQty > 0 && product.status !== 'rupture'));
+  const volumeConfig = getActiveVolumeDiscountSettings();
 
   const discountPercent = selectedVariant?.discountPercentage || product.discountPercentage || 0;
   const originalPrice = selectedVariant?.originalPrice || product.originalPrice;
@@ -149,7 +152,15 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 <Sparkles className="w-2.5 h-2.5 text-amber-200" />
                 -{discountPercent}%
               </span>
-            ) : <span />}
+            ) : hasPhysicalStock ? (
+              <span className="text-[9px] font-bold text-emerald-800 bg-emerald-50/95 backdrop-blur-xs px-1.5 py-0.5 rounded-md border border-emerald-200 shadow-2xs">
+                ✓ En stock ({stockQty})
+              </span>
+            ) : (
+              <span className="text-[9px] font-bold text-amber-800 bg-amber-50/95 backdrop-blur-xs px-1.5 py-0.5 rounded-md border border-amber-200 shadow-2xs">
+                Sur commande / Devis
+              </span>
+            )}
 
             <div className="flex items-center gap-1">
               {product.pdfNoticeUrl && (
@@ -170,9 +181,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               <span className="text-[11px] text-[#6a6a6b] font-medium truncate leading-none">
                 {product.subcategory || product.category}
               </span>
-              {!isQuote && !isOutOfStock && (
+              {!isQuote && !isOutOfStock && volumeConfig.enabled && volumeConfig.tier1Percent > 0 && (
                 <span className="text-[9px] font-bold text-[#0d44e8] bg-blue-50/90 px-1.5 py-0.5 rounded border border-blue-200/80 whitespace-nowrap">
-                  -5% dès 5
+                  -{volumeConfig.tier1Percent}% dès {volumeConfig.tier1Qty}
                 </span>
               )}
             </div>
@@ -224,20 +235,29 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               <button
                 type="button"
                 onClick={handleQuickAdd}
-                title="Ajouter 1 au panier"
-                className={`min-h-[40px] min-w-[40px] sm:min-h-[36px] sm:min-w-[36px] rounded-full flex items-center justify-center transition-all cursor-pointer shadow-xs ${
+                title={isQuote ? "Ajouter à la demande de devis" : "Ajouter 1 au panier"}
+                className={`min-h-[40px] px-2.5 sm:min-h-[36px] rounded-full flex items-center justify-center gap-1 transition-all cursor-pointer shadow-xs ${
                   justAdded
                     ? 'bg-emerald-600 text-white scale-95'
-                    : 'bg-[#0d44e8] hover:bg-[#0b3ac7] text-white active:scale-90'
+                    : isQuote
+                      ? 'bg-amber-600 hover:bg-amber-700 text-white active:scale-95 text-[11px] font-bold'
+                      : 'bg-[#0d44e8] hover:bg-[#0b3ac7] text-white active:scale-90 min-w-[40px] sm:min-w-[36px]'
                 }`}
                 style={{
                   boxShadow: justAdded 
                     ? 'none' 
-                    : 'rgba(4, 24, 85, 0.28) 0px 2px 6px -1px, rgba(66, 174, 247, 0.48) 0px 6px 14px 0px inset'
+                    : isQuote
+                      ? 'rgba(180, 83, 9, 0.28) 0px 2px 6px -1px'
+                      : 'rgba(4, 24, 85, 0.28) 0px 2px 6px -1px, rgba(66, 174, 247, 0.48) 0px 6px 14px 0px inset'
                 }}
               >
                 {justAdded ? (
                   <Check className="w-4 h-4 stroke-[2.5]" />
+                ) : isQuote ? (
+                  <>
+                    <FileText className="w-3.5 h-3.5" />
+                    <span className="hidden xs:inline">Devis</span>
+                  </>
                 ) : (
                   <Plus className="w-4 h-4 stroke-[2.5]" />
                 )}
@@ -408,7 +428,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               </div>
 
               {/* Volume Discount Schedule */}
-              {!isQuote && !isOutOfStock && (
+              {!isQuote && !isOutOfStock && volumeConfig.enabled && (
                 <div className="p-3.5 bg-blue-50/70 border border-blue-100 rounded-xl space-y-2">
                   <div className="flex items-center justify-between text-xs font-bold text-[#0d44e8]">
                     <span className="flex items-center gap-1.5">
@@ -418,17 +438,17 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                     <span className="text-[10px] text-blue-600 font-medium">Auto</span>
                   </div>
                   <div className="grid grid-cols-3 gap-1.5 text-center text-[11px]">
-                    <div className={`p-1.5 rounded-lg transition-all ${quantity >= 5 && quantity < 10 ? 'bg-white shadow-xs border border-blue-300 font-bold text-[#0d44e8]' : 'bg-white/60 text-slate-600'}`}>
-                      <div className="text-[10px] text-slate-500">5-9 unités</div>
-                      <div className="font-extrabold text-emerald-600">-5%</div>
+                    <div className={`p-1.5 rounded-lg transition-all ${quantity >= volumeConfig.tier1Qty && quantity < volumeConfig.tier2Qty ? 'bg-white shadow-xs border border-blue-300 font-bold text-[#0d44e8]' : 'bg-white/60 text-slate-600'}`}>
+                      <div className="text-[10px] text-slate-500">{volumeConfig.tier1Qty}-{volumeConfig.tier2Qty - 1} unités</div>
+                      <div className="font-extrabold text-emerald-600">-{volumeConfig.tier1Percent}%</div>
                     </div>
-                    <div className={`p-1.5 rounded-lg transition-all ${quantity >= 10 && quantity < 20 ? 'bg-white shadow-xs border border-blue-300 font-bold text-[#0d44e8]' : 'bg-white/60 text-slate-600'}`}>
-                      <div className="text-[10px] text-slate-500">10-19 unités</div>
-                      <div className="font-extrabold text-emerald-600">-10%</div>
+                    <div className={`p-1.5 rounded-lg transition-all ${quantity >= volumeConfig.tier2Qty && quantity < volumeConfig.tier3Qty ? 'bg-white shadow-xs border border-blue-300 font-bold text-[#0d44e8]' : 'bg-white/60 text-slate-600'}`}>
+                      <div className="text-[10px] text-slate-500">{volumeConfig.tier2Qty}-{volumeConfig.tier3Qty - 1} unités</div>
+                      <div className="font-extrabold text-emerald-600">-{volumeConfig.tier2Percent}%</div>
                     </div>
-                    <div className={`p-1.5 rounded-lg transition-all ${quantity >= 20 ? 'bg-white shadow-xs border border-blue-300 font-bold text-[#0d44e8]' : 'bg-white/60 text-slate-600'}`}>
-                      <div className="text-[10px] text-slate-500">20+ unités</div>
-                      <div className="font-extrabold text-emerald-600">-15%</div>
+                    <div className={`p-1.5 rounded-lg transition-all ${quantity >= volumeConfig.tier3Qty ? 'bg-white shadow-xs border border-blue-300 font-bold text-[#0d44e8]' : 'bg-white/60 text-slate-600'}`}>
+                      <div className="text-[10px] text-slate-500">{volumeConfig.tier3Qty}+ unités</div>
+                      <div className="font-extrabold text-emerald-600">-{volumeConfig.tier3Percent}%</div>
                     </div>
                   </div>
                 </div>
@@ -495,26 +515,35 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                     ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                     : justAdded
                       ? 'bg-emerald-600 text-white'
-                      : 'bg-[#0d44e8] hover:bg-[#0b3ac7] text-white active:scale-[0.98]'
+                      : isQuote
+                        ? 'bg-amber-600 hover:bg-amber-700 text-white active:scale-[0.98]'
+                        : 'bg-[#0d44e8] hover:bg-[#0b3ac7] text-white active:scale-[0.98]'
                 }`}
                 style={{
                   boxShadow: isOutOfStock || justAdded
                     ? 'none'
-                    : 'rgba(4, 24, 85, 0.28) 0px 2px 6px -1px, rgba(66, 174, 247, 0.48) 0px 6px 14px 0px inset'
+                    : isQuote
+                      ? 'rgba(180, 83, 9, 0.28) 0px 2px 6px -1px'
+                      : 'rgba(4, 24, 85, 0.28) 0px 2px 6px -1px, rgba(66, 174, 247, 0.48) 0px 6px 14px 0px inset'
                 }}
               >
                 {justAdded ? (
                   <>
                     <Check className="w-4 h-4" />
-                    <span>Ajouté au panier !</span>
+                    <span>{isQuote ? 'Ajouté à la demande de devis !' : 'Ajouté au panier !'}</span>
                   </>
                 ) : isOutOfStock ? (
                   <span>Article temporairement indisponible</span>
+                ) : isQuote ? (
+                  <>
+                    <FileText className="w-4 h-4" />
+                    <span>Demander un devis ({quantity} unité{quantity > 1 ? 's' : ''})</span>
+                  </>
                 ) : (
                   <>
                     <Plus className="w-4 h-4" />
                     <span>
-                      Ajouter · {isQuote ? 'Sur devis' : (() => {
+                      Ajouter · {(() => {
                         const calc = calculateItemVolumePrice(selectedVariant.price, quantity, false);
                         return `${calc.totalWithDiscount.toLocaleString('fr-FR')} F`;
                       })()}

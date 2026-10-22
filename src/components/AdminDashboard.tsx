@@ -27,7 +27,9 @@ import {
   Settings,
   Megaphone
 } from 'lucide-react';
-import { Order, OrderStatus, AdminStats, Pack, Product, User, AppRole, DeliveryStage, AppNotification } from '../types';
+import { Order, OrderStatus, AdminStats, Pack, Product, User, AppRole, DeliveryStage, AppNotification, VolumeDiscountSettings, StaffPermission } from '../types';
+import { api } from '../api';
+import { getActiveVolumeDiscountSettings, setActiveVolumeDiscountSettings } from '../utils/volumeDiscount';
 import { ProductFormModal } from './ProductFormModal';
 import { BestClientsModule } from './BestClientsModule';
 import { DirectMessagingModal } from './DirectMessagingModal';
@@ -68,6 +70,7 @@ interface AdminDashboardProps {
   onDeleteProduct: (id: string) => Promise<void>;
   onProductSaved: (product: Product) => void;
   onToggleProductStock: (productId: string, currentStatus: 'disponible' | 'rupture') => Promise<void>;
+  onUpdateProductStock?: (productId: string, quantityAvailable: number, status?: 'disponible' | 'rupture') => Promise<void>;
   onRefresh: () => void;
   defaultSubTab?: AdminSubTab;
   onOpenDeliveryModal?: (order: Order) => void;
@@ -89,16 +92,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onDeleteProduct,
   onProductSaved,
   onToggleProductStock,
+  onUpdateProductStock,
   onRefresh,
   defaultSubTab = 'kpi',
   onOpenDeliveryModal
 }) => {
   const role: AppRole = currentUser.role;
   const isSuperAdmin = role === 'Super-Admin';
-  const isSimpleAdmin = role === 'Admin simple';
-  const isCommercial = role === 'Commercial';
-  const isGestionnaire = role === 'Gestionnaire Catalogue' || isSuperAdmin;
-  const isLogistique = role === 'Logistique' || isSuperAdmin || isSimpleAdmin;
+  const hasPerm = (perm: StaffPermission) => isSuperAdmin || Boolean(currentUser.permissions?.includes(perm));
+  const isSimpleAdmin = role === 'Admin simple' || hasPerm('stats_view');
+  const isCommercial = role === 'Commercial' || hasPerm('orders_manage') || hasPerm('quotes_manage');
+  const isGestionnaire = role === 'Gestionnaire Catalogue' || isSuperAdmin || hasPerm('catalog_stock');
+  const isLogistique = role === 'Logistique' || isSuperAdmin || isSimpleAdmin || hasPerm('logistics_manage') || hasPerm('orders_view') || hasPerm('orders_manage');
+  const canManageClients = isSuperAdmin || hasPerm('clients_manage');
+  const canManageSettings = isSuperAdmin || hasPerm('settings_manage');
 
   const [activeTab, setActiveTab] = useState<AdminSubTab>(defaultSubTab);
   const [searchQuery, setSearchQuery] = useState('');
@@ -112,9 +119,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [targetMessageClient, setTargetMessageClient] = useState<any | null>(null);
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
 
+  // Volume discount settings state
+  const [discountSettings, setDiscountSettings] = useState<VolumeDiscountSettings>(() => getActiveVolumeDiscountSettings());
+  const [savingDiscounts, setSavingDiscounts] = useState(false);
+  const [discountSavedMsg, setDiscountSavedMsg] = useState('');
+
+  // Inline stock draft quantities per product
+  const [stockDrafts, setStockDrafts] = useState<Record<string, number>>({});
+  const [savingStockId, setSavingStockId] = useState<string | null>(null);
+  const [lastSavedStockId, setLastSavedStockId] = useState<string | null>(null);
+
   useEffect(() => {
     setActiveTab(defaultSubTab);
   }, [defaultSubTab]);
+
+  useEffect(() => {
+    api.getVolumeDiscountSettings()
+      .then((s) => {
+        setActiveVolumeDiscountSettings(s);
+        setDiscountSettings(s);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveVolumeDiscounts = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingDiscounts(true);
+    setDiscountSavedMsg('');
+    try {
+      const updated = await api.updateVolumeDiscountSettings(discountSettings);
+      setActiveVolumeDiscountSettings(updated);
+      setDiscountSettings(updated);
+      setDiscountSavedMsg('Seuils de réduction enregistrés et appliqués côté client !');
+      setTimeout(() => setDiscountSavedMsg(''), 4000);
+    } catch {
+      setDiscountSavedMsg('Erreur lors de la sauvegarde des paliers.');
+    } finally {
+      setSavingDiscounts(false);
+    }
+  };
+
+  const handleInlineStockSave = async (product: Product, nextQty: number) => {
+    const cleanQty = Math.max(0, Math.round(nextQty));
+    setSavingStockId(product.id);
+    try {
+      if (onUpdateProductStock) {
+        await onUpdateProductStock(product.id, cleanQty, 'disponible');
+      } else {
+        const updated = await api.updateProductStock(product.id, cleanQty, 'disponible');
+        onProductSaved(updated);
+      }
+      setStockDrafts(prev => {
+        const copy = { ...prev };
+        delete copy[product.id];
+        return copy;
+      });
+      setLastSavedStockId(product.id);
+      setTimeout(() => setLastSavedStockId(curr => (curr === product.id ? null : curr)), 2500);
+    } finally {
+      setSavingStockId(null);
+    }
+  };
 
   // Filtered orders with search and status chips
   const filteredOrders = orders.filter(o => {
@@ -217,7 +282,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* 2. SUB-TABS NAVIGATION WITH DYNAMIC BADGES */}
-      <div className="flex border-b border-slate-200 gap-1.5 overflow-x-auto pb-1 text-xs font-bold scrollbar-none">
+      <nav aria-label="Sections du tableau de bord" className="flex items-center gap-1.5 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1.5 pb-1 text-xs font-bold shadow-sm scrollbar-none">
         {(isSuperAdmin || isSimpleAdmin) && (
           <button
             type="button"
@@ -286,7 +351,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             )}
           </button>
         )}
-        {isSuperAdmin && (
+        {isSimpleAdmin && (
           <button
             type="button"
             onClick={() => setActiveTab('stats-achats')}
@@ -298,7 +363,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>Statistiques Établissements</span>
           </button>
         )}
-        {isSuperAdmin && (
+        {canManageClients && (
           <button
             type="button"
             onClick={() => setActiveTab('clients')}
@@ -334,7 +399,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>Comptes employés</span>
           </button>
         )}
-        {isSuperAdmin && (
+        {canManageSettings && (
           <button
             type="button"
             onClick={() => setActiveTab('settings')}
@@ -358,7 +423,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>Sauvegardes & Déploiement</span>
           </button>
         )}
-      </div>
+      </nav>
 
       {/* 3. TAB 1: EXECUTIVE KPIS */}
       {activeTab === 'kpi' && (isSuperAdmin || isSimpleAdmin) && stats && (
@@ -647,6 +712,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         {order.status}
                       </span>
 
+                      {order.hasQuoteItems && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                          Inclut Devis / Stock 0
+                        </span>
+                      )}
+
                       {/* Payment Checkbox toggle */}
                       {(isSuperAdmin || isSimpleAdmin) && (
                         <label className="flex items-center gap-1.5 cursor-pointer font-bold ml-1 bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded transition-colors">
@@ -794,62 +865,257 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* 5. TAB 3: CATALOG & STOCKS */}
+      {/* 5. TAB 3: CATALOG, STOCKS & VOLUME DISCOUNTS */}
       {activeTab === 'stock' && isGestionnaire && (
-        <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
-          <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between gap-3">
-            <div className="relative flex-1 max-w-xs">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Rechercher produit..."
-                value={stockSearchQuery}
-                onChange={(e) => setStockSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:bg-white"
-              />
+        <div className="space-y-5">
+          {/* Volume Discount Configuration Panel */}
+          <form onSubmit={handleSaveVolumeDiscounts} className="bg-white rounded-3xl border border-blue-200 p-5 shadow-2xs space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-black text-slate-900 text-sm sm:text-base flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-[#0d44e8]" />
+                  Configuration des Réductions sur Volume (5%, 10%, 15%...)
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Définissez vous-même à partir de quelle quantité commandée la remise s’applique automatiquement côté client.
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-800 bg-slate-100 px-3 py-1.5 rounded-xl cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={discountSettings.enabled}
+                  onChange={(e) => setDiscountSettings(prev => ({ ...prev, enabled: e.target.checked }))}
+                  className="rounded text-[#0d44e8]"
+                />
+                <span>Activer les remises volume</span>
+              </label>
             </div>
-          </div>
 
-          <div className="divide-y divide-slate-100">
-            {displayedProducts.map((p) => (
-              <div key={p.id} className="p-4 flex items-center justify-between gap-3 text-xs hover:bg-slate-50">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center overflow-hidden shrink-0 border border-slate-200">
-                    {p.thumbnailUrl || p.image ? (
-                      <img src={p.thumbnailUrl || p.image} alt={p.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <Package className="w-5 h-5 text-slate-400" />
-                    )}
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-slate-900">{p.name}</h4>
-                    <span className="text-[11px] text-slate-500">{p.category} · {p.variants.length} variante(s)</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onToggleProductStock(p.id, p.status)}
-                    className={`py-1.5 px-3 rounded-xl font-bold cursor-pointer transition-colors ${
-                      p.status === 'disponible'
-                        ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                        : 'bg-rose-100 text-rose-800 hover:bg-rose-200'
-                    }`}
-                  >
-                    {p.status === 'disponible' ? '✓ En Stock' : '⚠️ Rupture'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setEditingProduct(p); setIsProductModalOpen(true); }}
-                    className="p-1.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 cursor-pointer"
-                    title="Modifier"
-                  >
-                    <Edit className="w-4 h-4" />
-                  </button>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                <span className="font-black text-[#0d44e8] uppercase text-[10px] block">Palier 1 (Clinique)</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="font-bold text-slate-700">
+                    À partir de (qté)
+                    <input
+                      type="number"
+                      min={1}
+                      value={discountSettings.tier1Qty}
+                      onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier1Qty: Math.max(1, Number(e.target.value)) }))}
+                      className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-bold text-slate-900"
+                    />
+                  </label>
+                  <label className="font-bold text-slate-700">
+                    Réduction (%)
+                    <input
+                      type="number"
+                      min={0}
+                      max={80}
+                      value={discountSettings.tier1Percent}
+                      onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier1Percent: Math.max(0, Number(e.target.value)) }))}
+                      className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-bold text-emerald-700"
+                    />
+                  </label>
                 </div>
               </div>
-            ))}
+
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                <span className="font-black text-[#0d44e8] uppercase text-[10px] block">Palier 2 (Hôpital)</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="font-bold text-slate-700">
+                    À partir de (qté)
+                    <input
+                      type="number"
+                      min={2}
+                      value={discountSettings.tier2Qty}
+                      onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier2Qty: Math.max(2, Number(e.target.value)) }))}
+                      className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-bold text-slate-900"
+                    />
+                  </label>
+                  <label className="font-bold text-slate-700">
+                    Réduction (%)
+                    <input
+                      type="number"
+                      min={0}
+                      max={80}
+                      value={discountSettings.tier2Percent}
+                      onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier2Percent: Math.max(0, Number(e.target.value)) }))}
+                      className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-bold text-emerald-700"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                <span className="font-black text-[#0d44e8] uppercase text-[10px] block">Palier 3 (Centrale)</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="font-bold text-slate-700">
+                    À partir de (qté)
+                    <input
+                      type="number"
+                      min={3}
+                      value={discountSettings.tier3Qty}
+                      onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier3Qty: Math.max(3, Number(e.target.value)) }))}
+                      className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-bold text-slate-900"
+                    />
+                  </label>
+                  <label className="font-bold text-slate-700">
+                    Réduction (%)
+                    <input
+                      type="number"
+                      min={0}
+                      max={80}
+                      value={discountSettings.tier3Percent}
+                      onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier3Percent: Math.max(0, Number(e.target.value)) }))}
+                      className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-bold text-emerald-700"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <p className="text-[11px] text-slate-500">
+                Aperçu client actuel :{' '}
+                {discountSettings.enabled ? (
+                  <strong className="text-slate-800">
+                    -{discountSettings.tier1Percent}% dès {discountSettings.tier1Qty} u. · -{discountSettings.tier2Percent}% dès {discountSettings.tier2Qty} u. · -{discountSettings.tier3Percent}% dès {discountSettings.tier3Qty} u.
+                  </strong>
+                ) : (
+                  <strong className="text-rose-700">Remises volume désactivées</strong>
+                )}
+              </p>
+              <div className="flex items-center gap-2">
+                {discountSavedMsg && (
+                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-xl border border-emerald-200">
+                    {discountSavedMsg}
+                  </span>
+                )}
+                <button
+                  type="submit"
+                  disabled={savingDiscounts}
+                  className="px-4 py-2 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs cursor-pointer disabled:opacity-50"
+                >
+                  {savingDiscounts ? 'Enregistrement…' : 'Enregistrer les paliers de remise'}
+                </button>
+              </div>
+            </div>
+          </form>
+
+          {/* Products & Real-Time Stock Sync Table */}
+          <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-black text-slate-900 text-sm sm:text-base">
+                  Catalogue & Synchronisation Stock Client ({displayedProducts.length} produits)
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Modifiez la quantité en stock ici : si Stock &gt; 0, le produit passe immédiatement en <strong>validation directe</strong> côté client. Si Stock = 0, la commande est <strong>convertie en demande de devis</strong>.
+                </p>
+              </div>
+              <div className="relative flex-1 max-w-xs">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Rechercher produit..."
+                  value={stockSearchQuery}
+                  onChange={(e) => setStockSearchQuery(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:bg-white"
+                />
+              </div>
+            </div>
+
+            <div className="divide-y divide-slate-100">
+              {displayedProducts.map((p) => {
+                const currentQty = p.quantityAvailable ?? p.stockQuantity ?? 0;
+                const draftQty = stockDrafts[p.id] !== undefined ? stockDrafts[p.id] : currentQty;
+                const isQuoteOnly = p.isQuote || p.variants.every(v => v.price === 0);
+                return (
+                  <div key={p.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs hover:bg-slate-50">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center overflow-hidden shrink-0 border border-slate-200">
+                        {p.thumbnailUrl || p.image ? (
+                          <img src={p.thumbnailUrl || p.image} alt={p.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <Package className="w-5 h-5 text-slate-400" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-slate-900 truncate">{p.name}</h4>
+                        <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                          <span className="text-[11px] text-slate-500">{p.category} · {p.variants.length} variante(s)</span>
+                          {/* Live Client-Side Visibility Status Indicator */}
+                          {p.status === 'rupture' ? (
+                            <span className="px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">
+                              🔴 Bloqué (Rupture) côté client
+                            </span>
+                          ) : isQuoteOnly ? (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                              📋 Équipement sur devis
+                            </span>
+                          ) : currentQty > 0 ? (
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
+                              🟢 En stock côté client ({currentQty} u.) · Commande directe
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                              🟠 Stock 0 · Converti auto. en devis côté client
+                            </span>
+                          )}
+                          {lastSavedStockId === p.id && (
+                            <span className="text-[10px] font-extrabold text-emerald-700">
+                              ✓ Synchronisé côté client !
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 self-end sm:self-center shrink-0">
+                      {/* Direct Stock Quantity Editor */}
+                      <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-500 px-1.5">Stock :</span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={draftQty}
+                          onChange={(e) => setStockDrafts(prev => ({ ...prev, [p.id]: Math.max(0, Number(e.target.value)) }))}
+                          className="w-16 px-2 py-1 rounded-lg bg-white border border-slate-300 text-center font-bold text-slate-900 text-xs"
+                        />
+                        <button
+                          type="button"
+                          disabled={savingStockId === p.id}
+                          onClick={() => void handleInlineStockSave(p, draftQty)}
+                          className="px-2.5 py-1 rounded-lg bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-[11px] cursor-pointer disabled:opacity-50"
+                        >
+                          {savingStockId === p.id ? '...' : 'Valider stock'}
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => onToggleProductStock(p.id, p.status)}
+                        className={`py-1.5 px-3 rounded-xl font-bold cursor-pointer transition-colors ${
+                          p.status === 'disponible'
+                            ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                            : 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                        }`}
+                      >
+                        {p.status === 'disponible' ? '✓ Autorisé' : '⚠️ Rupture'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setEditingProduct(p); setIsProductModalOpen(true); }}
+                        className="p-1.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 cursor-pointer"
+                        title="Modifier la fiche complète"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -865,12 +1131,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* 6. TAB 4: CLIENT PURCHASES STATS */}
-      {activeTab === 'stats-achats' && isSuperAdmin && (
+      {activeTab === 'stats-achats' && isSimpleAdmin && (
         <ClientPurchasesStatsModule orders={orders} clients={clients} products={products} />
       )}
 
       {/* 7. TAB 5: CLIENTS & CONTACTS */}
-      {activeTab === 'clients' && isSuperAdmin && (
+      {activeTab === 'clients' && canManageClients && (
         <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
           <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
             <h3 className="font-bold text-base text-slate-900">
@@ -914,7 +1180,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* 7C. TAB: SYSTEM SETTINGS */}
-      {activeTab === 'settings' && isSuperAdmin && (
+      {activeTab === 'settings' && canManageSettings && (
         <SystemSettingsModule
           actorName={currentUser.contactName || currentUser.facilityName}
           actorRole={role}

@@ -36,6 +36,7 @@ import { createPdfObjectUrl, generateOrderPdf } from './utils/pdfGenerator';
 import { getStoredDrafts, deleteDraft } from './utils/draftsStorage';
 import { CATEGORIES, CONSUMABLE_SUBCATEGORIES, MEDICAL_SPECIALTIES } from './data/initialProducts';
 import { getProductSpecialty } from './utils/specialties';
+import { setActiveVolumeDiscountSettings } from './utils/volumeDiscount';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -247,12 +248,16 @@ export default function App() {
   const loadInitialData = async () => {
     const generation = authGeneration.current;
     try {
-      const [prodsData, packsData, authData] = await Promise.all([
+      const [prodsData, packsData, authData, discountData] = await Promise.all([
         api.getProducts(),
         api.getPacks(),
-        api.getCurrentUser()
+        api.getCurrentUser(),
+        api.getVolumeDiscountSettings().catch(() => null)
       ]);
       if (generation !== authGeneration.current) return;
+      if (discountData) {
+        setActiveVolumeDiscountSettings(discountData);
+      }
       setProducts(prodsData);
       setPacks(packsData);
 
@@ -262,13 +267,14 @@ export default function App() {
         const userOrders = await api.getOrders(authData.user.phone);
         if (generation !== authGeneration.current) return;
         setOrders(userOrders);
-        if (authData.role === 'Super-Admin' || authData.role === 'Admin simple') {
+        const perms = authData.user.permissions || [];
+        if (authData.role === 'Super-Admin' || authData.role === 'Admin simple' || perms.includes('stats_view')) {
           api.getAdminStats().then(setAdminStats).catch(() => {});
         }
-        if (authData.role === 'Super-Admin' || authData.role === 'Admin simple' || authData.role === 'Commercial') {
+        if (authData.role === 'Super-Admin' || authData.role === 'Admin simple' || authData.role === 'Commercial' || perms.includes('clients_manage')) {
           api.getClients().then(setClients).catch(() => {});
         }
-        if (authData.role === 'Super-Admin' || authData.role === 'Commercial') {
+        if (authData.role === 'Super-Admin' || authData.role === 'Commercial' || perms.includes('quotes_manage')) {
           api.getQuotes().then(setQuotes).catch(() => {});
         }
       } else {
@@ -397,6 +403,8 @@ export default function App() {
   // Cart Operations
   const handleAddToCart = (product: Product, variant: ProductVariant, quantity: number) => {
     if (product.status === 'rupture') return;
+    const stockQty = product.quantityAvailable ?? product.stockQuantity ?? 0;
+    const hasStock = Boolean(product.hasPhysicalStock || stockQty > 0);
     setCartItems(prev => {
       const existingIndex = prev.findIndex(
         it => it.productId === product.id && it.variant === variant.label
@@ -404,16 +412,19 @@ export default function App() {
       if (existingIndex > -1) {
         const copy = [...prev];
         copy[existingIndex].quantity = Math.min(9999, copy[existingIndex].quantity + quantity);
+        copy[existingIndex].isDeferredStock = !hasStock || copy[existingIndex].quantity > stockQty;
         return copy;
       } else {
+        const cleanQty = Math.min(9999, Math.max(1, quantity));
         const newItem: CartItem = {
           productId: product.id,
           productName: product.name,
           category: product.category,
           variant: variant.label,
           price: variant.price,
-          quantity: Math.min(9999, Math.max(1, quantity)),
-          isQuote: variant.price === 0
+          quantity: cleanQty,
+          isQuote: variant.price === 0 || Boolean(product.isQuote),
+          isDeferredStock: !hasStock || cleanQty > stockQty
         };
         return [...prev, newItem];
       }
@@ -437,7 +448,15 @@ export default function App() {
     }
     setCartItems(prev => {
       const copy = [...prev];
-      copy[index].quantity = Math.min(9999, quantity);
+      const item = copy[index];
+      const prod = products.find(p => p.id === item.productId);
+      const stockQty = prod ? (prod.quantityAvailable ?? prod.stockQuantity ?? 0) : 0;
+      const nextQty = Math.min(9999, quantity);
+      copy[index] = {
+        ...item,
+        quantity: nextQty,
+        isDeferredStock: stockQty <= 0 || nextQty > stockQty
+      };
       return copy;
     });
   };
@@ -454,20 +473,24 @@ export default function App() {
     setCartItems(prev => {
       let copy = [...prev];
       itemsToAdd.forEach(({ product, variant, quantity }) => {
+        const stockQty = product.quantityAvailable ?? product.stockQuantity ?? 0;
         const existingIndex = copy.findIndex(
           it => it.productId === product.id && it.variant === variant.label
         );
         if (existingIndex > -1) {
           copy[existingIndex].quantity = Math.min(9999, copy[existingIndex].quantity + quantity);
+          copy[existingIndex].isDeferredStock = stockQty <= 0 || copy[existingIndex].quantity > stockQty;
         } else {
+          const cleanQty = Math.min(9999, Math.max(1, quantity));
           copy.push({
             productId: product.id,
             productName: product.name,
             category: product.category,
             variant: variant.label,
             price: variant.price,
-            quantity: Math.min(9999, Math.max(1, quantity)),
-            isQuote: variant.price === 0
+            quantity: cleanQty,
+            isQuote: variant.price === 0 || Boolean(product.isQuote),
+            isDeferredStock: stockQty <= 0 || cleanQty > stockQty
           });
         }
       });
@@ -676,8 +699,13 @@ export default function App() {
 
   const handleAdminToggleStock = async (productId: string, currentStatus: 'disponible' | 'rupture') => {
     const newStatus = currentStatus === 'disponible' ? 'rupture' : 'disponible';
-    await api.updateProductStatus(productId, newStatus);
-    setProducts(prev => prev.map(p => p.id === productId ? { ...p, status: newStatus } : p));
+    const updatedProduct = await api.updateProductStatus(productId, newStatus);
+    setProducts(prev => prev.map(p => p.id === productId ? updatedProduct : p));
+  };
+
+  const handleAdminUpdateProductStock = async (productId: string, quantityAvailable: number, status?: 'disponible' | 'rupture') => {
+    const updatedProduct = await api.updateProductStock(productId, quantityAvailable, status);
+    setProducts(prev => prev.map(p => p.id === productId ? updatedProduct : p));
   };
 
   const handleAdminDeleteProduct = async (productId: string) => {
@@ -953,13 +981,9 @@ export default function App() {
               </div>
             )}
 
-            {/* VIEW 7: ADMIN DASHBOARD (STRICTLY GUARDED FOR SUPER-ADMIN) */}
+            {/* VIEW 7: ADMIN DASHBOARD (GUARDED BY ROLE OR GRANULAR PERMISSIONS) */}
             {ADMIN_TABS.includes(activeTab) && (
-              currentUser && (
-                currentUser.role === 'Super-Admin' ||
-                (currentUser.role === 'Admin simple' && ['admin', 'admin-orders'].includes(activeTab)) ||
-                (currentUser.role === 'Logistique' && activeTab === 'admin-orders')
-              ) ? (
+              currentUser && currentUser.role !== 'client' ? (
                 <React.Suspense fallback={<div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-sm font-bold text-slate-500">Chargement du tableau de bord…</div>}>
                   <AdminDashboard
                     stats={adminStats}
@@ -976,12 +1000,16 @@ export default function App() {
                     onDeleteProduct={handleAdminDeleteProduct}
                     onProductSaved={handleAdminProductSaved}
                     onToggleProductStock={handleAdminToggleStock}
+                    onUpdateProductStock={handleAdminUpdateProductStock}
                     onRefresh={() => {
-                      if (currentUser.role === 'Super-Admin' || currentUser.role === 'Admin simple') {
-                        api.getAdminStats().then(setAdminStats);
-                        api.getClients().then(setClients);
+                      api.getProducts().then(setProducts).catch(() => {});
+                      if (currentUser.role === 'Super-Admin' || currentUser.role === 'Admin simple' || currentUser.permissions?.includes('stats_view')) {
+                        api.getAdminStats().then(setAdminStats).catch(() => {});
                       }
-                      api.getOrders().then(setOrders);
+                      if (currentUser.role === 'Super-Admin' || currentUser.role === 'Admin simple' || currentUser.permissions?.includes('clients_manage')) {
+                        api.getClients().then(setClients).catch(() => {});
+                      }
+                      api.getOrders().then(setOrders).catch(() => {});
                     }}
                     defaultSubTab={
                       activeTab === 'admin-catalog'

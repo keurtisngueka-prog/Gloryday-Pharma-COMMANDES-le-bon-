@@ -52,6 +52,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   onLogoClick
 }) => {
   const role: AppRole = currentUser?.role || 'client';
+  const hasPermission = (permission: string) => role === 'Super-Admin' || Boolean(currentUser?.permissions?.includes(permission as any));
 
   const handleNav = (tab: string) => {
     setActiveTab(tab);
@@ -237,8 +238,9 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 <span className="w-2 h-2 rounded-full bg-purple-600 animate-pulse"></span>
               </div>
 
-              {(role === 'Commercial' || role === 'Super-Admin') && (
+              {(hasPermission('quotes_manage') || hasPermission('clients_manage')) && (
                 <>
+                  {hasPermission('quotes_manage') && <>
                   <button
                     type="button"
                     onClick={() => handleNav('commercial-quotes')}
@@ -252,6 +254,8 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                     </div>
                     <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
+                  </>}
+                  {hasPermission('clients_manage') && <>
                   <button
                     type="button"
                     onClick={() => handleNav('clients-list')}
@@ -265,6 +269,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                     </div>
                     <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
+                  </>}
                 </>
               )}
 
@@ -373,7 +378,13 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 </>
               )}
 
-              {role === 'Logistique' && (
+              {role !== 'Super-Admin' && hasPermission('catalog_stock') && (
+                <button type="button" onClick={() => handleNav('admin-catalog')} className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold ${activeTab === 'admin-catalog' ? 'bg-purple-100 text-purple-900 font-bold' : 'text-slate-700 hover:bg-white'}`}>
+                  <span className="flex items-center gap-2.5"><Package className="w-4 h-4 text-purple-600" /><span>Catalogue & stocks</span></span><ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+              )}
+
+              {role !== 'Super-Admin' && role !== 'Admin simple' && (hasPermission('orders_view') || hasPermission('orders_manage') || hasPermission('logistics_manage')) && (
                 <button
                   type="button"
                   onClick={() => handleNav('admin-orders')}
@@ -386,6 +397,12 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                     <span>Commandes & livraisons</span>
                   </div>
                   <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+              )}
+
+              {role !== 'Super-Admin' && role !== 'Admin simple' && (hasPermission('stats_view') || hasPermission('settings_manage')) && (
+                <button type="button" onClick={() => handleNav('admin')} className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold ${activeTab === 'admin' ? 'bg-purple-100 text-purple-900 font-bold' : 'text-slate-700 hover:bg-white'}`}>
+                  <span className="flex items-center gap-2.5"><ShieldCheck className="w-4 h-4 text-purple-600" /><span>Tableau de bord</span></span><ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                 </button>
               )}
             </div>

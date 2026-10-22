@@ -119,11 +119,16 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                   return (
                     <tr key={idx} className={idx % 2 === 1 ? 'bg-slate-50/40' : 'bg-white'}>
                       <td className="py-2.5 px-3">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-bold text-slate-900 block">{item.productName}</span>
                           {itemCalc.discountPercent > 0 && (
                             <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
                               -{itemCalc.discountPercent}%
+                            </span>
+                          )}
+                          {item.isDeferredStock && !item.isQuote && (
+                            <span className="text-[9px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                              Devis auto (Stock 0)
                             </span>
                           )}
                         </div>

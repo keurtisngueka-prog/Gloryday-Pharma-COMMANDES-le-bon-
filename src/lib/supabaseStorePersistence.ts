@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { LEGACY_DEMO_PRODUCT_IDS, LEGACY_DEMO_PACK_IDS } from '../data/initialProducts.js';
 import type {
   AppNotification,
   CommercialQuote,
@@ -8,7 +9,9 @@ import type {
   Product,
   User,
   AppRole,
-  DeliveryLocationPoint
+  DeliveryLocationPoint,
+  StaffPermission,
+  VolumeDiscountSettings
 } from '../types.js';
 
 export interface StoredUserAccount {
@@ -25,6 +28,9 @@ export interface ManagedStaffAccount {
   role: StaffRole;
   passwordHash: string;
   active: boolean;
+  permissions?: StaffPermission[];
+  lastSeenAt?: string;
+  lastLoginAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,6 +44,7 @@ export interface PersistentServerStore {
   quotes: CommercialQuote[];
   messages: DirectMessage[];
   notifications: AppNotification[];
+  volumeDiscounts?: VolumeDiscountSettings;
 }
 
 type Row = Record<string, any>;
@@ -321,7 +328,7 @@ export class SupabaseStorePersistence {
       } as AppNotification;
     });
 
-    const merged: PersistentServerStore = {
+    const rawMerged: PersistentServerStore = {
       products: mergeById(remoteProducts, local.products, (item) => item.id),
       packs: mergeById(remotePacks, local.packs, (item) => item.id),
       orders: mergeById(remoteOrders, local.orders, (item) => item.id),
@@ -331,8 +338,13 @@ export class SupabaseStorePersistence {
       messages: mergeById(remoteMessages, local.messages, (item) => item.id),
       notifications: mergeById(remoteNotifications, local.notifications, (item) => item.id),
     };
-    this.baseline = clone(merged);
-    return merged;
+    this.baseline = clone(rawMerged);
+    const cleanedMerged: PersistentServerStore = {
+      ...rawMerged,
+      products: rawMerged.products.filter((item) => !LEGACY_DEMO_PRODUCT_IDS.has(item.id)),
+      packs: rawMerged.packs.filter((item) => !LEGACY_DEMO_PACK_IDS.has(item.id)),
+    };
+    return cleanedMerged;
   }
 
   async persist(store: PersistentServerStore): Promise<void> {

@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { Order, DeliveryStage, CourierInfo, DeliveryProof, DeliveryLocationPoint } from '../types';
 import { generateWhatsAppMessageForStage, generateCourierMissionWhatsApp } from '../utils/whatsappNotifications';
-import { computeDeliveryTimeWindow } from '../data/librevilleZones';
+import { computeDeliveryTimeWindow, resolveOrderDestinationCoordinates } from '../data/librevilleZones';
 import { api } from '../api';
 import { LiveDeliveryMap } from './LiveDeliveryMap';
 
@@ -124,6 +124,11 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
       setTrackingExpiresAt('');
       return;
     }
+    if (order.courierTrackingToken) {
+      setTrackingLink(new URL(`/courier-track/${encodeURIComponent(order.courierTrackingToken)}`, window.location.origin).href);
+      setTrackingActive(true);
+      if (order.courierTrackingExpiresAt) setTrackingExpiresAt(order.courierTrackingExpiresAt);
+    }
     let active = true;
     const refreshTrackingStatus = async () => {
       try {
@@ -131,6 +136,7 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
         if (active) {
           setTrackingActive(status.active);
           setTrackingExpiresAt(status.expiresAt || '');
+          if (status.url) setTrackingLink(status.url);
         }
       } catch (error) {
         if (active) setTrackingActionError(error instanceof Error ? error.message : 'Impossible de vérifier le lien GPS.');
@@ -142,7 +148,7 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
       active = false;
       window.clearInterval(timer);
     };
-  }, [isOpen, isAdmin, order.id, order.status]);
+  }, [isOpen, isAdmin, order.id, order.status, order.courier?.name, order.courierTrackingToken, order.courierTrackingExpiresAt]);
 
   if (!isOpen || !order) return null;
 
@@ -165,6 +171,13 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
     Number.isFinite(coordinates.lat) && coordinates.lat >= -90 && coordinates.lat <= 90 &&
     Number.isFinite(coordinates.lng) && coordinates.lng >= -180 && coordinates.lng <= 180);
   const hasConfirmedOrderGps = hasPreciseCoordinates && coordinates?.source === 'checkout';
+  const fallbackNeighborhoodCoords = resolveOrderDestinationCoordinates(
+    order.customer.neighborhoodId,
+    order.customer.deliveryAddress
+  );
+  const mapDestinationCoords = hasPreciseCoordinates
+    ? { lat: coordinates!.lat, lng: coordinates!.lng, source: coordinates?.source || 'neighborhood' }
+    : { lat: fallbackNeighborhoodCoords.lat, lng: fallbackNeighborhoodCoords.lng, source: 'neighborhood' as const };
   const providedMapsUrl = (() => {
     try {
       const url = new URL(order.customer.googleMapsUrl || '');
@@ -180,7 +193,7 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
     .join(', ');
   const mapDestination = hasConfirmedOrderGps
     ? `${coordinates!.lat},${coordinates!.lng}`
-    : addressQuery;
+    : addressQuery || `${mapDestinationCoords.lat},${mapDestinationCoords.lng}`;
   const mapQuery = mapDestination && /gabon/i.test(mapDestination) ? mapDestination : `${mapDestination}, Gabon`;
   const googleMapsUrl = order.customer.deliveryMode === 'retrait'
     ? ''
@@ -238,8 +251,7 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
   const currentStageIndex = getStageIndex(currentStage);
   const nextStage = currentStageIndex < stages.length - 1 ? stages[currentStageIndex + 1].key : null;
   const isOrderActive = order.status !== 'Livrée' && order.status !== 'Annulée';
-  const canTrackCourier = isOrderActive && ['picked_up', 'in_transit'].includes(currentStage) &&
-    Boolean(order.courier) && order.customer.deliveryMode !== 'retrait';
+  const canTrackCourier = isOrderActive && Boolean(order.courier?.name) && order.customer.deliveryMode !== 'retrait';
   const latestLocation = locationPoints[locationPoints.length - 1];
   const locationIsRecent = Boolean(latestLocation && Date.now() - Date.parse(latestLocation.recordedAt) < 60_000);
 
@@ -301,6 +313,12 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
         ? courierDraft
         : undefined;
       await onUpdateStage(order.id, targetStage, courier ? { courier } : undefined);
+      if (isAdmin && order.customer.deliveryMode !== 'retrait') {
+        const status = await api.getCourierTrackingStatus(order.id);
+        setTrackingActive(status.active);
+        setTrackingExpiresAt(status.expiresAt || '');
+        if (status.url) setTrackingLink(status.url);
+      }
     } catch (error) {
       setStageError(error instanceof Error ? error.message : 'Impossible d’enregistrer le suivi.');
     } finally {
@@ -314,6 +332,12 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
       setIsUpdating(true);
       setStageError('');
       await onUpdateStage(order.id, currentStage, { courier: courierDraft });
+      if (isAdmin && order.customer.deliveryMode !== 'retrait') {
+        const status = await api.getCourierTrackingStatus(order.id);
+        setTrackingActive(status.active);
+        setTrackingExpiresAt(status.expiresAt || '');
+        if (status.url) setTrackingLink(status.url);
+      }
     } catch (error) {
       setStageError(error instanceof Error ? error.message : 'Impossible d’enregistrer le coursier.');
     } finally {
@@ -627,17 +651,11 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
 
               <div className="grid gap-3 lg:grid-cols-[minmax(0,1.55fr)_minmax(235px,0.8fr)]">
               <div>
-              {locationPoints.length ? (
                 <LiveDeliveryMap
                   points={locationPoints}
-                  destination={hasConfirmedOrderGps ? { lat: coordinates!.lat, lng: coordinates!.lng } : undefined}
+                  destination={mapDestinationCoords}
+                  destinationLabel={order.customer.facilityName}
                 />
-              ) : (
-                <div className="hidden">
-                  {trackingActive ? 'En attente de la première position envoyée par le coursier…' : 'Aucune position GPS reçue pour le moment.'}
-                </div>
-              )}
-              {!locationPoints.length && <LiveDeliveryMap points={[]} destination={hasConfirmedOrderGps ? { lat: coordinates!.lat, lng: coordinates!.lng } : undefined} destinationLabel={order.customer.facilityName} />}
               </div>
               <aside className="flex flex-col gap-3 rounded-[24px] bg-slate-50 p-3 sm:p-4">
                 <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-900/5">
@@ -662,18 +680,16 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                       <div className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-slate-500">{order.customer.deliveryAddress || deliveryZone}</div>
                       {hasConfirmedOrderGps ? (
                         <div className="mt-2 rounded-xl bg-emerald-50 px-3 py-2 ring-1 ring-emerald-100">
-                          <div className="text-[9px] font-black uppercase tracking-wider text-emerald-800">GPS relevé pour cette commande</div>
-                          <div className="mt-1 font-mono text-[11px] font-extrabold tabular-nums text-slate-900">{coordinates!.lat.toFixed(6)}, {coordinates!.lng.toFixed(6)}</div>
-                          <div className="mt-0.5 text-[10px] font-semibold text-slate-600">{Number.isFinite(coordinates!.accuracy) ? `Précision au relevé ±${Math.round(coordinates!.accuracy!)} m` : 'Précision du relevé non conservée'}</div>
-                        </div>
-                      ) : hasPreciseCoordinates ? (
-                        <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 ring-1 ring-amber-100">
-                          <div className="text-[9px] font-black uppercase tracking-wider text-amber-800">Ancien point GPS à confirmer</div>
-                          <div className="mt-1 font-mono text-[11px] font-extrabold tabular-nums text-slate-900">{coordinates!.lat.toFixed(6)}, {coordinates!.lng.toFixed(6)}</div>
-                          <div className="mt-0.5 text-[10px] font-semibold leading-relaxed text-amber-900">Ce point provient d’une ancienne commande ou du profil. L’itinéraire utilise l’adresse écrite tant qu’un GPS n’est pas relevé au passage de commande.</div>
+                          <div className="text-[9px] font-black uppercase tracking-wider text-emerald-800">GPS exact relevé à la commande</div>
+                          <div className="mt-1 font-mono text-[11px] font-extrabold tabular-nums text-slate-900">{mapDestinationCoords.lat.toFixed(6)}, {mapDestinationCoords.lng.toFixed(6)}</div>
+                          <div className="mt-0.5 text-[10px] font-semibold text-slate-600">{Number.isFinite(coordinates!.accuracy) ? `Précision au relevé ±${Math.round(coordinates!.accuracy!)} m` : 'Position exacte confirmée'}</div>
                         </div>
                       ) : (
-                        <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[10px] font-semibold leading-relaxed text-amber-900">GPS précis non enregistré pour cette commande. L’itinéraire utilise seulement l’adresse et le quartier saisis.</div>
+                        <div className="mt-2 rounded-xl bg-blue-50 px-3 py-2 ring-1 ring-blue-100">
+                          <div className="text-[9px] font-black uppercase tracking-wider text-blue-800">Carte du quartier : {order.customer.neighborhoodName || fallbackNeighborhoodCoords.neighborhoodName}</div>
+                          <div className="mt-1 font-mono text-[11px] font-extrabold tabular-nums text-slate-900">{mapDestinationCoords.lat.toFixed(4)}, {mapDestinationCoords.lng.toFixed(4)}</div>
+                          <div className="mt-0.5 text-[10px] font-semibold leading-relaxed text-blue-900">Carte OpenStreetMap centrée sur le quartier choisi à Libreville.</div>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -780,13 +796,13 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                 </a>
 
                 <a
-                  href={generateCourierMissionWhatsApp(order).directUrl}
+                  href={generateCourierMissionWhatsApp(order, trackingLink).directUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer text-center"
                 >
                   <Truck className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Ordre de Mission Coursier</span>
+                  <span>Ordre de Mission Coursier (+ Lien GPS)</span>
                 </a>
               </div>
 

@@ -1,12 +1,11 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv } from 'vite';
-import { VitePWA } from 'vite-plugin-pwa';
 import { fileURLToPath } from 'node:url';
 
 const projectRoot = fileURLToPath(new URL('.', import.meta.url));
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(async ({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const resolvedSupabaseUrl =
     env.VITE_SUPABASE_URL ||
@@ -21,7 +20,24 @@ export default defineConfig(({ mode }) => {
     process.env.SUPABASE_ANON_KEY ||
     '';
 
+  const plugins = [react(), tailwindcss()];
+  if (command === 'build') {
+    const { VitePWA } = await import('vite-plugin-pwa');
+    plugins.push(
+      VitePWA({
+        registerType: 'autoUpdate',
+        injectRegister: null,
+        includeAssets: ['apple-touch-icon.png', 'icon.svg', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
+        manifest: false,
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,webmanifest}'],
+        },
+      })
+    );
+  }
+
   return {
+    root: projectRoot,
     // Never expose arbitrary SUPABASE_* values (such as a service role key) to the browser.
     // Only the explicitly defined public URL and anon key below may be embedded.
     envPrefix: ['APP_PUBLIC_'],
@@ -31,22 +47,7 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.SUPABASE_ANON_KEY': JSON.stringify(resolvedSupabaseAnonKey),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(resolvedSupabaseAnonKey),
     },
-    plugins: [
-      react(),
-      tailwindcss(),
-      VitePWA({
-        registerType: 'autoUpdate',
-        injectRegister: null,
-        includeAssets: ['apple-touch-icon.png', 'icon.svg', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
-        manifest: false,
-        workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,webmanifest}'],
-        },
-        devOptions: {
-          enabled: false,
-        },
-      }),
-    ],
+    plugins,
     resolve: {
       alias: {
         '@': projectRoot,

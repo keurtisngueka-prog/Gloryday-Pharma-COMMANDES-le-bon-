@@ -7,6 +7,10 @@ export interface LibrevilleNeighborhood {
   landmarkExample: string;
   isExpressEligible: boolean;
   baseDeliveryFee: number; // in FCFA (0 if free/included)
+  defaultCoordinates: {
+    lat: number;
+    lng: number;
+  };
 }
 
 export interface LibrevilleZoneGroup {
@@ -15,6 +19,11 @@ export interface LibrevilleZoneGroup {
   averageDelay: string;
   neighborhoods: LibrevilleNeighborhood[];
 }
+
+export const LIBREVILLE_DEFAULT_CENTER = {
+  lat: 0.3924,
+  lng: 9.4536,
+};
 
 export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
   {
@@ -30,7 +39,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '30 à 40 minutes (Express)',
         landmarkExample: 'Près de la Mairie Centrale ou Bd Triomphal',
         isExpressEligible: true,
-        baseDeliveryFee: 0
+        baseDeliveryFee: 0,
+        defaultCoordinates: { lat: 0.3924, lng: 9.4536 }
       },
       {
         id: 'batterie-iv',
@@ -40,7 +50,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '30 à 45 minutes (Express)',
         landmarkExample: 'Près de la Polyclinique Chambrier / Ambassades',
         isExpressEligible: true,
-        baseDeliveryFee: 0
+        baseDeliveryFee: 0,
+        defaultCoordinates: { lat: 0.4158, lng: 9.4422 }
       },
       {
         id: 'louis',
@@ -50,7 +61,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '35 à 45 minutes',
         landmarkExample: 'Avenue de Cointet ou bord de mer',
         isExpressEligible: true,
-        baseDeliveryFee: 0
+        baseDeliveryFee: 0,
+        defaultCoordinates: { lat: 0.4065, lng: 9.4461 }
       },
       {
         id: 'glass',
@@ -60,7 +72,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '35 à 50 minutes',
         landmarkExample: 'Carrefour Glass / Ancien Sobraga',
         isExpressEligible: true,
-        baseDeliveryFee: 0
+        baseDeliveryFee: 0,
+        defaultCoordinates: { lat: 0.3742, lng: 9.4618 }
       },
       {
         id: 'oloumi',
@@ -70,7 +83,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '40 à 50 minutes',
         landmarkExample: 'Entrepôts Oloumi ou Rue de la Peyrie',
         isExpressEligible: true,
-        baseDeliveryFee: 0
+        baseDeliveryFee: 0,
+        defaultCoordinates: { lat: 0.3665, lng: 9.4692 }
       },
       {
         id: 'mont-bouet',
@@ -80,7 +94,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '40 à 55 minutes',
         landmarkExample: 'Proche Grand Marché ou Pharmacie Centrale',
         isExpressEligible: true,
-        baseDeliveryFee: 0
+        baseDeliveryFee: 0,
+        defaultCoordinates: { lat: 0.3982, lng: 9.4628 }
       }
     ]
   },
@@ -97,7 +112,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '45 à 60 minutes',
         landmarkExample: 'Vers le Stade de l’Amitié ou Carrefour Amissa',
         isExpressEligible: true,
-        baseDeliveryFee: 2000
+        baseDeliveryFee: 2000,
+        defaultCoordinates: { lat: 0.5112, lng: 9.3995 }
       },
       {
         id: 'akanda-centre',
@@ -107,7 +123,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '50 à 65 minutes',
         landmarkExample: 'Vers le CHUO ou CHU Angondjé',
         isExpressEligible: true,
-        baseDeliveryFee: 2000
+        baseDeliveryFee: 2000,
+        defaultCoordinates: { lat: 0.4985, lng: 9.4060 }
       },
       {
         id: 'avorbam',
@@ -117,7 +134,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '50 à 65 minutes',
         landmarkExample: 'Bordure voie express Akanda',
         isExpressEligible: false,
-        baseDeliveryFee: 2500
+        baseDeliveryFee: 2500,
+        defaultCoordinates: { lat: 0.4840, lng: 9.4135 }
       },
       {
         id: 'sabliere',
@@ -127,7 +145,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '40 à 55 minutes',
         landmarkExample: 'Vers l’Aéroport Léon Mba / Bord de mer',
         isExpressEligible: true,
-        baseDeliveryFee: 2000
+        baseDeliveryFee: 2000,
+        defaultCoordinates: { lat: 0.4590, lng: 9.4180 }
       },
       {
         id: 'cap-esterias',
@@ -137,7 +156,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '1h15 à 1h30 (Zone Nord Éloignée)',
         landmarkExample: 'Fin de goudron Cap Estérias',
         isExpressEligible: false,
-        baseDeliveryFee: 5000
+        baseDeliveryFee: 5000,
+        defaultCoordinates: { lat: 0.6115, lng: 9.3360 }
       }
     ]
   },
@@ -154,7 +174,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '40 à 55 minutes',
         landmarkExample: 'Carrefour Charbonnages / Total',
         isExpressEligible: true,
-        baseDeliveryFee: 1500
+        baseDeliveryFee: 1500,
+        defaultCoordinates: { lat: 0.4275, lng: 9.4655 }
       },
       {
         id: 'nzeng-ayong',
@@ -164,7 +185,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '50 à 70 minutes',
         landmarkExample: 'Rond-point de Nzeng-Ayong ou Stade',
         isExpressEligible: true,
-        baseDeliveryFee: 2000
+        baseDeliveryFee: 2000,
+        defaultCoordinates: { lat: 0.4190, lng: 9.4930 }
       },
       {
         id: 'plein-ciel',
@@ -174,7 +196,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '45 à 60 minutes',
         landmarkExample: 'Échangeur Plein Ciel',
         isExpressEligible: true,
-        baseDeliveryFee: 1500
+        baseDeliveryFee: 1500,
+        defaultCoordinates: { lat: 0.3965, lng: 9.4810 }
       },
       {
         id: 'sotega-kinguele',
@@ -184,7 +207,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '45 à 60 minutes',
         landmarkExample: 'Carrefour Sotéga ou Pharmacie Kinguélé',
         isExpressEligible: true,
-        baseDeliveryFee: 1500
+        baseDeliveryFee: 1500,
+        defaultCoordinates: { lat: 0.4055, lng: 9.4765 }
       },
       {
         id: 'pk5-pk8',
@@ -194,7 +218,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '50 à 65 minutes',
         landmarkExample: 'Axe Voie Rapide / PK7 École Normale',
         isExpressEligible: true,
-        baseDeliveryFee: 2000
+        baseDeliveryFee: 2000,
+        defaultCoordinates: { lat: 0.3910, lng: 9.5050 }
       },
       {
         id: 'pk9-pk12',
@@ -204,7 +229,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '1h à 1h20',
         landmarkExample: 'Marché PK12 / Sortie Libreville',
         isExpressEligible: false,
-        baseDeliveryFee: 3000
+        baseDeliveryFee: 3000,
+        defaultCoordinates: { lat: 0.3860, lng: 9.5380 }
       }
     ]
   },
@@ -221,7 +247,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '60 à 80 minutes',
         landmarkExample: 'Centre Hospitalier Universitaire d’Owendo',
         isExpressEligible: true,
-        baseDeliveryFee: 2500
+        baseDeliveryFee: 2500,
+        defaultCoordinates: { lat: 0.3045, lng: 9.5015 }
       },
       {
         id: 'port-owendo',
@@ -231,7 +258,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '65 à 85 minutes',
         landmarkExample: 'Bord du Port minéralier / OPRAG',
         isExpressEligible: false,
-        baseDeliveryFee: 3000
+        baseDeliveryFee: 3000,
+        defaultCoordinates: { lat: 0.2895, lng: 9.5060 }
       },
       {
         id: 'alenakiri-sni',
@@ -241,7 +269,8 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '1h10 à 1h30',
         landmarkExample: 'Zone Cité SNI Owendo',
         isExpressEligible: false,
-        baseDeliveryFee: 3000
+        baseDeliveryFee: 3000,
+        defaultCoordinates: { lat: 0.3120, lng: 9.5140 }
       }
     ]
   }
@@ -262,6 +291,44 @@ export function detectNeighborhoodFromAddress(address: string): LibrevilleNeighb
     lower.includes(n.name.toLowerCase()) || 
     lower.includes(n.id.replace(/-/g, ' '))
   );
+}
+
+export function resolveOrderDestinationCoordinates(
+  neighborhoodId?: string,
+  deliveryAddress?: string
+): { lat: number; lng: number; neighborhoodName: string } {
+  if (neighborhoodId) {
+    const found = getNeighborhoodById(neighborhoodId);
+    if (found) {
+      return {
+        lat: found.defaultCoordinates.lat,
+        lng: found.defaultCoordinates.lng,
+        neighborhoodName: found.name
+      };
+    }
+  }
+  if (deliveryAddress) {
+    const detected = detectNeighborhoodFromAddress(deliveryAddress);
+    if (detected) {
+      return {
+        lat: detected.defaultCoordinates.lat,
+        lng: detected.defaultCoordinates.lng,
+        neighborhoodName: detected.name
+      };
+    }
+    const lower = deliveryAddress.toLowerCase();
+    if (lower.includes('akanda') || lower.includes('angondje') || lower.includes('angondjé')) {
+      return { lat: 0.4985, lng: 9.4060, neighborhoodName: 'Akanda' };
+    }
+    if (lower.includes('owendo')) {
+      return { lat: 0.3045, lng: 9.5015, neighborhoodName: 'Owendo' };
+    }
+  }
+  return {
+    lat: LIBREVILLE_DEFAULT_CENTER.lat,
+    lng: LIBREVILLE_DEFAULT_CENTER.lng,
+    neighborhoodName: 'Libreville Centre'
+  };
 }
 
 export function getEstimatedDeliveryText(neighborhoodId?: string, fallbackAddress?: string): string {
@@ -298,7 +365,6 @@ export function computeDeliveryTimeWindow(
 
   // Current hours in local time
   const currentHours = baseDate.getHours();
-  const currentMinutes = baseDate.getMinutes();
 
   // If outside regular distribution depot hours (18h00 to 07h30)
   if (currentHours >= 18 || currentHours < 7) {

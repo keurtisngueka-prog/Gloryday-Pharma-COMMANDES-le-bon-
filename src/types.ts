@@ -45,6 +45,8 @@ export interface Product {
   pdfNoticeName?: string;
   description?: string;
   isPromotion?: boolean;
+  isQuote?: boolean;
+  price?: number;
   originalPrice?: number;
   discountPercentage?: number;
   quantityAvailable?: number;
@@ -52,6 +54,7 @@ export interface Product {
   alertThreshold?: number;
   lowStockAlertThreshold?: number;
   purchasePrice?: number;
+  hasPhysicalStock?: boolean;
 }
 
 export interface PackItem {
@@ -80,6 +83,7 @@ export interface CartItem {
   price: number; // 0 = sur devis
   quantity: number;
   isQuote: boolean;
+  isDeferredStock?: boolean;
   discountPercent?: number;
   savings?: number;
 }
@@ -88,7 +92,7 @@ export interface Coordinates {
   lat: number;
   lng: number;
   accuracy?: number;
-  source?: 'checkout';
+  source?: 'checkout' | 'neighborhood';
 }
 
 export interface MobilePaymentDetails {
@@ -133,6 +137,7 @@ export interface OrderItem {
   quantity: number;
   total: number;
   isQuote: boolean;
+  isDeferredStock?: boolean;
   discountPercent?: number;
   savings?: number;
 }
@@ -200,6 +205,11 @@ export interface CourierTrackingInfo {
   courierName: string;
   facilityName: string;
   deliveryAddress: string;
+  neighborhoodName?: string;
+  destinationCoordinates?: {
+    lat: number;
+    lng: number;
+  };
   contactName: string;
   contactPhone: string;
   expiresAt: string;
@@ -243,8 +253,12 @@ export interface Order {
   deliveryStage?: DeliveryStage;
   stockReserved?: boolean;
   courier?: CourierInfo;
+  courierTrackingToken?: string;
+  courierTrackingExpiresAt?: string;
   deliveryZone?: string;
   deliveryEstimated?: string;
+  expectedDeliveryDate?: string;
+  expectedDeliverySlot?: string;
   deliveryFee?: number;
   lastWhatsAppNotifiedStage?: string;
   whatsappLogs?: WhatsAppNotificationLog[];
@@ -360,6 +374,7 @@ export interface User {
   lastOrderDate?: string;
   totalOrdersCount?: number;
   totalSpent?: number;
+  permissions?: StaffPermission[];
 }
 
 export interface CommercialQuote {
@@ -442,6 +457,33 @@ export interface ClientPurchaseStats {
   orderStatusCounts: Record<OrderStatus, number>;
 }
 
+export type StaffPermission =
+  | 'catalog_stock'
+  | 'orders_view'
+  | 'orders_manage'
+  | 'quotes_manage'
+  | 'clients_manage'
+  | 'logistics_manage'
+  | 'stats_view'
+  | 'settings_manage';
+
+export interface VolumeDiscountSettings {
+  enabled: boolean;
+  tier1Qty: number;
+  tier1Percent: number;
+  tier2Qty: number;
+  tier2Percent: number;
+  tier3Qty: number;
+  tier3Percent: number;
+}
+
+export interface StaffActivityStats {
+  ordersProcessed: number;
+  quotesManaged: number;
+  deliveriesHandled: number;
+  lastLoginAt?: string;
+}
+
 export interface AdminStats {
   totalRevenue: number;
   ordersToConfirm: number;
@@ -455,4 +497,6 @@ export interface AdminStats {
   priorityOrders: Order[];
   inactiveClientsCount: number;
   clientPurchases?: ClientPurchaseStats[];
+  volumeDiscounts?: VolumeDiscountSettings;
 }
+

@@ -31,7 +31,7 @@ export function generateWhatsAppMessageForStage(
   const neighborhood = order.deliveryZone || order.customer.city || 'Libreville';
   const estimatedTime = order.deliveryEstimated || 'Dans 45 à 60 minutes';
   const timeWindow = computeDeliveryTimeWindow(order.customer.neighborhoodId).timeWindow;
-  const courierName = order.courier?.name || 'Alexandre Moundounga (Livreur Médical Gloryday)';
+  const courierName = order.courier?.name || 'Coursier Médical Gloryday Pharma';
   const courierPhone = order.courier?.phone || '+241 77 003 004';
   const totalFmt = order.estimatedTotal?.toLocaleString('fr-FR') || '0';
   const itemsCount = order.items?.length || 0;
@@ -182,7 +182,8 @@ Des questions ou un réassort urgent ?
   }
 }
 
-export function generateCourierMissionWhatsApp(order: Order): WhatsAppNotificationPayload {
+export function generateCourierMissionWhatsApp(order: Order, customTrackingLink?: string): WhatsAppNotificationPayload {
+  const courierName = order.courier?.name || 'Coursier Gloryday Pharma';
   const courierPhone = order.courier?.phone || '+241 77 003 004';
   const courierPhoneFormatted = formatGabonPhone(courierPhone);
   const ref = order.reference || 'CMD-2026';
@@ -190,14 +191,26 @@ export function generateCourierMissionWhatsApp(order: Order): WhatsAppNotificati
   const contact = order.customer.contactName || facility;
   const phone = order.customer.phone;
   const address = order.customer.deliveryAddress;
-  const neighborhood = order.deliveryZone || 'Libreville';
+  const neighborhood = order.deliveryZone || order.customer.neighborhoodName || 'Libreville';
   const estimatedTime = order.deliveryEstimated || 'Dès que possible';
   const notes = order.customer.notes ? `\n⚠️ *Instructions particulières :* ${order.customer.notes}` : '';
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const trackingUrl = customTrackingLink || (order.courierTrackingToken && origin ? `${origin}/courier-track/${encodeURIComponent(order.courierTrackingToken)}` : '');
+  const trackingBlock = trackingUrl
+    ? `\n\n📡 *LIEN GPS EN DIRECT (OBLIGATOIRE) :*\nOuvrez ce lien et cliquez sur « Démarrer le partage GPS » pour afficher votre position au client :\n${trackingUrl}`
+    : '';
+
+  const coords = order.customer.coordinates;
+  const destinationParam = coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)
+    ? `${coords.lat},${coords.lng}`
+    : `${address || neighborhood}, Libreville, Gabon`;
+  const googleMapsLink = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destinationParam)}&travelmode=driving`;
 
   const text = 
 `📋 *ORDRE DE MISSION COURSIER MÉDICAL* · *GLORYDAY PHARMA*
 ----------------------------------------
-Bonjour Alexandre, nouvelle mission de livraison prioritaire :
+Bonjour *${courierName}*, nouvelle mission de livraison prioritaire :
 
 📦 *Commande :* *${ref}*
 🏥 *Destinataire :* *${facility}*
@@ -205,7 +218,8 @@ Bonjour Alexandre, nouvelle mission de livraison prioritaire :
 🗺️ *Adresse & Repère :* ${address}${notes}
 👤 *Contact Réception :* ${contact} (📞 *${phone}*)
 ⏱️ *Délai cible :* *${estimatedTime}*
-💰 *Encaissement :* ${order.isPaid ? 'Rien à encaisser (Déjà payé)' : `À encaisser en espèces : *${order.estimatedTotal.toLocaleString('fr-FR')} FCFA*`}
+💰 *Encaissement :* ${order.isPaid ? 'Rien à encaisser (Déjà payé)' : `À encaisser : *${order.estimatedTotal.toLocaleString('fr-FR')} FCFA*`}
+🧭 *Itinéraire Google Maps :* ${googleMapsLink}${trackingBlock}
 
 Scellé médical obligatoire au départ du dépôt. Bonne route et prudence !`;
 
@@ -213,7 +227,7 @@ Scellé médical obligatoire au départ du dépôt. Bonne route et prudence !`;
     stageKey: 'courier_mission',
     stageTitle: 'Ordre de Mission Coursier',
     recipientRole: 'coursier',
-    recipientName: order.courier?.name || 'Alexandre Moundounga',
+    recipientName: courierName,
     recipientPhone: courierPhone,
     messageText: text,
     directUrl: `https://wa.me/${courierPhoneFormatted}?text=${encodeURIComponent(text)}`
