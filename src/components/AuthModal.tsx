@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   X, 
   Building2, 
-  Phone, 
   Lock, 
   KeyRound, 
   ArrowRight, 
@@ -15,8 +14,8 @@ import {
   EyeOff
 } from 'lucide-react';
 import { api } from '../api';
-import { User, AppRole, FacilityType } from '../types';
-import { BrandLogo } from './BrandLogo';
+import { User, FacilityType, Coordinates } from '../types';
+import { PhoneNumberInput } from './PhoneNumberInput';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -52,24 +51,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onSuccess,
   initialMode = 'guest_choice'
 }) => {
-  const [mode, setMode] = useState<'guest_choice' | 'login' | 'register' | 'admin' | 'google_complete'>(initialMode);
+  const [mode, setMode] = useState<'guest_choice' | 'login' | 'register' | 'admin' | 'google_complete' | 'recover'>(initialMode);
   const [phone, setPhone] = useState('');
   const [contactName, setContactName] = useState('');
   const [facilityName, setFacilityName] = useState('');
   const [facilityType, setFacilityType] = useState<FacilityType>('Clinique');
   const [deliveryAddress, setDeliveryAddress] = useState('Libreville, Gabon');
-  const [coordinates, setCoordinates] = useState<{ lat: number; lng: number } | null>(null);
+  const [coordinates, setCoordinates] = useState<Coordinates | null>(null);
   const [locating, setLocating] = useState(false);
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [adminIdentifier, setAdminIdentifier] = useState('admin');
   const [adminPassword, setAdminPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
-  const [isCustomizingAdminPass, setIsCustomizingAdminPass] = useState(false);
-  const [newCustomAdminPassword, setNewCustomAdminPassword] = useState('');
-  const [customPassSuccess, setCustomPassSuccess] = useState<string | null>(null);
-  const [selectedRole, setSelectedRole] = useState<AppRole>('Super-Admin');
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recoverySubmitted, setRecoverySubmitted] = useState(false);
 
   // Google Sign-In state & profile
   const [googleProfile, setGoogleProfile] = useState<{
@@ -77,11 +77,51 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     name: string;
     avatarUrl?: string;
   }>({
-    email: 'chidisstore3@gmail.com',
-    name: 'Responsable Établissement'
+    email: '',
+    name: '',
+    avatarUrl: undefined
   });
   const [googleCustomEmail, setGoogleCustomEmail] = useState('');
   const [showCustomGoogleInput, setShowCustomGoogleInput] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setMode(initialMode);
+      setError(null);
+      setRecoverySubmitted(false);
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+      setShowAdminPassword(false);
+      return;
+    }
+
+    setPassword('');
+    setConfirmPassword('');
+    setAdminPassword('');
+    setShowPassword(false);
+    setShowConfirmPassword(false);
+    setShowAdminPassword(false);
+    setError(null);
+    setRecoverySubmitted(false);
+  }, [isOpen, initialMode]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => {
+      const dialog = dialogRef.current;
+      const focusable = dialog?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])'
+      );
+      const firstVisible = Array.from(focusable || []).find((element) => element.getClientRects().length > 0);
+      firstVisible?.focus();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -93,14 +133,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setCoordinates({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setCoordinates({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
         setLocating(false);
       },
       () => {
         setLocating(false);
         setError('Impossible d accéder aux coordonnées GPS. Veuillez préciser votre quartier manuellement.');
       },
-      { timeout: 8000 }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
     );
   };
 
@@ -173,8 +213,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setError('Veuillez remplir tous les champs obligatoires.');
       return;
     }
-    if (password.length < 6) {
-      setError('Le mot de passe doit comporter au moins 6 caractères.');
+    if (password.length < 8 || password.length > 85) {
+      setError('Le mot de passe doit comporter entre 8 et 85 caractères.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Les deux mots de passe ne correspondent pas.');
       return;
     }
     try {
@@ -204,6 +248,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setError('Veuillez renseigner votre téléphone et mot de passe.');
       return;
     }
+    if (password.length < 8 || password.length > 85) {
+      setError('Le mot de passe doit comporter entre 8 et 85 caractères.');
+      return;
+    }
     try {
       setLoading(true);
       const res = await api.login(phone, password);
@@ -211,6 +259,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       onClose();
     } catch (err: any) {
       setError(err.message || 'Échec de connexion. Vérifiez vos identifiants.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRecoveryRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!phone.trim()) {
+      setError('Veuillez renseigner le téléphone associé à votre compte.');
+      return;
+    }
+    try {
+      setLoading(true);
+      await api.requestPasswordRecovery(phone.trim());
+      setRecoverySubmitted(true);
+    } catch (err: any) {
+      setError(err.message || 'Impossible d’envoyer la demande pour le moment.');
     } finally {
       setLoading(false);
     }
@@ -225,7 +291,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
     try {
       setLoading(true);
-      const res = await api.adminLogin(adminIdentifier, adminPassword, selectedRole);
+      const res = await api.adminLogin(adminIdentifier, adminPassword);
       onSuccess(res.user);
       onClose();
     } catch (err: any) {
@@ -235,22 +301,60 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
+  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])'
+    )).filter((element) => element.getClientRects().length > 0);
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) {
+      event.preventDefault();
+      return;
+    }
+    if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-200">
-      <div className="w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden relative max-h-[90vh] flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-modal-title"
+        aria-describedby="auth-modal-description"
+        onKeyDown={handleDialogKeyDown}
+        className="w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden relative max-h-[90vh] flex flex-col"
+      >
         {/* Top Header */}
         <div className="bg-[#0f0f12] text-white p-5 relative shrink-0">
           <button
             type="button"
             onClick={onClose}
+            aria-label="Fermer la fenêtre de connexion"
             className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
-          <div className="mb-1.5">
-            <BrandLogo variant="dark" size="md" showSubtitle={true} />
+          <div className="w-9 h-9 rounded-xl bg-[#0d44e8] flex items-center justify-center mb-2 text-white font-bold text-sm">
+            +
           </div>
-          <p className="text-xs text-slate-400 mt-1">
+          <h2 id="auth-modal-title" className="text-base sm:text-lg font-bold tracking-tight">Gloryday Pharma Gabon</h2>
+          <p id="auth-modal-description" className="text-xs text-slate-400 mt-0.5">
             Commandes médicales pour cliniques, hôpitaux & officines
           </p>
         </div>
@@ -258,7 +362,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* Content Body */}
         <div className="p-5 overflow-y-auto flex-1">
           {error && (
-            <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+            <div role="alert" aria-live="assertive" className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>
@@ -271,8 +375,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 Accédez à vos commandes et approvisionnements médicaux :
               </p>
 
-              {/* 1-CLICK GOOGLE SIGN IN BUTTON */}
-              <div className="p-3 rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50/70 to-indigo-50/40 space-y-2">
+              <div className="p-3 rounded-2xl border border-slate-200 bg-slate-50 text-xs text-slate-600">
+                La connexion Google est désactivée tant que le fournisseur OAuth n’est pas configuré et vérifié.
+              </div>
+              <div className="hidden">
                 <button
                   type="button"
                   onClick={() => handleGoogleSignIn()}
@@ -331,10 +437,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div>
                   <h4 className="font-bold text-slate-800 text-xs sm:text-sm flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Continuer en invité, sans compte
+                    Parcourir comme invité
                   </h4>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    Consultez le catalogue, composez le panier et commandez directement sur WhatsApp.
+                    Consultez le catalogue et préparez votre panier. Un compte client est requis pour enregistrer une commande.
                   </p>
                 </div>
                 <ArrowRight className="w-4 h-4 text-slate-400" />
@@ -390,7 +496,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <span className="font-bold text-slate-900 text-sm">{googleProfile.name}</span>
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
                       <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                      Google Vérifié
+                      Google non configuré
                     </span>
                   </div>
                   <div className="text-[11px] text-slate-600">{googleProfile.email}</div>
@@ -398,16 +504,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-slate-600 text-[11px]">
-                Pour éditer vos devis, bons de commande officiels et assurer la livraison express au Gabon, veuillez préciser votre établissement de santé :
+                Pour préparer vos devis et bons de commande, veuillez préciser votre établissement de santé :
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 uppercase mb-1">
+                <label htmlFor="google-facility-name" className="block font-bold text-slate-700 uppercase mb-1">
                   Nom de l'établissement de santé *
                 </label>
                 <div className="relative">
                   <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
+                    id="google-facility-name"
                     type="text"
                     required
                     placeholder="Ex: Clinique Ste-Marie, Pharmacie du Bord de Mer, Polyclinique..."
@@ -420,10 +527,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-bold text-slate-700 uppercase mb-1">
+                  <label htmlFor="google-facility-type" className="block font-bold text-slate-700 uppercase mb-1">
                     Type d'établissement
                   </label>
                   <select
+                    id="google-facility-type"
                     value={facilityType}
                     onChange={(e: any) => setFacilityType(e.target.value)}
                     className="w-full p-2 rounded-xl border border-slate-300 font-semibold bg-white text-xs"
@@ -439,28 +547,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 uppercase mb-1">
-                    Téléphone Gabon (+241) *
+                  <label htmlFor="google-phone" className="block font-bold text-slate-700 uppercase mb-1">
+                    Téléphone WhatsApp *
                   </label>
-                  <div className="relative">
-                    <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                    <input
-                      type="tel"
-                      required
-                      placeholder="+241 77 00 11 22"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#0d44e8] bg-white"
-                    />
-                  </div>
+                  <PhoneNumberInput id="google-phone" required value={phone} onChange={setPhone} className="text-xs" />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 uppercase mb-1">
+                <label htmlFor="google-contact-name" className="block font-bold text-slate-700 uppercase mb-1">
                   Nom du responsable / Contact
                 </label>
                 <input
+                  id="google-contact-name"
                   type="text"
                   placeholder="Ex: Dr. Mengue / Major de Bloc"
                   value={contactName}
@@ -471,7 +570,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="font-bold text-slate-700 uppercase">
+                  <label htmlFor="google-delivery-address" className="font-bold text-slate-700 uppercase">
                     Quartier & Adresse de livraison
                   </label>
                   <button
@@ -487,6 +586,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="relative">
                   <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
+                    id="google-delivery-address"
                     type="text"
                     required
                     placeholder="Quartier (ex: Batterie 4, Louis, Glass, Libreville...)"
@@ -527,12 +627,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {/* LOGIN */}
           {mode === 'login' && (
             <form onSubmit={handleLogin} className="space-y-3.5">
-              {/* Direct Google Button in Login Form */}
               <button
                 type="button"
                 onClick={() => { setMode('guest_choice'); setShowCustomGoogleInput(true); setError(null); }}
                 disabled={loading}
-                className="w-full py-2.5 px-3 rounded-xl border border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs shadow-2xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="hidden"
               >
                 <GoogleIcon className="w-4 h-4 shrink-0" />
                 <span>Connexion directe avec Google</span>
@@ -546,37 +645,51 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                <label htmlFor="login-phone" className="block text-xs font-bold text-slate-700 uppercase mb-1">
                   Numéro de téléphone
                 </label>
-                <div className="relative">
-                  <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                  <input
-                    type="tel"
-                    required
-                    placeholder="+241 77 003 004"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#0d44e8]"
-                  />
-                </div>
+                <PhoneNumberInput id="login-phone" required value={phone} onChange={setPhone} placeholder="77 00 30 04" />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Mot de passe
+                <label htmlFor="login-password" className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                  Mot de passe (8 caractères minimum)
                 </label>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
-                    type="password"
+                    id="login-password"
+                    type={showPassword ? 'text' : 'password'}
                     required
+                    minLength={8}
+                    maxLength={85}
+                    autoComplete="current-password"
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#0d44e8]"
+                    className="w-full pl-9 pr-12 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#0d44e8]"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((visible) => !visible)}
+                    aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                    aria-pressed={showPassword}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0d44e8]"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+                  </button>
                 </div>
+                <p className="mt-1 text-[10px] text-slate-500" aria-live="polite">{password.length}/85 caractères · 8 minimum</p>
+              </div>
+
+              <div className="text-right">
+                <button
+                  type="button"
+                  onClick={() => { setMode('recover'); setError(null); setRecoverySubmitted(false); }}
+                  className="text-[#0d44e8] hover:underline font-semibold text-xs"
+                >
+                  Mot de passe oublié ?
+                </button>
               </div>
 
               <button
@@ -606,14 +719,55 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </form>
           )}
 
+          {/* PASSWORD RECOVERY REQUEST */}
+          {mode === 'recover' && (
+            <form onSubmit={handleRecoveryRequest} className="space-y-3.5 text-xs">
+              <div className="p-3 rounded-xl bg-blue-50 border border-blue-100 text-blue-950 leading-relaxed">
+                Indiquez le téléphone de votre compte. Si le compte existe, une demande sera envoyée à l’administrateur dans la cloche de notifications. Il vous contactera après vérification de votre identité.
+              </div>
+
+              <div>
+                <label htmlFor="recovery-phone" className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                  Téléphone du compte
+                </label>
+                <PhoneNumberInput id="recovery-phone" required value={phone} onChange={setPhone} placeholder="77 00 30 04" />
+              </div>
+
+              {recoverySubmitted && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800" role="status">
+                  Si un compte correspond à ce numéro, l’administrateur a reçu votre demande. Ne communiquez jamais votre ancien mot de passe.
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading || recoverySubmitted}
+                className="w-full py-2.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs shadow-md disabled:opacity-60"
+              >
+                {loading ? 'Envoi...' : recoverySubmitted ? 'Demande envoyée' : 'Envoyer la demande'}
+              </button>
+
+              <div className="text-center pt-1">
+                <button
+                  type="button"
+                  onClick={() => { setMode('login'); setRecoverySubmitted(false); setError(null); }}
+                  className="text-slate-500 hover:text-slate-700"
+                >
+                  Retour à la connexion
+                </button>
+              </div>
+            </form>
+          )}
+
           {/* REGISTER */}
           {mode === 'register' && (
             <form onSubmit={handleRegister} className="space-y-3 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 uppercase mb-0.5">
+                <label htmlFor="register-facility-name" className="block font-bold text-slate-700 uppercase mb-0.5">
                   Nom de l'établissement *
                 </label>
                 <input
+                  id="register-facility-name"
                   type="text"
                   required
                   placeholder="Ex: Clinique Ste Marie, Polyclinique..."
@@ -624,10 +778,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 uppercase mb-0.5">
+                <label htmlFor="register-facility-type" className="block font-bold text-slate-700 uppercase mb-0.5">
                   Type d'établissement
                 </label>
                 <select
+                  id="register-facility-type"
                   value={facilityType}
                   onChange={(e: any) => setFacilityType(e.target.value)}
                   className="w-full p-2 rounded-xl border border-slate-300 font-semibold"
@@ -643,10 +798,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 uppercase mb-0.5">
+                <label htmlFor="register-contact-name" className="block font-bold text-slate-700 uppercase mb-0.5">
                   Responsable / Contact
                 </label>
                 <input
+                  id="register-contact-name"
                   type="text"
                   placeholder="Dr. / Mme / M."
                   value={contactName}
@@ -656,22 +812,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 uppercase mb-0.5">
+                <label htmlFor="register-phone" className="block font-bold text-slate-700 uppercase mb-0.5">
                   Téléphone WhatsApp *
                 </label>
-                <input
-                  type="tel"
-                  required
-                  placeholder="+241 77 003 004"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="w-full p-2 rounded-xl border border-slate-300"
-                />
+                <PhoneNumberInput id="register-phone" required value={phone} onChange={setPhone} placeholder="77 00 30 04" />
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-0.5">
-                  <label className="font-bold text-slate-700 uppercase">
+                  <label htmlFor="register-delivery-address" className="font-bold text-slate-700 uppercase">
                     Localisation de livraison
                   </label>
                   <button
@@ -685,6 +834,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </button>
                 </div>
                 <input
+                  id="register-delivery-address"
                   type="text"
                   required
                   placeholder="Ville, quartier (ex: Libreville, Mont-Bouët...)"
@@ -701,17 +851,61 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 uppercase mb-0.5">
-                  Mot de passe (min. 6 car.) *
+                  <label htmlFor="register-password" className="block font-bold text-slate-700 uppercase mb-0.5">
+                  Mot de passe (8 caractères minimum) *
                 </label>
+                <div className="relative">
+                  <input
+                    id="register-password"
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    minLength={8}
+                    maxLength={85}
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full p-2 pr-12 rounded-xl border border-slate-300"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((visible) => !visible)}
+                    aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                    aria-pressed={showPassword}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0d44e8]"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+                  </button>
+                </div>
+                <p className="mt-1 text-[10px] text-slate-500" aria-live="polite">{password.length}/85 caractères · 8 minimum</p>
+              </div>
+
+              <div>
+                <label htmlFor="register-password-confirm" className="block font-bold text-slate-700 uppercase mb-0.5">
+                  Confirmer le mot de passe *
+                </label>
+                <div className="relative">
                 <input
-                  type="password"
+                  id="register-password-confirm"
+                  type={showConfirmPassword ? 'text' : 'password'}
                   required
-                  minLength={6}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full p-2 rounded-xl border border-slate-300"
+                  minLength={8}
+                  maxLength={85}
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full p-2 pr-12 rounded-xl border border-slate-300"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword((visible) => !visible)}
+                  aria-label={showConfirmPassword ? 'Masquer le mot de passe de confirmation' : 'Afficher le mot de passe de confirmation'}
+                  aria-pressed={showConfirmPassword}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0d44e8]"
+                >
+                  {showConfirmPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+                </button>
+                </div>
+                <p className="mt-1 text-[10px] text-slate-500" aria-live="polite">{confirmPassword.length}/85 caractères saisis</p>
               </div>
 
               <button
@@ -745,21 +939,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 Authentification sécurisée requise pour accéder au portail d'administration, aux expéditions et aux paramètres.
               </div>
 
-              {customPassSuccess && (
-                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>{customPassSuccess}</span>
-                </div>
-              )}
-
               <div>
-                <label className="block font-bold text-slate-700 uppercase mb-1">
+                <label htmlFor="admin-identifier" className="block font-bold text-slate-700 uppercase mb-1">
                   Email ou Identifiant Administrateur
                 </label>
                 <input
+                  id="admin-identifier"
                   type="text"
                   required
-                  placeholder="admin ou direction@glorydaypharma.ga"
+                  autoComplete="username"
+                  placeholder="direction@glorydaypharma.ga"
                   value={adminIdentifier}
                   onChange={(e) => setAdminIdentifier(e.target.value)}
                   className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-purple-600 focus:outline-none"
@@ -767,104 +956,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="font-bold text-slate-700 uppercase">
-                    Mot de passe Administrateur
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsCustomizingAdminPass(!isCustomizingAdminPass);
-                      setError(null);
-                      setCustomPassSuccess(null);
-                    }}
-                    className="text-purple-700 hover:underline font-bold text-[11px] cursor-pointer flex items-center gap-1"
-                  >
-                    <KeyRound className="w-3 h-3" />
-                    {isCustomizingAdminPass ? 'Fermer la personnalisation' : 'Personnaliser mon mot de passe'}
-                  </button>
-                </div>
+                <label htmlFor="admin-password" className="block font-bold text-slate-700 uppercase mb-1">
+                  Mot de passe de sécurité
+                </label>
                 <div className="relative">
                   <input
+                    id="admin-password"
                     type={showAdminPassword ? 'text' : 'password'}
                     required
-                    placeholder="Saisissez votre mot de passe secret"
+                    autoComplete="current-password"
+                    placeholder="••••••••••••"
                     value={adminPassword}
                     onChange={(e) => setAdminPassword(e.target.value)}
-                    className="w-full p-2.5 pr-10 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-purple-600 focus:outline-none"
+                    className="w-full p-2.5 pr-12 rounded-xl border border-slate-300 font-medium focus:ring-2 focus:ring-purple-600 focus:outline-none"
                   />
                   <button
                     type="button"
-                    onClick={() => setShowAdminPassword(!showAdminPassword)}
-                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-700 cursor-pointer"
-                    title={showAdminPassword ? 'Masquer' : 'Afficher'}
+                    onClick={() => setShowAdminPassword((visible) => !visible)}
+                    aria-label={showAdminPassword ? 'Masquer le mot de passe administrateur' : 'Afficher le mot de passe administrateur'}
+                    aria-pressed={showAdminPassword}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-600"
                   >
-                    {showAdminPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showAdminPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
                   </button>
                 </div>
               </div>
 
-              {/* CUSTOM ADMIN PASSWORD CONFIGURATOR */}
-              {isCustomizingAdminPass && (
-                <div className="p-3.5 rounded-xl bg-slate-50 border border-purple-200 space-y-2.5">
-                  <div className="font-bold text-purple-950 text-[11px] flex items-center justify-between">
-                    <span>Définir votre nouveau mot de passe Administrateur :</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type={showAdminPassword ? 'text' : 'password'}
-                      placeholder="Nouveau mot de passe (min. 6 car.)"
-                      value={newCustomAdminPassword}
-                      onChange={(e) => setNewCustomAdminPassword(e.target.value)}
-                      className="flex-1 p-2 rounded-lg border border-slate-300 bg-white text-xs font-medium focus:ring-2 focus:ring-purple-600 focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        setError(null);
-                        setCustomPassSuccess(null);
-                        if (newCustomAdminPassword.trim().length < 6) {
-                          setError('Le nouveau mot de passe personnalisé doit contenir au moins 6 caractères.');
-                          return;
-                        }
-                        try {
-                          setLoading(true);
-                          await api.updateAdminPassword(newCustomAdminPassword.trim());
-                          setAdminPassword(newCustomAdminPassword.trim());
-                          setCustomPassSuccess('Nouveau mot de passe Administrateur enregistré et prêt à l’emploi !');
-                          setNewCustomAdminPassword('');
-                          setIsCustomizingAdminPass(false);
-                        } catch (err: any) {
-                          setError(err.message || 'Impossible de mettre à jour le mot de passe.');
-                        } finally {
-                          setLoading(false);
-                        }
-                      }}
-                      className="px-3 py-2 rounded-lg bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs cursor-pointer shrink-0 transition-colors"
-                    >
-                      Enregistrer
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-slate-500 leading-tight">
-                    Une fois enregistré, ce nouveau mot de passe remplace immédiatement le mot de passe par défaut sur le serveur et votre session.
-                  </p>
-                </div>
-              )}
-
-              <div>
-                <label className="block font-bold text-slate-700 uppercase mb-1">
-                  Poste / Rôle à activer :
-                </label>
-                <select
-                  value={selectedRole}
-                  onChange={(e: any) => setSelectedRole(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-purple-300 font-bold text-purple-950 bg-white focus:ring-2 focus:ring-purple-600 focus:outline-none"
-                >
-                  <option value="Super-Admin">Super-Admin (Direction Générale)</option>
-                  <option value="Commercial">Commercial (Devis & Relances)</option>
-                  <option value="Gestionnaire Catalogue">Gestionnaire Catalogue (Produits & Stocks)</option>
-                  <option value="Logistique">Logistique (Expéditions & Livraisons)</option>
-                </select>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[11px] text-slate-500 gap-1">
+                <span>Rôle attribué par le compte configuré.</span>
+                <span className="text-purple-700 font-medium">Compte initial : admin / GlorydayAdmin2026!</span>
               </div>
 
               <button
@@ -872,7 +992,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 disabled={loading}
                 className="w-full py-2.5 rounded-xl bg-purple-900 hover:bg-purple-800 text-white font-bold shadow-md cursor-pointer transition-colors"
               >
-                {loading ? 'Authentification...' : `S'identifier & Ouvrir la session [${selectedRole}]`}
+                {loading ? 'Authentification...' : "S'identifier & Ouvrir la session"}
               </button>
 
               <div className="text-center pt-1">

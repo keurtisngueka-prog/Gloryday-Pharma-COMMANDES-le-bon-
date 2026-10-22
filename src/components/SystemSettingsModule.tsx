@@ -7,10 +7,7 @@ import {
   CheckCircle2, 
   Zap,
   Database,
-  Copy,
-  Terminal,
-  Trash2,
-  ShieldCheck
+  Copy
 } from 'lucide-react';
 import { 
   getSystemSettings, 
@@ -19,8 +16,6 @@ import {
   SystemSettings 
 } from '../utils/systemSettingsStorage';
 import { recordAuditLog } from '../utils/auditLogger';
-import { executeProductionCleanup, CleanupReport } from '../utils/productionCleanup';
-import { SUPABASE_PROJECT_REF, DEFAULT_SUPABASE_URL, supabaseUrl, isSupabaseConfigured } from '../lib/supabase';
 
 interface SystemSettingsModuleProps {
   actorName?: string;
@@ -33,33 +28,7 @@ export const SystemSettingsModule: React.FC<SystemSettingsModuleProps> = ({
 }) => {
   const [formData, setFormData] = useState<SystemSettings>(() => getSystemSettings());
   const [savedBanner, setSavedBanner] = useState(false);
-  const [copiedCli, setCopiedCli] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
-  const [isCleaning, setIsCleaning] = useState(false);
-  const [cleanupReport, setCleanupReport] = useState<CleanupReport | null>(null);
-
-  const handleRunProductionCleanup = async (fullReset: boolean) => {
-    setIsCleaning(true);
-    try {
-      const report = await executeProductionCleanup({ fullReset });
-      setCleanupReport(report);
-      setTimeout(() => setCleanupReport(null), 6000);
-    } finally {
-      setIsCleaning(false);
-    }
-  };
-
-  const handleCopyCli = () => {
-    const cliCommands = [
-      'supabase login',
-      'supabase init',
-      `supabase link --project-ref ${SUPABASE_PROJECT_REF}`,
-      'supabase db push'
-    ].join('\n');
-    navigator.clipboard.writeText(cliCommands);
-    setCopiedCli(true);
-    setTimeout(() => setCopiedCli(false), 2500);
-  };
 
   const handleCopyMigrationSql = async () => {
     try {
@@ -77,24 +46,12 @@ export const SystemSettingsModule: React.FC<SystemSettingsModuleProps> = ({
     e.preventDefault();
     const updated = saveSystemSettings(formData);
     setFormData(updated);
-    if (updated.adminPassword && updated.adminPassword.trim().length >= 6) {
-      try {
-        localStorage.setItem('gloryday_admin_custom_password', updated.adminPassword.trim());
-      } catch {}
-      try {
-        await fetch('/api/auth/admin-password', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ newPassword: updated.adminPassword.trim() })
-        });
-      } catch {}
-    }
     recordAuditLog({
       category: 'settings',
       action: 'Mise à jour des Paramètres Système',
       actorName,
       actorRole,
-      details: `Configuration sauvegardée : Airtel (${updated.airtelMoneyPhone}), Moov (${updated.moovMoneyPhone}), WhatsApp Auto (${updated.enableAutoWhatsAppOnStageChange ? 'Actif' : 'Désactivé'}).`,
+      details: 'Configuration locale mise à jour dans ce navigateur.',
       status: 'success'
     });
     setSavedBanner(true);
@@ -118,10 +75,13 @@ export const SystemSettingsModule: React.FC<SystemSettingsModuleProps> = ({
 
   return (
     <form onSubmit={handleSave} className="space-y-5">
+      <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
+        Ces valeurs sont enregistrées dans ce navigateur uniquement. Elles ne changent pas les paramètres du serveur, les numéros affichés aux clients ni les frais calculés lors d’une commande.
+      </div>
       {savedBanner && (
         <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>Vos paramètres opérationnels ont été enregistrés et synchronisés avec succès.</span>
+          <span>Vos paramètres locaux ont été enregistrés dans ce navigateur.</span>
         </div>
       )}
 
@@ -154,7 +114,7 @@ export const SystemSettingsModule: React.FC<SystemSettingsModuleProps> = ({
 
           <div>
             <label className="block font-bold text-slate-700 uppercase mb-1">
-              Numéro Standard WhatsApp Officiel
+              Numéro utilisé pour préparer les messages WhatsApp
             </label>
             <input
               type="text"
@@ -188,20 +148,8 @@ export const SystemSettingsModule: React.FC<SystemSettingsModuleProps> = ({
             />
           </div>
 
-          <div className="sm:col-span-2 pt-2 border-t border-slate-100">
-            <label className="block font-bold text-purple-900 uppercase mb-1">
-              Mot de Passe Administrateur de Production (Accès Direction & Staff)
-            </label>
-            <input
-              type="text"
-              minLength={6}
-              value={formData.adminPassword || 'Gloryday@2026!'}
-              onChange={(e) => setFormData({ ...formData, adminPassword: e.target.value })}
-              className="w-full sm:w-80 p-2.5 rounded-xl border border-purple-300 bg-purple-50/40 font-mono font-bold text-purple-950"
-            />
-            <p className="text-[11px] text-slate-500 mt-1">
-              Ce mot de passe secret protège l'accès au portail Direction (`admin` / `admin@glorydaypharma.ga`).
-            </p>
+          <div className="sm:col-span-2 pt-2 border-t border-slate-100 text-xs text-amber-800">
+            Le mot de passe administrateur se configure uniquement dans les variables sécurisées de l’hébergeur. Les réglages affichés ici restent enregistrés dans ce navigateur.
           </div>
         </div>
       </div>
@@ -291,105 +239,38 @@ export const SystemSettingsModule: React.FC<SystemSettingsModuleProps> = ({
         </div>
       </div>
 
-      {/* 3. SUPABASE CLOUD & CLI INTEGRATION */}
+      {/* 3. SUPABASE SERVER CONNECTION */}
       <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div>
             <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
               <Database className="w-5 h-5 text-emerald-600" />
-              <span>Liaison Supabase Cloud Production ({SUPABASE_PROJECT_REF})</span>
+              <span>Connexion à la base Supabase</span>
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              URL de Production active (<code className="font-mono">SUPABASE_URL</code>) : <span className="font-mono font-semibold text-emerald-700">{supabaseUrl || DEFAULT_SUPABASE_URL}</span>
+              Le projet Supabase existe déjà. Cette migration ajoute uniquement les éléments nécessaires au raccordement du serveur.
             </p>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              Statut <code className="font-mono">SUPABASE_ANON_KEY</code> :{' '}
-              <span className={isSupabaseConfigured ? 'font-bold text-emerald-700' : 'font-semibold text-amber-700'}>
-                {isSupabaseConfigured ? 'Clé de production active' : 'En attente de SUPABASE_ANON_KEY dans les variables d’environnement'}
-              </span>
+            <p className="text-[11px] text-amber-800 mt-1">
+              Pour activer la connexion, appliquez cette migration puis configurez la clé serveur dans les secrets privés de l’hébergeur. Ne la collez jamais dans cette page.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={handleCopyCli}
-              className="py-1.5 px-3 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-            >
-              <Terminal className="w-3.5 h-3.5 text-slate-500" />
-              <span>{copiedCli ? 'Commandes CLI copiées !' : 'Copier commandes CLI'}</span>
-            </button>
             <button
               type="button"
               onClick={handleCopyMigrationSql}
               className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
             >
               <Copy className="w-3.5 h-3.5" />
-              <span>{copiedSql ? 'Script SQL copié !' : 'Copier Migration SQL complète'}</span>
+              <span>{copiedSql ? 'Migration copiée !' : 'Copier la migration de raccordement'}</span>
             </button>
           </div>
         </div>
 
-        <div className="bg-slate-900 text-slate-100 rounded-2xl p-3.5 font-mono text-xs space-y-1 overflow-x-auto">
-          <div className="text-slate-400"># Variables de production supportées (.env / Environnement Cloud) :</div>
-          <div className="text-emerald-400">SUPABASE_URL={DEFAULT_SUPABASE_URL}</div>
-          <div className="text-emerald-400">SUPABASE_ANON_KEY=&lt;votre_cle_publique_anon_production&gt;</div>
-          <div className="text-slate-400 pt-2"># Commandes CLI de synchronisation du schéma :</div>
-          <div>supabase login</div>
-          <div>supabase init</div>
-          <div>supabase link --project-ref {SUPABASE_PROJECT_REF}</div>
-          <div>supabase db push</div>
+        <div className="bg-slate-900 text-slate-100 rounded-2xl p-3.5 text-xs space-y-1">
+          <div>Les commandes et le catalogue seront enregistrés dans les tables Supabase existantes.</div>
+          <div>La clé serveur doit rester dans les variables privées de l’hébergeur, jamais dans le navigateur.</div>
+          <div>La connexion démarre uniquement quand la migration et la clé serveur sont toutes les deux configurées.</div>
         </div>
-      </div>
-
-      {/* 3B. PRODUCTION CLEAN SLATE & DEMO PURGE */}
-      <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs p-5 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-          <div>
-            <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-rose-600" />
-              <span>Nettoyage de Production & État Vierge (Lancement)</span>
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Purgez les commandes fictives de démonstration, les journaux d'audit de test et les notifications résiduelles pour garantir un état 100 % vierge en production (le catalogue de produits médicaux et vos tarifs sont intégralement conservés).
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button
-              type="button"
-              disabled={isCleaning}
-              onClick={() => handleRunProductionCleanup(false)}
-              className="py-2 px-3.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-slate-500" />
-              <span>Purger Données Démo</span>
-            </button>
-            <button
-              type="button"
-              disabled={isCleaning}
-              onClick={() => handleRunProductionCleanup(true)}
-              className="py-2 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>{isCleaning ? 'Nettoyage en cours...' : 'Réinitialiser Commandes & Logs (État Vierge)'}</span>
-            </button>
-          </div>
-        </div>
-
-        {cleanupReport && (
-          <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs font-semibold flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>
-                État vierge de production activé : <strong>{cleanupReport.removedOrdersCount}</strong> commande(s),{' '}
-                <strong>{cleanupReport.removedLogsCount}</strong> log(s) d'audit et{' '}
-                <strong>{cleanupReport.removedNotificationsCount}</strong> notification(s) supprimés.
-              </span>
-            </div>
-            <span className="text-[11px] font-mono text-emerald-700">
-              {cleanupReport.serverCleaned ? 'Serveur & Client synchronisés' : 'Stockage local purgé'}
-            </span>
-          </div>
-        )}
       </div>
 
       {/* 4. LOGISTICS & WHATSAPP AUTOMATION */}
@@ -398,21 +279,21 @@ export const SystemSettingsModule: React.FC<SystemSettingsModuleProps> = ({
           <div>
             <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
               <Zap className="w-5 h-5 text-emerald-600" />
-              <span>Automate de Notifications WhatsApp & Tarification Livraison</span>
+              <span>Tarification et notifications de livraison</span>
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Paramétrez les seuils de gratuité et les messages envoyés à chaque changement d'étape logistique.
+              Le tarif du serveur suit les règles du catalogue et des quartiers. L’envoi automatique WhatsApp n’est pas connecté.
             </p>
           </div>
 
-          <label className="flex items-center gap-2 cursor-pointer bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl text-xs font-bold text-emerald-900 self-start sm:self-center">
+          <label className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 self-start sm:self-center">
             <input
               type="checkbox"
-              checked={formData.enableAutoWhatsAppOnStageChange}
-              onChange={(e) => setFormData({ ...formData, enableAutoWhatsAppOnStageChange: e.target.checked })}
-              className="rounded text-emerald-600"
+              checked={false}
+              disabled
+              className="rounded"
             />
-            <span>Envoi WhatsApp Auto Actif</span>
+            <span>Envoi automatique indisponible</span>
           </label>
         </div>
 

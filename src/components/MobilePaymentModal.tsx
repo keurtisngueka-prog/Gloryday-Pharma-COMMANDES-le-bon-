@@ -18,7 +18,7 @@ interface MobilePaymentModalProps {
   onClose: () => void;
   order: Order;
   allOrders?: Order[];
-  onPaymentConfirmed?: (transactionId: string, operator: 'airtel_money' | 'moov_money', status?: 'verified' | 'failed') => Promise<void>;
+  onPaymentConfirmed?: (transactionId: string, operator: 'airtel_money' | 'moov_money') => Promise<void>;
 }
 
 export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
@@ -58,8 +58,6 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
     }
   };
 
-  const [paymentStatusChoice, setPaymentStatusChoice] = useState<'verified' | 'failed'>('verified');
-
   // Check for duplicate transaction references
   const duplicateOrder = transactionRef.trim() && allOrders
     ? allOrders.find(
@@ -76,18 +74,15 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
     }
 
     if (duplicateOrder) {
-      const confirmDup = window.confirm(
-        `ALERTE SÉCURITÉ : La référence ${transactionRef.trim()} a DÉJÀ été utilisée sur la commande ${duplicateOrder.reference} (${duplicateOrder.customer.facilityName}).\n\nSouhaitez-vous continuer malgré le risque de doublon / fraude ?`
-      );
-      if (!confirmDup) return;
+      setError('Cette référence est déjà associée à une autre de vos commandes. Utilisez une référence unique.');
+      return;
     }
 
     try {
       setIsSubmitting(true);
       setError(null);
-      if (onPaymentConfirmed) {
-        await onPaymentConfirmed(transactionRef.trim(), operator, paymentStatusChoice);
-      }
+      if (!onPaymentConfirmed) throw new Error('La transmission de la référence de paiement n’est pas disponible.');
+      await onPaymentConfirmed(transactionRef.trim(), operator);
       setSuccess(true);
       setTimeout(() => {
         onClose();
@@ -237,7 +232,7 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
             {success && (
               <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                <span>Rapprochement enregistré avec succès !</span>
+                <span>Référence transmise. Le paiement reste en attente de vérification par Gloryday Pharma.</span>
               </div>
             )}
 
@@ -257,36 +252,6 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
               />
             </div>
 
-            {/* Status selection : verified vs failed */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                Résultat du rapprochement bancaire / opérateur :
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPaymentStatusChoice('verified')}
-                  className={`py-1.5 px-3 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
-                    paymentStatusChoice === 'verified'
-                      ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
-                      : 'border-slate-200 bg-slate-50 text-slate-600'
-                  }`}
-                >
-                  ✓ Conforme (Verified)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaymentStatusChoice('failed')}
-                  className={`py-1.5 px-3 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
-                    paymentStatusChoice === 'failed'
-                      ? 'bg-rose-600 border-rose-600 text-white shadow-xs'
-                      : 'border-slate-200 bg-slate-50 text-slate-600'
-                  }`}
-                >
-                  ✗ Rejeté (Failed)
-                </button>
-              </div>
-            </div>
 
             <div className="flex flex-col sm:flex-row gap-2 pt-1">
               <button
@@ -295,7 +260,7 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
                 className="flex-1 py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-xs"
               >
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>{isSubmitting ? 'Validation...' : 'Valider mon règlement'}</span>
+                <span>{isSubmitting ? 'Transmission...' : 'Transmettre ma référence'}</span>
               </button>
 
               <a

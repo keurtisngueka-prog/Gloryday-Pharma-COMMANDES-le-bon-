@@ -343,7 +343,10 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
           {activeTab === 'invoices' && (
             <div className="space-y-3">
               <div className="space-y-1">
-                <span className="font-bold text-slate-700 text-[11px]">Pièces comptables émises :</span>
+                <span className="font-bold text-slate-700 text-[11px]">Documents de commande :</span>
+                <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[10px] text-amber-900">
+                  Les documents générés ici sont des projets internes. Vérifiez les mentions, la numérotation et le taux applicable avec votre comptable avant de les transmettre.
+                </p>
                 {(!order.invoices || order.invoices.length === 0) ? (
                   <p className="text-slate-400 italic">Aucune facture ou note d'avoir générée pour cette commande.</p>
                 ) : (
@@ -352,7 +355,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                       <div>
                         <div className="font-bold text-slate-900 font-mono">{inv.number}</div>
                         <div className="text-[10px] text-slate-500">
-                          {inv.type === 'facture' ? 'Facture Définitive' : 'Avoir Commercial'} · Émis le {inv.issueDate}
+                          {inv.type === 'facture' ? 'Projet de facture' : 'Projet d’avoir'} · Créé le {inv.issueDate}
                           {inv.reason && ` · Motif : ${inv.reason}`}
                         </div>
                       </div>
@@ -366,7 +369,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
               </div>
 
               <form onSubmit={handleCreateInvoiceOrCredit} className="p-3 border border-slate-200 rounded-xl space-y-2 bg-slate-50/50">
-                <span className="font-bold text-slate-800">Générer une pièce comptable :</span>
+                <span className="font-bold text-slate-800">Créer un projet de document :</span>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-slate-600 mb-0.5">Type de Document</label>
@@ -375,8 +378,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                       onChange={(e: any) => setInvoiceType(e.target.value)}
                       className="w-full p-1.5 border border-slate-300 rounded-lg bg-white"
                     >
-                      <option value="facture">Facture Officielle</option>
-                      <option value="avoir">Note d'Avoir / Retour Produit</option>
+                      <option value="facture">Projet de facture</option>
+                      <option value="avoir">Projet d'avoir / retour</option>
                     </select>
                   </div>
                   <div>
@@ -386,8 +389,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                       onChange={(e) => setTvaRate(Number(e.target.value))}
                       className="w-full p-1.5 border border-slate-300 rounded-lg bg-white"
                     >
-                      <option value="0">0% (Exonéré Dispositifs Médicaux)</option>
-                      <option value="0.18">18% (Taux Standard Gabon)</option>
+                      <option value="0">0% (à confirmer)</option>
+                      <option value="0.18">18% (à confirmer)</option>
                     </select>
                   </div>
                 </div>
@@ -410,7 +413,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                   type="submit"
                   className="w-full py-2 bg-[#0d44e8] hover:bg-blue-700 text-white font-bold rounded-xl cursor-pointer shadow-xs mt-1"
                 >
-                  Émettre {invoiceType === 'facture' ? 'la Facture' : 'l\'Avoir'}
+                  Créer {invoiceType === 'facture' ? 'le projet de facture' : 'le projet d’avoir'}
                 </button>
               </form>
             </div>
@@ -421,7 +424,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
             <form onSubmit={handleSaveDeliveryProofAndCourier} className="space-y-3">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
-                  Sélectionner un Coursier (Annuaire Officiel)
+                  Sélectionner un coursier (annuaire configuré)
                 </label>
                 <select
                   value={selectedCourierId}

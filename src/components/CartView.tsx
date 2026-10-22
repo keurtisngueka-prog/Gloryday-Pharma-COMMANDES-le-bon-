@@ -6,7 +6,6 @@ import {
   ShoppingBag, 
   ArrowRight, 
   Building2, 
-  Phone, 
   MapPin, 
   Truck, 
   FileText,
@@ -16,8 +15,8 @@ import {
   Compass,
   ShieldCheck
 } from 'lucide-react';
-import { CartItem, CustomerInfo, User } from '../types';
-import { getStoredCustomerInfo, setStoredCustomerInfo } from '../api';
+import { CartItem, Coordinates, CustomerInfo, User } from '../types';
+import { PhoneNumberInput } from './PhoneNumberInput';
 import { 
   LIBREVILLE_ZONE_GROUPS, 
   getNeighborhoodById, 
@@ -59,55 +58,36 @@ export const CartView: React.FC<CartViewProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<'especes' | 'airtel_money' | 'moov_money' | 'virement'>('especes');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [deliveryCoordinates, setDeliveryCoordinates] = useState<Coordinates | null>(null);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [gpsMessage, setGpsMessage] = useState('');
+  const [isLocatingGps, setIsLocatingGps] = useState(false);
 
   useEffect(() => {
     if (currentUser) {
       if (currentUser.facilityName) setFacilityName(currentUser.facilityName);
       if (currentUser.contactName) setContactName(currentUser.contactName);
       if (currentUser.phone) setPhone(currentUser.phone);
+      setDeliveryCoordinates(null);
+      setGpsMessage('Relevez le GPS à l’adresse de livraison pour associer un point exact à cette commande.');
       if (currentUser.deliveryAddress) {
         setDeliveryAddress(currentUser.deliveryAddress);
         const detected = detectNeighborhoodFromAddress(currentUser.deliveryAddress);
         if (detected) setNeighborhoodId(detected.id);
       }
     } else {
-      const saved = getStoredCustomerInfo();
-      if (saved) {
-        if (saved.facilityName) setFacilityName(saved.facilityName);
-        if (saved.contactName) setContactName(saved.contactName);
-        if (saved.phone) setPhone(saved.phone);
-        if (saved.deliveryAddress) setDeliveryAddress(saved.deliveryAddress);
-        if (saved.neighborhoodId) setNeighborhoodId(saved.neighborhoodId);
-        if (saved.deliveryMode) setDeliveryMode(saved.deliveryMode);
-        if (saved.paymentMethod) setPaymentMethod(saved.paymentMethod);
-        if (saved.addressDetails) setAddressDetails(saved.addressDetails);
-        if (saved.notes) setNotes(saved.notes);
-      } else {
-        setFacilityName('');
-        setContactName('');
-        setPhone('');
-        setNeighborhoodId('centre-ville');
-        setDeliveryAddress('Centre-Ville, Libreville');
-      }
+      setFacilityName('');
+      setContactName('');
+      setPhone('');
+      setNeighborhoodId('centre-ville');
+      setDeliveryAddress('Centre-Ville, Libreville');
+      setAddressDetails('');
+      setNotes('');
+      setDeliveryCoordinates(null);
+      setGpsError(null);
+      setGpsMessage('');
     }
   }, [currentUser]);
-
-  // Synchronous auto-save of delivery draft to localStorage to prevent data loss on browser close
-  useEffect(() => {
-    if (facilityName.trim() || phone.trim() || addressDetails.trim() || notes.trim()) {
-      setStoredCustomerInfo({
-        facilityName,
-        contactName,
-        phone,
-        neighborhoodId,
-        deliveryAddress,
-        addressDetails,
-        deliveryMode,
-        paymentMethod,
-        notes
-      });
-    }
-  }, [facilityName, contactName, phone, neighborhoodId, deliveryAddress, addressDetails, deliveryMode, paymentMethod, notes]);
 
   const fixedItems = items.filter(it => !it.isQuote);
   const quoteItems = items.filter(it => it.isQuote);
@@ -126,6 +106,9 @@ export const CartView: React.FC<CartViewProps> = ({
 
   const handleNeighborhoodChange = (newId: string) => {
     setNeighborhoodId(newId);
+    setDeliveryCoordinates(null);
+    setGpsError(null);
+    setGpsMessage('Quartier modifié : reprenez le GPS à l’adresse de livraison pour confirmer le point exact.');
     const found = getNeighborhoodById(newId);
     if (found) {
       const landmarkSuffix = addressDetails ? ` (${addressDetails})` : '';
@@ -135,11 +118,44 @@ export const CartView: React.FC<CartViewProps> = ({
 
   const handleAddressDetailsChange = (details: string) => {
     setAddressDetails(details);
+    setDeliveryCoordinates(null);
+    setGpsError(null);
+    setGpsMessage('Adresse modifiée : reprenez le GPS à l’adresse de livraison pour confirmer le point exact.');
     const found = getNeighborhoodById(neighborhoodId);
     if (found) {
       const landmarkSuffix = details.trim() ? ` · Repère : ${details.trim()}` : '';
       setDeliveryAddress(`${found.name}, Libreville${landmarkSuffix}`);
     }
+  };
+
+  const captureDeliveryGps = () => {
+    setGpsError(null);
+    if (!navigator.geolocation) {
+      setGpsError('La localisation GPS n’est pas disponible dans ce navigateur.');
+      return;
+    }
+    setIsLocatingGps(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setDeliveryCoordinates({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          source: 'checkout',
+        });
+        setGpsMessage('Point relevé sur ce téléphone. Vérifiez que vous êtes bien à l’adresse de livraison.');
+        setIsLocatingGps(false);
+      },
+      (geoError) => {
+        setIsLocatingGps(false);
+        setGpsError(geoError.code === geoError.PERMISSION_DENIED
+          ? 'Autorisez la localisation du navigateur, puis réessayez.'
+          : geoError.code === geoError.TIMEOUT
+            ? 'Le GPS met trop de temps à répondre. Réessayez dehors ou vérifiez le réseau.'
+            : 'Position GPS indisponible. Vous pouvez tout de même commander avec l’adresse écrite.');
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+    );
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -163,6 +179,7 @@ export const CartView: React.FC<CartViewProps> = ({
       contactName: contactName.trim() || facilityName.trim(),
       phone: phone.trim(),
       deliveryAddress: fullAddress,
+      coordinates: deliveryMode === 'livraison' ? deliveryCoordinates || undefined : undefined,
       neighborhoodId,
       neighborhoodName: `${selectedNeighborhood?.name || 'Libreville'} (${deliveryWindow.shortWindow})`,
       notes: notes.trim() || undefined,
@@ -171,7 +188,6 @@ export const CartView: React.FC<CartViewProps> = ({
       deliveryFee
     };
 
-    setStoredCustomerInfo(customerInfo);
     onProceedToPreview(customerInfo);
   };
 
@@ -387,17 +403,10 @@ export const CartView: React.FC<CartViewProps> = ({
             </div>
 
             <div>
-              <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+              <label htmlFor="checkout-phone" className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
                 Téléphone WhatsApp *
               </label>
-              <input
-                type="tel"
-                required
-                placeholder="+241 77 003 004"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#0d44e8]"
-              />
+              <PhoneNumberInput id="checkout-phone" required value={phone} onChange={setPhone} placeholder="77 00 30 04" className="text-xs" />
             </div>
 
             <div>
@@ -515,6 +524,50 @@ export const CartView: React.FC<CartViewProps> = ({
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white focus:ring-2 focus:ring-[#0d44e8]"
                   />
                 </div>
+
+                <section aria-label="Position GPS de cette livraison" className="rounded-2xl border border-blue-200 bg-white p-3.5 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h4 className="flex items-center gap-2 text-xs font-black text-slate-900">
+                        <MapPin className="h-4 w-4 text-[#0d44e8]" />
+                        GPS de cette commande
+                      </h4>
+                      <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
+                        Relevez le point à l’établissement à livrer. Il sera enregistré uniquement pour cette commande.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={captureDeliveryGps}
+                      disabled={isLocatingGps}
+                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#0d44e8] px-3 py-2 text-[11px] font-extrabold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      <MapPin className={`h-3.5 w-3.5 ${isLocatingGps ? 'animate-pulse' : ''}`} />
+                      {isLocatingGps ? 'Recherche du GPS…' : deliveryCoordinates ? 'Actualiser le GPS' : 'Localiser l’adresse'}
+                    </button>
+                  </div>
+                  <p aria-live="polite" className="mt-2 text-[10px] leading-relaxed text-slate-500">{gpsMessage}</p>
+                  {deliveryCoordinates ? (
+                    <div className="mt-3 grid grid-cols-1 gap-2 rounded-xl bg-blue-50 p-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                      <div>
+                        <div className="text-[9px] font-bold uppercase tracking-wider text-blue-700">Latitude</div>
+                        <div className="mt-0.5 font-mono text-sm font-black tabular-nums text-slate-950">{deliveryCoordinates.lat.toFixed(6)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] font-bold uppercase tracking-wider text-blue-700">Longitude</div>
+                        <div className="mt-0.5 font-mono text-sm font-black tabular-nums text-slate-950">{deliveryCoordinates.lng.toFixed(6)}</div>
+                      </div>
+                      <div className="text-[10px] font-semibold text-slate-600">
+                        {Number.isFinite(deliveryCoordinates.accuracy) ? `Précision appareil ±${Math.round(deliveryCoordinates.accuracy!)} m` : 'Précision du relevé inconnue'}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-[10px] font-semibold leading-relaxed text-amber-900">
+                      Sans point GPS, l’équipe utilisera le quartier et l’adresse écrite ; la carte ne pourra pas placer un repère exact pour cette commande.
+                    </div>
+                  )}
+                  {gpsError && <p role="alert" className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-[10px] font-semibold text-rose-800">{gpsError}</p>}
+                </section>
               </div>
             ) : (
               <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200 text-xs text-amber-900 space-y-1">

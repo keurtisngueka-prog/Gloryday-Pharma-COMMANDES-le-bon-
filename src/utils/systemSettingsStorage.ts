@@ -16,11 +16,25 @@ export interface SystemSettings {
   customPickedUpTemplate: string;
   customInTransitTemplate: string;
   customDeliveredTemplate: string;
-  adminPassword?: string;
   updatedAt: string;
 }
 
 const SETTINGS_STORAGE_KEY = 'gloryday_system_settings';
+
+if (typeof window !== 'undefined') {
+  try {
+    const legacySettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (legacySettings) {
+      const parsed = JSON.parse(legacySettings);
+      if (parsed && typeof parsed === 'object' && 'adminPassword' in parsed) {
+        delete parsed.adminPassword;
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(parsed));
+      }
+    }
+  } catch {
+    localStorage.removeItem(SETTINGS_STORAGE_KEY);
+  }
+}
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   companyName: 'Gloryday Pharma Gabon',
@@ -35,12 +49,11 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   moovUssdPrefix: '*555*2*1*',
   freeDeliveryThreshold: 150000,
   standardDeliveryFeeLibreville: 3000,
-  enableAutoWhatsAppOnStageChange: true,
-  customPreparationTemplate: 'Votre commande {REF} pour {ETABLISSEMENT} est actuellement en cours de colisage dans notre dépôt pharmaceutique de Libreville.',
-  customPickedUpTemplate: 'Votre colis médical {REF} a été pris en charge par notre coursier certifié {COURSIER} ({TELEPHONE_COURSIER}).',
+  enableAutoWhatsAppOnStageChange: false,
+  customPreparationTemplate: 'Votre commande {REF} pour {ETABLISSEMENT} est en cours de préparation par notre équipe.',
+  customPickedUpTemplate: 'Votre colis {REF} a été pris en charge par le coursier {COURSIER} ({TELEPHONE_COURSIER}).',
   customInTransitTemplate: 'Votre commande {REF} est en cours d’acheminement vers {ETABLISSEMENT}. Arrivée estimée : {DELAI}.',
   customDeliveredTemplate: 'Votre commande {REF} a été livrée et réceptionnée avec succès à {ETABLISSEMENT}. Merci pour votre confiance.',
-  adminPassword: 'Gloryday@2026!',
   updatedAt: new Date().toISOString()
 };
 
@@ -51,7 +64,12 @@ export function getSystemSettings(): SystemSettings {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(DEFAULT_SYSTEM_SETTINGS));
       return DEFAULT_SYSTEM_SETTINGS;
     }
-    return { ...DEFAULT_SYSTEM_SETTINGS, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && 'adminPassword' in parsed) {
+      delete parsed.adminPassword;
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(parsed));
+    }
+    return { ...DEFAULT_SYSTEM_SETTINGS, ...parsed };
   } catch {
     return DEFAULT_SYSTEM_SETTINGS;
   }

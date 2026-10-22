@@ -216,7 +216,7 @@ export const EnterpriseReportsModule: React.FC<EnterpriseReportsModuleProps> = (
         {/* KPI Row 1: Marge & Annulations */}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
           <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50">
-            <span className="text-[10px] font-bold text-slate-500 uppercase">Chiffre d'Affaires Période</span>
+            <span className="text-[10px] font-bold text-slate-500 uppercase">Montant des commandes</span>
             <div className="text-lg font-black text-slate-900 mt-1 font-mono tabular-nums">
               {totalRevenue.toLocaleString('fr-FR')} F
             </div>
@@ -288,7 +288,7 @@ export const EnterpriseReportsModule: React.FC<EnterpriseReportsModuleProps> = (
           <div className="p-3.5 border border-slate-200 rounded-xl space-y-2.5">
             <h4 className="font-bold text-slate-900 flex items-center gap-1.5">
               <MapPin className="w-4 h-4 text-emerald-600" />
-              <span>Chiffre d'Affaires par Zone Géographique</span>
+                <span>Valeur des commandes par zone géographique</span>
             </h4>
             <div className="space-y-1.5">
               {revenueByZone.map(([zone, amount], i) => {
@@ -354,7 +354,7 @@ export const EnterpriseReportsModule: React.FC<EnterpriseReportsModuleProps> = (
               <div key={sp.id} className="p-2 border border-slate-200 rounded-lg bg-white flex justify-between items-center">
                 <span className="font-semibold text-slate-800 truncate mr-2">{sp.name}</span>
                 <span className="font-mono text-slate-400 shrink-0 text-[10px]">
-                  {typeof sp.stockQuantity === 'number' ? sp.stockQuantity : 40} en stock
+                  {typeof sp.stockQuantity === 'number' ? `${sp.stockQuantity} en stock` : 'Stock non renseigné'}
                 </span>
               </div>
             ))}

@@ -24,6 +24,39 @@
   --shadow-subtle: rgba(22, 22, 24, 0.03) 0px 1px 3px 0px, rgba(22, 22, 24, 0.04) 0px 0px 0px 1px;
 }
 
+@keyframes admin-dashboard-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.admin-dashboard-enter {
+  animation: admin-dashboard-enter 420ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+}
+
+.admin-dashboard-kpis > div {
+  transition: transform 180ms ease, box-shadow 180ms ease;
+  animation: admin-dashboard-enter 420ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+}
+
+.admin-dashboard-kpis > div:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 16px 30px -20px rgba(15, 23, 42, 0.45);
+}
+
+.admin-dashboard-kpis > div:nth-child(2) { animation-delay: 35ms; }
+.admin-dashboard-kpis > div:nth-child(3) { animation-delay: 70ms; }
+.admin-dashboard-kpis > div:nth-child(4) { animation-delay: 105ms; }
+.admin-dashboard-kpis > div:nth-child(5) { animation-delay: 140ms; }
+.admin-dashboard-kpis > div:nth-child(6) { animation-delay: 175ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-dashboard-enter,
+  .admin-dashboard-kpis > div {
+    animation: none;
+    transition: none;
+  }
+}
+
 /* Custom scrollbar for horizontal categories */
 .scrollbar-none::-webkit-scrollbar {
   display: none;
@@ -32,50 +65,3 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
-
-/* Cart Icon Bounce Animation on Catalog Add */
-@keyframes cart-icon-bounce {
-  0% {
-    transform: translateY(0) scale(1) rotate(0deg);
-  }
-  25% {
-    transform: translateY(-7px) scale(1.28) rotate(-10deg);
-  }
-  50% {
-    transform: translateY(2px) scale(0.94) rotate(6deg);
-  }
-  75% {
-    transform: translateY(-4px) scale(1.12) rotate(-4deg);
-  }
-  100% {
-    transform: translateY(0) scale(1) rotate(0deg);
-  }
-}
-
-@keyframes cart-plus-float {
-  0% {
-    opacity: 0;
-    transform: translateY(4px) scale(0.75);
-  }
-  25% {
-    opacity: 1;
-    transform: translateY(-6px) scale(1.05);
-  }
-  80% {
-    opacity: 1;
-    transform: translateY(-12px) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-16px) scale(0.9);
-  }
-}
-
-.animate-cart-bounce {
-  animation: cart-icon-bounce 0.65s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-}
-
-.animate-cart-plus-float {
-  animation: cart-plus-float 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-

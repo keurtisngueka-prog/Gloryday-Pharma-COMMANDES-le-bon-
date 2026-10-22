@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   ShieldCheck, 
   TrendingUp, 
@@ -24,20 +24,33 @@ import {
   MapPin,
   Calendar,
   Check,
-  Settings
+  Settings,
+  Megaphone
 } from 'lucide-react';
 import { Order, OrderStatus, AdminStats, Pack, Product, User, AppRole, DeliveryStage, AppNotification } from '../types';
 import { ProductFormModal } from './ProductFormModal';
 import { BestClientsModule } from './BestClientsModule';
 import { DirectMessagingModal } from './DirectMessagingModal';
+import { ClientAnnouncementModal } from './ClientAnnouncementModal';
 import { ClientPurchasesStatsModule } from './ClientPurchasesStatsModule';
 import { DataExportModule } from './DataExportModule';
 import { AuditLogModule } from './AuditLogModule';
 import { StockLotsModule } from './StockLotsModule';
 import { SystemSettingsModule } from './SystemSettingsModule';
+import { StaffAccountsModule } from './StaffAccountsModule';
+const SalesMonthlyChart = React.lazy(() => import('./SalesMonthlyChart').then(module => ({ default: module.SalesMonthlyChart })));
 import { generateWhatsAppMessageForStage } from '../utils/whatsappNotifications';
 
-export type AdminSubTab = 'kpi' | 'orders' | 'packs' | 'stock' | 'lots' | 'clients' | 'stats-achats' | 'audit' | 'settings' | 'export-deploy';
+const hasValidOrderCoordinates = (order: Order): boolean => {
+  const coordinates = order.customer.coordinates;
+  return Boolean(coordinates && Number.isFinite(coordinates.lat) && coordinates.lat >= -90 && coordinates.lat <= 90 &&
+    Number.isFinite(coordinates.lng) && coordinates.lng >= -180 && coordinates.lng <= 180);
+};
+
+const hasConfirmedOrderGps = (order: Order): boolean =>
+  hasValidOrderCoordinates(order) && order.customer.coordinates?.source === 'checkout';
+
+export type AdminSubTab = 'kpi' | 'orders' | 'packs' | 'stock' | 'lots' | 'clients' | 'stats-achats' | 'audit' | 'settings' | 'staff' | 'export-deploy';
 
 interface AdminDashboardProps {
   stats: AdminStats | null;
@@ -82,8 +95,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 }) => {
   const role: AppRole = currentUser.role;
   const isSuperAdmin = role === 'Super-Admin';
+  const isSimpleAdmin = role === 'Admin simple';
+  const isCommercial = role === 'Commercial';
   const isGestionnaire = role === 'Gestionnaire Catalogue' || isSuperAdmin;
-  const isLogistique = role === 'Logistique' || isSuperAdmin;
+  const isLogistique = role === 'Logistique' || isSuperAdmin || isSimpleAdmin;
 
   const [activeTab, setActiveTab] = useState<AdminSubTab>(defaultSubTab);
   const [searchQuery, setSearchQuery] = useState('');
@@ -95,6 +110,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
   const [targetMessageClient, setTargetMessageClient] = useState<any | null>(null);
+  const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
+
+  useEffect(() => {
+    setActiveTab(defaultSubTab);
+  }, [defaultSubTab]);
 
   // Filtered orders with search and status chips
   const filteredOrders = orders.filter(o => {
@@ -129,9 +149,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const inPreparationCount = orders.filter(o => o.status === 'En préparation').length;
   const inTransitCount = orders.filter(o => o.deliveryStage === 'in_transit').length;
   const outOfStockCount = products.filter(p => p.status === 'rupture').length;
+  const activeDeliveryOrders = orders.filter(order =>
+    order.customer.deliveryMode === 'livraison' &&
+    ['Confirmée', 'En préparation'].includes(order.status)
+  );
+  const activeDeliveriesWithConfirmedGps = activeDeliveryOrders.filter(hasConfirmedOrderGps).length;
+  const deliveryOrdersToAssign = activeDeliveryOrders.filter(order => !order.courier?.name?.trim());
+  const courierLoads = Array.from(activeDeliveryOrders.reduce((loads, order) => {
+    const courier = order.courier;
+    if (!courier?.name?.trim()) return loads;
+    const key = courier.phone?.trim() || courier.name.trim().toLocaleLowerCase('fr');
+    const load = loads.get(key) || { name: courier.name.trim(), count: 0 };
+    load.count += 1;
+    loads.set(key, load);
+    return loads;
+  }, new Map<string, { name: string; count: number }>()).entries()).map(([key, load]) => ({ key, ...load }));
 
   return (
-    <div className="max-w-6xl mx-auto pb-24 space-y-6 px-2 sm:px-0">
+    <div className="admin-dashboard-enter max-w-6xl mx-auto pb-24 space-y-6 px-2 sm:px-0">
       {/* 1. TOP COMMAND CENTER BANNER */}
       <div className="bg-gradient-to-r from-slate-950 via-[#0f172a] to-slate-950 text-white rounded-3xl p-5 sm:p-6 shadow-xl border border-slate-800 relative overflow-hidden">
         {/* Subtle decorative glow */}
@@ -148,9 +183,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-white/20 text-white border border-white/30">
                   {role}
                 </span>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  Automate WhatsApp Actif
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-200 border border-amber-400/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  WhatsApp manuel · envoi automatique non connecté
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-1">
@@ -170,17 +205,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span>Nouveau Produit</span>
               </button>
             )}
-            {isSuperAdmin && (
-              <button
-                type="button"
-                onClick={() => setActiveTab('settings')}
-                className="py-2 px-3.5 rounded-xl bg-purple-600/80 hover:bg-purple-600 text-white text-xs font-bold border border-purple-400/30 transition-colors cursor-pointer flex items-center gap-1.5"
-                title="Personnaliser le mot de passe Administrateur"
-              >
-                <Settings className="w-3.5 h-3.5" />
-                <span>Mot de passe Admin</span>
-              </button>
-            )}
             <button
               type="button"
               onClick={onRefresh}
@@ -194,7 +218,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* 2. SUB-TABS NAVIGATION WITH DYNAMIC BADGES */}
       <div className="flex border-b border-slate-200 gap-1.5 overflow-x-auto pb-1 text-xs font-bold scrollbar-none">
-        {isSuperAdmin && (
+        {(isSuperAdmin || isSimpleAdmin) && (
           <button
             type="button"
             onClick={() => setActiveTab('kpi')}
@@ -301,6 +325,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {isSuperAdmin && (
           <button
             type="button"
+            onClick={() => setActiveTab('staff')}
+            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'staff' ? 'bg-purple-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Comptes employés</span>
+          </button>
+        )}
+        {isSuperAdmin && (
+          <button
+            type="button"
             onClick={() => setActiveTab('settings')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'settings' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
@@ -325,15 +361,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* 3. TAB 1: EXECUTIVE KPIS */}
-      {activeTab === 'kpi' && isSuperAdmin && stats && (
+      {activeTab === 'kpi' && (isSuperAdmin || isSimpleAdmin) && stats && (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="admin-dashboard-kpis grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
-              <span className="text-[10px] font-bold text-slate-500 uppercase block tracking-wider">Chiffre d'Affaires</span>
+              <span className="text-[10px] font-bold text-slate-500 uppercase block tracking-wider">Montant des commandes</span>
               <div className="text-base sm:text-lg font-black text-slate-900 mt-1 tabular-nums">
                 {stats.totalRevenue.toLocaleString('fr-FR')} <span className="text-[10px] font-bold text-slate-500">FCFA</span>
               </div>
-              <div className="text-[10px] text-emerald-600 font-bold mt-1">Facturé & Réglé</div>
+              <div className="text-[10px] text-slate-600 font-bold mt-1">Commandes payées et en attente</div>
             </div>
 
             <div className="bg-white p-4 rounded-2xl border border-amber-200 bg-amber-50/30 shadow-2xs">
@@ -341,7 +377,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="text-xl font-black text-amber-900 mt-1">
                 {stats.ordersToConfirm}
               </div>
-              <div className="text-[10px] text-amber-700 mt-1 font-medium">Validation WhatsApp requise</div>
+              <div className="text-[10px] text-amber-700 mt-1 font-medium">Confirmation manuelle à effectuer</div>
             </div>
 
             <div className="bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/20 shadow-2xs">
@@ -377,8 +413,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
+          <div className="rounded-3xl border border-slate-200/90 bg-white p-3 shadow-sm sm:p-5">
+            <React.Suspense fallback={<div className="flex h-72 items-center justify-center text-sm font-semibold text-slate-500">Chargement du graphique…</div>}>
+              <SalesMonthlyChart orders={orders} stats={stats} />
+            </React.Suspense>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('orders')}
+            className="flex w-full cursor-pointer items-start gap-3 rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 to-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-400 hover:shadow-md"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-[#0d44e8]"><MapPin className="h-5 w-5" /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-black text-slate-900">Localisation GPS par commande</span>
+              <span className="mt-1 block text-[11px] leading-relaxed text-slate-600">{activeDeliveriesWithConfirmedGps} sur {activeDeliveryOrders.length} livraison(s) active(s) ont un point GPS relevé pour cette commande. Ouvrez la liste pour consulter chaque adresse et sa carte.</span>
+            </span>
+            <span className="shrink-0 rounded-xl bg-[#0d44e8] px-3 py-2 text-[10px] font-extrabold text-white">Voir les commandes</span>
+          </button>
+
           {/* Quick Thematic Navigation Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+          {isSuperAdmin && <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
             <button
               type="button"
               onClick={() => setActiveTab('lots')}
@@ -406,7 +461,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div>
                 <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Journal d'Audit & Traçabilité</h4>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  Historique certifié des notifications WhatsApp automatiques, validations et connexions.
+                  Journal local au navigateur. Aucun envoi WhatsApp automatique n'est configuré.
                 </p>
               </div>
             </button>
@@ -426,7 +481,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </p>
               </div>
             </button>
-          </div>
+          </div>}
         </div>
       )}
 
@@ -437,10 +492,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="font-bold text-base text-slate-900">
-                Pilotage des Commandes & Notifications WhatsApp ({filteredOrders.length})
+                Commandes et suivi des livraisons ({filteredOrders.length})
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Chaque changement d'étape déclenche automatiquement une notification WhatsApp en arrière-plan vers le client.
+                Les alertes dans l’application sont envoyées aux rôles concernés. Les messages WhatsApp au client et au coursier sont à transmettre avec les boutons ci-dessous.
               </p>
             </div>
 
@@ -505,6 +560,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </button>
           </div>
 
+          {/* Compact dispatch overview: one courier per delivery, with reusable couriers across orders. */}
+          <section className="p-4 sm:p-5 border-b border-slate-100 bg-white" aria-label="Organisation des livreurs">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 mb-3">
+              <div>
+                <h4 className="font-bold text-sm text-slate-900">Organisation des livraisons</h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Une commande = un livreur affecté. Un même livreur peut prendre plusieurs commandes.
+                </p>
+              </div>
+              <span className="text-[10px] text-slate-400">Commandes confirmées ou en préparation</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-3.5 py-3 flex items-center gap-3">
+                <span className="w-9 h-9 rounded-xl bg-white text-blue-700 flex items-center justify-center shadow-sm">
+                  <Truck className="w-4 h-4" />
+                </span>
+                <div>
+                  <p className="text-[10px] font-semibold text-blue-800">Livraisons actives</p>
+                  <p className="text-xl leading-6 font-black text-slate-900">{activeDeliveryOrders.length}</p>
+                </div>
+              </div>
+              <div className={`rounded-2xl border px-3.5 py-3 flex items-center gap-3 ${deliveryOrdersToAssign.length ? 'border-amber-200 bg-amber-50/80' : 'border-emerald-100 bg-emerald-50/70'}`}>
+                <span className={`w-9 h-9 rounded-xl bg-white flex items-center justify-center shadow-sm ${deliveryOrdersToAssign.length ? 'text-amber-700' : 'text-emerald-700'}`}>
+                  <Clock className="w-4 h-4" />
+                </span>
+                <div>
+                  <p className={`text-[10px] font-semibold ${deliveryOrdersToAssign.length ? 'text-amber-800' : 'text-emerald-800'}`}>À affecter</p>
+                  <p className="text-xl leading-6 font-black text-slate-900">{deliveryOrdersToAssign.length}</p>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-violet-100 bg-violet-50/70 px-3.5 py-3 flex items-center gap-3">
+                <span className="w-9 h-9 rounded-xl bg-white text-violet-700 flex items-center justify-center shadow-sm">
+                  <Users className="w-4 h-4" />
+                </span>
+                <div>
+                  <p className="text-[10px] font-semibold text-violet-800">Livreurs mobilisés</p>
+                  <p className="text-xl leading-6 font-black text-slate-900">{courierLoads.length}</p>
+                </div>
+              </div>
+            </div>
+
+            {courierLoads.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-2" aria-label="Nombre de commandes par livreur">
+                {courierLoads.map(load => (
+                  <span key={load.key} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] text-slate-700">
+                    <Truck className="w-3.5 h-3.5 text-violet-600" />
+                    <strong>{load.name}</strong>
+                    <span className="text-slate-500">· {load.count} commande{load.count > 1 ? 's' : ''}</span>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-[11px] text-slate-500">Aucun livreur n’est encore affecté à une livraison active.</p>
+            )}
+
+            <p className="mt-3 text-[10px] leading-4 text-slate-400">
+              La charge compte les commandes actives. Le trajet GPS est propre à chaque commande ; aucune capacité maximale ni tournée groupée automatique n’est encore définie.
+            </p>
+          </section>
+
           {/* Orders List items */}
           <div className="divide-y divide-slate-100">
             {filteredOrders.length === 0 ? (
@@ -532,23 +648,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </span>
 
                       {/* Payment Checkbox toggle */}
-                      <label className="flex items-center gap-1.5 cursor-pointer font-bold ml-1 bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={order.isPaid}
-                          onChange={(e) => onUpdatePayment(order.id, e.target.checked)}
-                          className="rounded text-[#0d44e8]"
-                        />
-                        <span className={order.isPaid ? 'text-emerald-700' : 'text-slate-500'}>
-                          {order.isPaid ? '✓ Payée' : 'Non payée'}
-                        </span>
-                      </label>
+                      {(isSuperAdmin || isSimpleAdmin) && (
+                        <label className="flex items-center gap-1.5 cursor-pointer font-bold ml-1 bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={order.isPaid}
+                            onChange={(e) => onUpdatePayment(order.id, e.target.checked)}
+                            className="rounded text-[#0d44e8]"
+                          />
+                          <span className={order.isPaid ? 'text-emerald-700' : 'text-slate-500'}>
+                            {order.isPaid ? '✓ Payée' : 'Non payée'}
+                          </span>
+                        </label>
+                      )}
 
                       {/* Automated WhatsApp logs badge */}
                       {order.whatsappLogs && order.whatsappLogs.length > 0 && (
                         <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
                           <Zap className="w-3 h-3 text-emerald-600" />
-                          <span>WhatsApp Auto ({order.whatsappLogs.length})</span>
+                          <span>Historique WhatsApp ({order.whatsappLogs.length})</span>
                         </span>
                       )}
                     </div>
@@ -556,8 +674,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="text-slate-800">
                       <strong className="text-sm font-bold">{order.customer.facilityName}</strong> · Contact : {order.customer.contactName || 'Réception'} ({order.customer.phone})
                     </div>
-                    <div className="text-slate-500 text-[11px]">
-                      📍 {order.customer.deliveryAddress} · {order.items.length} article(s) · <strong className="text-slate-900">{order.estimatedTotal.toLocaleString('fr-FR')} FCFA</strong>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex items-start gap-2">
+                        <MapPin className={`mt-0.5 h-4 w-4 shrink-0 ${hasConfirmedOrderGps(order) ? 'text-emerald-600' : 'text-amber-600'}`} />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-bold leading-relaxed text-slate-800">{order.customer.deliveryMode === 'retrait' ? 'Retrait au dépôt' : order.customer.deliveryAddress || 'Adresse non renseignée'}</div>
+                          {order.customer.deliveryMode !== 'retrait' && (
+                            <div className={`mt-1 text-[10px] font-extrabold ${hasConfirmedOrderGps(order) ? 'text-emerald-800' : hasValidOrderCoordinates(order) ? 'text-amber-800' : 'text-slate-500'}`}>
+                              {hasConfirmedOrderGps(order) ? 'GPS relevé pour cette commande' : hasValidOrderCoordinates(order) ? 'Ancien point GPS — à confirmer' : 'GPS précis non relevé · adresse écrite uniquement'}
+                            </div>
+                          )}
+                          {hasValidOrderCoordinates(order) && (
+                            <div className="mt-0.5 font-mono text-[10px] tabular-nums text-slate-600">
+                              {order.customer.coordinates!.lat.toFixed(6)}, {order.customer.coordinates!.lng.toFixed(6)}
+                              {Number.isFinite(order.customer.coordinates!.accuracy) && ` · ±${Math.round(order.customer.coordinates!.accuracy!)} m`}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-2 border-t border-slate-200 pt-2 text-[10px] text-slate-500">
+                        {order.items.length} article(s) · <strong className="text-slate-900">{order.estimatedTotal.toLocaleString('fr-FR')} FCFA</strong>
+                      </div>
                     </div>
 
                     {/* Mobile Payment details banner if present */}
@@ -595,12 +732,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         title="Gérer les étapes de livraison et affecter le coursier"
                       >
                         <Truck className="w-3.5 h-3.5 text-purple-600" />
-                        <span>{order.deliveryStage ? `Étape : ${order.deliveryStage}` : 'Suivi Logistique'}</span>
+                        <span>{hasConfirmedOrderGps(order) ? 'Voir carte GPS' : order.deliveryStage ? `Étape : ${order.deliveryStage}` : 'Localisation & livraison'}</span>
                       </button>
                     )}
 
                     {/* Status Transitions */}
-                    {order.status === 'À confirmer' && (
+                    {order.status === 'À confirmer' && (isSuperAdmin || isSimpleAdmin || isCommercial) && (
                       <button
                         type="button"
                         onClick={() => onUpdateStatus(order.id, 'Confirmée')}
@@ -610,23 +747,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </button>
                     )}
 
-                    {order.status === 'Confirmée' && (
+                    {order.status === 'Confirmée' && (isSuperAdmin || isSimpleAdmin) && (
                       <button
                         type="button"
                         onClick={() => onUpdateStatus(order.id, 'En préparation')}
                         className="py-1.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold cursor-pointer transition-colors"
                       >
                         Lancer Colisage
-                      </button>
-                    )}
-
-                    {order.status === 'En préparation' && (
-                      <button
-                        type="button"
-                        onClick={() => onUpdateStatus(order.id, 'Livrée')}
-                        className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer transition-colors"
-                      >
-                        Marquer Livrée
                       </button>
                     )}
 
@@ -645,7 +772,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <span>WhatsApp Client</span>
                     </a>
 
-                    {order.status !== 'Livrée' && order.status !== 'Annulée' && (
+                    {order.status !== 'Livrée' && order.status !== 'Annulée' &&
+                      (((isSuperAdmin || isSimpleAdmin) && !(order.status === 'En préparation' && ['picked_up', 'in_transit', 'delivered'].includes(order.deliveryStage || 'preparation'))) ||
+                        (isCommercial && ['À confirmer', 'Confirmée'].includes(order.status))) && (
                       <button
                         type="button"
                         onClick={() => {
@@ -743,10 +872,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* 7. TAB 5: CLIENTS & CONTACTS */}
       {activeTab === 'clients' && isSuperAdmin && (
         <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
-          <div className="p-4 sm:p-5 border-b border-slate-100">
+          <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
             <h3 className="font-bold text-base text-slate-900">
               Répertoire des Établissements Hospitaliers & Cliniques
             </h3>
+            <button
+              type="button"
+              onClick={() => setIsAnnouncementModalOpen(true)}
+              className="py-2 px-3 rounded-xl bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs flex items-center gap-2"
+            >
+              <Megaphone className="w-4 h-4" />
+              <span>Informer tous les clients</span>
+            </button>
           </div>
           <div className="divide-y divide-slate-100">
             {clients.map((c) => (
@@ -784,6 +921,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         />
       )}
 
+      {activeTab === 'staff' && isSuperAdmin && <StaffAccountsModule />}
+
       {/* 8. TAB 6: EXPORT & CLOUD BACKUP */}
       {activeTab === 'export-deploy' && isSuperAdmin && (
         <DataExportModule orders={orders} products={products} packs={packs} clients={clients} notifications={notifications} />
@@ -805,6 +944,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           onClose={() => { setIsMessageModalOpen(false); setTargetMessageClient(null); }}
           targetClient={targetMessageClient}
           onSuccess={() => { setIsMessageModalOpen(false); setTargetMessageClient(null); onRefresh(); }}
+        />
+      )}
+
+      {isAnnouncementModalOpen && (
+        <ClientAnnouncementModal
+          isOpen={true}
+          onClose={() => setIsAnnouncementModalOpen(false)}
         />
       )}
 

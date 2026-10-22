@@ -29,6 +29,7 @@ export const notifyDraftsChange = () => {
  * Retrieve all saved drafts for the active session
  */
 export const getStoredDrafts = (userPhone?: string): OrderDraft[] => {
+  if (!userPhone?.trim()) return [];
   try {
     const key = getDraftsStorageKey(userPhone);
     const raw = localStorage.getItem(key);
@@ -68,6 +69,9 @@ export const saveDraft = (
   },
   userPhone?: string
 ): OrderDraft => {
+  if (!userPhone?.trim()) {
+    throw new Error('Connectez-vous à votre compte client pour enregistrer un brouillon privé.');
+  }
   const existingDrafts = getStoredDrafts(userPhone);
   const now = new Date().toISOString();
   const { totalAmount, itemsCount } = calculateDraftTotals(draftData.items);
@@ -125,6 +129,7 @@ export const saveDraft = (
  * Delete a draft
  */
 export const deleteDraft = (draftId: string, userPhone?: string): void => {
+  if (!userPhone?.trim()) return;
   try {
     const list = getStoredDrafts(userPhone);
     const filtered = list.filter(d => d.id !== draftId);
@@ -139,6 +144,7 @@ export const deleteDraft = (draftId: string, userPhone?: string): void => {
  * Duplicate a draft
  */
 export const duplicateDraft = (draftId: string, userPhone?: string): OrderDraft | null => {
+  if (!userPhone?.trim()) return null;
   const list = getStoredDrafts(userPhone);
   const found = list.find(d => d.id === draftId);
   if (!found) return null;
@@ -163,6 +169,7 @@ export const duplicateDraft = (draftId: string, userPhone?: string): OrderDraft 
  * Rename a draft
  */
 export const renameDraft = (draftId: string, newName: string, userPhone?: string): OrderDraft | null => {
+  if (!userPhone?.trim()) return null;
   const list = getStoredDrafts(userPhone);
   const index = list.findIndex(d => d.id === draftId);
   if (index === -1) return null;
@@ -186,6 +193,7 @@ export const saveAutoDraft = (
   customerInfo: Partial<CustomerInfo>,
   userPhone?: string
 ): OrderDraft | null => {
+  if (!userPhone?.trim()) return null;
   if (!items || items.length === 0) {
     clearAutoDraft(userPhone);
     return null;
@@ -218,6 +226,7 @@ export const saveAutoDraft = (
 };
 
 export const getAutoDraft = (userPhone?: string): OrderDraft | null => {
+  if (!userPhone?.trim()) return null;
   try {
     const key = getAutoDraftStorageKey(userPhone);
     const raw = localStorage.getItem(key);
@@ -229,6 +238,7 @@ export const getAutoDraft = (userPhone?: string): OrderDraft | null => {
 };
 
 export const clearAutoDraft = (userPhone?: string): void => {
+  if (!userPhone?.trim()) return;
   try {
     const key = getAutoDraftStorageKey(userPhone);
     localStorage.removeItem(key);

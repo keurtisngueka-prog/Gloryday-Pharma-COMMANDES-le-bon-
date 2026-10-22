@@ -18,19 +18,81 @@ export function getDefaultQuotaForFacilityType(type: FacilityType): number {
   }
 }
 
-export const INITIAL_HEALTHCARE_STRUCTURES: HealthcareStructure[] = [];
+export const INITIAL_HEALTHCARE_STRUCTURES: HealthcareStructure[] = [
+  {
+    id: 'struct-chambrier',
+    name: 'Clinique Chambrier',
+    type: 'Clinique',
+    maxAccounts: 3,
+    city: 'Libreville',
+    deliveryAddress: 'Montagne Sainte, Libreville',
+    createdAt: '2026-01-10T08:00:00Z',
+    directorName: 'Dr. Marcel Chambrier',
+    directorPhone: '+24177001122'
+  },
+  {
+    id: 'struct-el-rapha',
+    name: 'Polyclinique El Rapha',
+    type: 'Polyclinique',
+    maxAccounts: 5,
+    city: 'Libreville',
+    deliveryAddress: 'Batterie 4, Libreville',
+    createdAt: '2026-01-12T09:00:00Z',
+    directorName: 'Dr. Jeanne Mengue',
+    directorPhone: '+24166112233'
+  },
+  {
+    id: 'struct-chul',
+    name: 'CHU de Libreville (CHUL)',
+    type: 'Hôpital',
+    maxAccounts: 10,
+    city: 'Libreville',
+    deliveryAddress: 'Boulevard Léon Mba, Libreville',
+    createdAt: '2026-01-05T07:30:00Z',
+    directorName: 'Prof. Jean-Baptiste Nguema',
+    directorPhone: '+24174889900'
+  },
+  {
+    id: 'struct-bio-sante',
+    name: 'Laboratoire Bio-Santé',
+    type: 'Laboratoire',
+    maxAccounts: 3,
+    city: 'Libreville',
+    deliveryAddress: 'Quartier Louis, Libreville',
+    createdAt: '2026-02-01T10:00:00Z'
+  },
+  {
+    id: 'struct-pharm-forestiers',
+    name: 'Grande Pharmacie des Forestiers',
+    type: 'Pharmacie',
+    maxAccounts: 3,
+    city: 'Libreville',
+    deliveryAddress: 'Glass, Centre-Ville, Libreville',
+    createdAt: '2026-02-15T11:00:00Z'
+  },
+  {
+    id: 'struct-ebori',
+    name: 'Hôpital Mère-Enfant Jeanne Ebori',
+    type: 'Hôpital',
+    maxAccounts: 10,
+    city: 'Libreville',
+    deliveryAddress: 'Camp de Gaulle, Libreville',
+    createdAt: '2026-02-20T08:00:00Z'
+  }
+];
 
 export function getHealthcareStructures(): HealthcareStructure[] {
   try {
     const raw = localStorage.getItem(STRUCTURES_KEY);
     if (!raw) {
-      return [];
+      localStorage.setItem(STRUCTURES_KEY, JSON.stringify(INITIAL_HEALTHCARE_STRUCTURES));
+      return INITIAL_HEALTHCARE_STRUCTURES;
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_HEALTHCARE_STRUCTURES;
   } catch (err) {
     console.error('Error reading healthcare structures from storage:', err);
-    return [];
+    return INITIAL_HEALTHCARE_STRUCTURES;
   }
 }
 

@@ -70,6 +70,7 @@ export const DraftsManagerModal: React.FC<DraftsManagerModalProps> = ({
   const [newDraftName, setNewDraftName] = useState('');
   const [isSavingCurrent, setIsSavingCurrent] = useState(false);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // PDF generation state
   const [generatingPdfId, setGeneratingPdfId] = useState<string | null>(null);
@@ -155,7 +156,7 @@ export const DraftsManagerModal: React.FC<DraftsManagerModalProps> = ({
       document.body.removeChild(link);
     } catch (err) {
       console.error('Error generating draft PDF', err);
-      alert('Erreur lors de la génération du document PDF hors-ligne.');
+      setErrorMessage('Erreur lors de la génération du document PDF hors-ligne.');
     } finally {
       setGeneratingPdfId(null);
     }
@@ -170,13 +171,14 @@ export const DraftsManagerModal: React.FC<DraftsManagerModalProps> = ({
     if (!onDirectSubmitDraft) return;
     try {
       setSubmittingDraftId(draft.id);
+      setErrorMessage(null);
       await onDirectSubmitDraft(draft);
       // Delete draft on successful conversion
       deleteDraft(draft.id, userPhone);
       refreshDrafts();
       onClose();
     } catch (err: any) {
-      alert(err.message || 'Impossible de finaliser la commande. Veuillez vérifier la connexion.');
+      setErrorMessage(err.message || 'Impossible de finaliser la commande. Veuillez vérifier la connexion.');
     } finally {
       setSubmittingDraftId(null);
     }
@@ -260,6 +262,17 @@ export const DraftsManagerModal: React.FC<DraftsManagerModalProps> = ({
             </div>
           )}
 
+          {/* Error toast */}
+          {errorMessage && (
+            <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center justify-between gap-2 animate-in slide-in-from-top">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+              <button onClick={() => setErrorMessage(null)} className="text-rose-500 hover:text-rose-700 text-xs font-bold px-1.5 py-0.5">✕</button>
+            </div>
+          )}
+
           {/* Offline advisory banner */}
           {!isOnline && (
             <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2.5">
@@ -270,6 +283,12 @@ export const DraftsManagerModal: React.FC<DraftsManagerModalProps> = ({
                   Toutes les modifications apportées à vos brouillons sont enregistrées localement sur votre téléphone ou ordinateur. Vous pouvez aussi générer un Bon de commande PDF ou envoyer le récapitulatif par WhatsApp même sans accès au serveur !
                 </p>
               </div>
+            </div>
+          )}
+
+          {!userPhone && (
+            <div className="p-3.5 rounded-2xl bg-blue-50 border border-blue-200 text-blue-900 text-xs">
+              Connectez-vous à votre compte client pour enregistrer et consulter des brouillons privés.
             </div>
           )}
 
@@ -297,7 +316,7 @@ export const DraftsManagerModal: React.FC<DraftsManagerModalProps> = ({
                 <button
                   type="button"
                   onClick={handleSaveCurrentCartAsDraft}
-                  disabled={isSavingCurrent}
+                  disabled={isSavingCurrent || !userPhone}
                   className="px-4 py-2 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50 shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5" />

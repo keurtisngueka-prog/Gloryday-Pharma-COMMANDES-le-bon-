@@ -13,11 +13,9 @@ import {
   Settings, 
   RefreshCw,
   CheckCircle2,
-  AlertTriangle,
-  Trash2
+  AlertTriangle
 } from 'lucide-react';
-import { getAuditLogs, clearAuditLogs, AuditLogEntry, AuditCategory } from '../utils/auditLogger';
-import { executeProductionCleanup } from '../utils/productionCleanup';
+import { getAuditLogs, AuditLogEntry, AuditCategory } from '../utils/auditLogger';
 import { Order } from '../types';
 
 interface AuditLogModuleProps {
@@ -136,13 +134,13 @@ export const AuditLogModule: React.FC<AuditLogModuleProps> = ({ orders = [] }) =
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Total Événements Tracés</span>
           <div className="text-2xl font-black text-slate-900 mt-1 tabular-nums">{logs.length}</div>
-          <span className="text-[11px] text-slate-500">Horodatage certifié</span>
+          <span className="text-[11px] text-slate-500">Horodatage local au navigateur</span>
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-emerald-200 bg-emerald-50/20 shadow-2xs">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">Envois WhatsApp Auto</span>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">Journal WhatsApp</span>
           <div className="text-2xl font-black text-emerald-900 mt-1 tabular-nums">{whatsappCount}</div>
-          <span className="text-[11px] text-emerald-700">Notifications clients & coursiers</span>
+          <span className="text-[11px] text-emerald-700">Aucun envoi automatique configuré</span>
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-purple-200 bg-purple-50/20 shadow-2xs">
@@ -167,11 +165,11 @@ export const AuditLogModule: React.FC<AuditLogModuleProps> = ({ orders = [] }) =
               <span>Journal d'Audit Opérationnel & Traçabilité</span>
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Historique complet des actions administrateurs, notifications WhatsApp automatiques et mouvements de stock.
+              Événements conservés dans ce navigateur; ce journal n'est pas un historique serveur ni une preuve d'envoi.
             </p>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-center flex-wrap">
+          <div className="flex items-center gap-2 self-start sm:self-center">
             <button
               type="button"
               onClick={loadLogs}
@@ -179,18 +177,6 @@ export const AuditLogModule: React.FC<AuditLogModuleProps> = ({ orders = [] }) =
             >
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Actualiser</span>
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                clearAuditLogs();
-                await executeProductionCleanup({ fullReset: false });
-                loadLogs();
-              }}
-              className="py-1.5 px-3 rounded-xl border border-rose-200 bg-rose-50/60 hover:bg-rose-100 text-rose-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Purger le Journal</span>
             </button>
             <button
               type="button"

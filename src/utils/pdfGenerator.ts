@@ -1,184 +1,247 @@
 import { Order } from '../types';
 
+const formatPdfAmount = (amount: number) =>
+  `${Number.isFinite(amount) ? amount : 0}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+
+const normalizePdfText = (value: unknown) => String(value ?? '')
+  .normalize('NFC')
+  .replace(/[\u00a0\u202f]/g, ' ')
+  .replace(/[“”]/g, '"')
+  .replace(/[’]/g, "'")
+  .replace(/[–—]/g, '-');
+
+function readBlobAsDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') resolve(reader.result);
+      else reject(new Error('Le fichier PDF n’a pas pu être préparé pour son téléchargement.'));
+    };
+    reader.onerror = () => reject(reader.error || new Error('Lecture du PDF impossible.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+export function createPdfObjectUrl(dataUrl: string): string {
+  const separatorIndex = dataUrl.indexOf(',');
+  if (separatorIndex < 0 || !dataUrl.slice(0, separatorIndex).includes(';base64')) {
+    throw new Error('Le bon PDF n’est pas dans un format téléchargeable.');
+  }
+
+  const binary = window.atob(dataUrl.slice(separatorIndex + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+}
+
 export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; dataUrl: string }> {
   const { jsPDF } = await import('jspdf');
-  const doc = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4'
-  });
-
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
+  const blue = [13, 68, 232];
+  const ink = [22, 22, 24];
+  const muted = [106, 106, 107];
+  const margin = 14;
+  const contentWidth = pageWidth - margin * 2;
+  const text = (value: unknown) => normalizePdfText(value);
+  const paymentLabels: Record<string, string> = {
+    especes: 'Espèces',
+    airtel_money: 'Airtel Money',
+    moov_money: 'Moov Money',
+    virement: 'Virement bancaire'
+  };
+  const mobilePayment = order.mobilePayment || order.customer.mobilePayment;
+  const paymentText = mobilePayment?.transactionReference
+    ? `${paymentLabels[order.customer.paymentMethod] || 'Paiement'} - Réf. ${mobilePayment.transactionReference}`
+    : `${paymentLabels[order.customer.paymentMethod] || 'Paiement'}${order.isPaid ? ' - Acquitté' : ''}`;
+  const deliveryMode = order.customer.deliveryMode === 'livraison' ? 'Livraison sur site' : 'Retrait en agence';
+  const createdAt = new Date(order.createdAt);
+  const orderDate = Number.isNaN(createdAt.getTime()) ? 'Date non précisée' : createdAt.toLocaleDateString('fr-FR');
 
-  // CleanShot X / Medical Colors
-  const blueDark = [13, 68, 232]; // #0d44e8
-  const graphite = [22, 22, 24]; // #161618
-  const slateMuted = [106, 106, 107]; // #6a6a6b
-
-  // Top header banner
-  doc.setFillColor(blueDark[0], blueDark[1], blueDark[2]);
-  doc.rect(0, 0, pageWidth, 30, 'F');
-
-  // Official Gloryday Pharma Vector Emblem in PDF Header (Shield + Medical Cross)
-  doc.setFillColor(255, 255, 255);
-  doc.roundedRect(14, 6, 17, 17, 3.5, 3.5, 'F');
-  doc.setDrawColor(13, 68, 232);
-  doc.setLineWidth(0.6);
-  doc.roundedRect(15.4, 7.4, 14.2, 14.2, 2.5, 2.5, 'S');
-  // Inner Cobalt Medical Cross
-  doc.setFillColor(blueDark[0], blueDark[1], blueDark[2]);
-  doc.roundedRect(21.1, 9.5, 2.8, 10, 0.8, 0.8, 'F');
-  doc.roundedRect(17.5, 13.1, 10, 2.8, 0.8, 0.8, 'F');
-  // Center white point
-  doc.setFillColor(255, 255, 255);
-  doc.circle(22.5, 14.5, 0.9, 'F');
-
-  // Header Title & Official Brand Lockup
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(19);
-  doc.setFont('helvetica', 'bold');
-  doc.text('GLORYDAY PHARMA GABON', 35, 14.5);
-  doc.setFontSize(8.5);
-  doc.setFont('helvetica', 'normal');
-  doc.text('Distribution Médicale, Consommables & Équipements Hospitaliers Certifiés', 35, 20.5);
-  doc.setFontSize(8);
-  doc.text('Libreville - GABON | Tél: +241 77 003 004 / +241 66 240 399', pageWidth - 14, 25.5, { align: 'right' });
-
-  // Sub-header / Order Badge
-  doc.setTextColor(graphite[0], graphite[1], graphite[2]);
-  doc.setFontSize(16);
-  doc.setFont('helvetica', 'bold');
-  doc.text('BON DE COMMANDE PROVISOIRE', 14, 40);
-
-  // Order Details Box (Top Right)
-  doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(226, 232, 240);
-  doc.roundedRect(pageWidth - 85, 32, 71, 25, 2, 2, 'FD');
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.text(`N° Réf : ${order.reference}`, pageWidth - 80, 39);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Date : ${new Date(order.createdAt).toLocaleDateString('fr-FR')}`, pageWidth - 80, 45);
-  doc.text(`Statut : ${order.status}`, pageWidth - 80, 51);
-
-  // Client Info Box
-  doc.setFillColor(241, 245, 249);
-  doc.roundedRect(14, 50, pageWidth - 28, 28, 2, 2, 'F');
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(blueDark[0], blueDark[1], blueDark[2]);
-  doc.text('DESTINATAIRE / ÉTABLISSEMENT CLIENT', 18, 56);
-  doc.setFontSize(9);
-  doc.setTextColor(graphite[0], graphite[1], graphite[2]);
-  doc.setFont('helvetica', 'bold');
-  doc.text(order.customer.facilityName, 18, 62);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Contact : ${order.customer.contactName || order.customer.facilityName}`, 18, 67);
-  doc.text(`Téléphone : ${order.customer.phone}`, 18, 72);
-  doc.text(`Mode réception : ${order.customer.deliveryMode === 'livraison' ? 'Livraison sur site' : 'Retrait en agence'}`, pageWidth / 2 + 5, 62);
-  doc.text(`Adresse : ${order.customer.deliveryAddress}`, pageWidth / 2 + 5, 67);
-  const mp = order.mobilePayment || order.customer.mobilePayment;
-  let paymentText = `Paiement : ${order.customer.paymentMethod.replace('_', ' ').toUpperCase()}`;
-  if (mp && (order.customer.paymentMethod === 'airtel_money' || order.customer.paymentMethod === 'moov_money')) {
-    const op = mp.provider === 'airtel_money' ? 'Airtel Money' : 'Moov Money';
-    paymentText = `${op} - ${mp.transactionReference ? `Réf: ${mp.transactionReference}` : (order.isPaid ? 'Acquitté' : 'À réception')}`;
-  }
-  doc.text(paymentText, pageWidth / 2 + 5, 72);
-
-  // Table Header
-  let y = 86;
-  doc.setFillColor(blueDark[0], blueDark[1], blueDark[2]);
-  doc.rect(14, y, pageWidth - 28, 8, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.text('Désignation de l\'article & Variante', 18, y + 5.5);
-  doc.text('Qté', 125, y + 5.5, { align: 'center' });
-  doc.text('Prix Unit. (FCFA)', 155, y + 5.5, { align: 'right' });
-  doc.text('Total (FCFA)', pageWidth - 18, y + 5.5, { align: 'right' });
-
-  // Table Rows
-  y += 8;
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(graphite[0], graphite[1], graphite[2]);
-  
-  let totalSavings = 0;
-
-  order.items.forEach((item, index) => {
-    if (y > pageHeight - 65) {
-      doc.addPage();
-      y = 20;
-    }
-    if (index % 2 === 1) {
-      doc.setFillColor(248, 250, 252);
-      doc.rect(14, y, pageWidth - 28, 8, 'F');
-    }
+  const drawHeader = () => {
+    doc.setFillColor(blue[0], blue[1], blue[2]);
+    doc.rect(0, 0, pageWidth, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(19);
+    doc.text('GLORYDAY PHARMA', margin, 14);
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
-    const itemLabel = item.variant && item.variant !== 'Standard'
-      ? `${item.productName} (${item.variant})`
-      : item.productName;
-    const truncatedLabel = doc.splitTextToSize(itemLabel, 100);
-    doc.text(truncatedLabel[0], 18, y + 5.5);
-    doc.text(String(item.quantity), 125, y + 5.5, { align: 'center' });
-    if (item.isQuote) {
-      doc.setTextColor(217, 119, 6);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Sur devis', 155, y + 5.5, { align: 'right' });
-      doc.text('Sur devis', pageWidth - 18, y + 5.5, { align: 'right' });
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(graphite[0], graphite[1], graphite[2]);
-    } else {
-      if (item.savings && item.savings > 0) {
-        totalSavings += item.savings;
-      }
-      doc.text(item.price.toLocaleString('fr-FR'), 155, y + 5.5, { align: 'right' });
-      doc.text(item.total.toLocaleString('fr-FR'), pageWidth - 18, y + 5.5, { align: 'right' });
-    }
-    y += 8;
-  });
+    doc.text('Distribution médicale, consommables et équipements hospitaliers', margin, 21);
+    doc.text('Libreville, Gabon | +241 77 003 004 / +241 66 240 399', pageWidth - margin, 21, { align: 'right' });
 
-  // Totals Section
-  y += 6;
-  if (y > pageHeight - 55) {
+    doc.setTextColor(ink[0], ink[1], ink[2]);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('BON DE COMMANDE PROVISOIRE', margin, 41);
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(pageWidth - 83, 32, 69, 25, 2, 2, 'FD');
+    doc.setFontSize(8.5);
+    doc.text(`Réf. : ${text(order.reference)}`, pageWidth - 78, 39);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Date : ${orderDate}`, pageWidth - 78, 45);
+    doc.text(`Statut : ${text(order.status)}`, pageWidth - 78, 51);
+  };
+
+  drawHeader();
+
+  const clientBoxTop = 61;
+  const leftColumnX = margin + 4;
+  const rightColumnX = pageWidth / 2 + 4;
+  const rightColumnWidth = pageWidth - rightColumnX - margin - 4;
+  const addressLines = doc.splitTextToSize(`Adresse : ${text(order.customer.deliveryAddress || 'Non renseignée')}`, rightColumnWidth);
+  const notesLines = order.customer.notes
+    ? doc.splitTextToSize(`Instructions : ${text(order.customer.notes)}`, rightColumnWidth)
+    : [];
+  const addressY = 81;
+  const paymentY = addressY + addressLines.length * 4 + 1;
+  const notesY = paymentY + 5;
+  const clientBoxBottom = Math.max(91, notesLines.length ? notesY + notesLines.length * 4 : paymentY + 5) + 4;
+
+  doc.setFillColor(241, 245, 249);
+  doc.roundedRect(margin, clientBoxTop, contentWidth, clientBoxBottom - clientBoxTop, 2, 2, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(blue[0], blue[1], blue[2]);
+  doc.text('CLIENT / DESTINATAIRE', leftColumnX, 68);
+  doc.setFontSize(9);
+  doc.setTextColor(ink[0], ink[1], ink[2]);
+  doc.text(text(order.customer.facilityName || '�?tablissement'), leftColumnX, 75);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text(`Contact : ${text(order.customer.contactName || order.customer.facilityName)}`, leftColumnX, 81);
+  doc.text(`Téléphone : ${text(order.customer.phone)}`, leftColumnX, 86);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Réception : ${deliveryMode}`, rightColumnX, 68);
+  doc.setFont('helvetica', 'normal');
+  doc.text(addressLines, rightColumnX, addressY);
+  doc.text(paymentText, rightColumnX, paymentY);
+  if (notesLines.length) doc.text(notesLines, rightColumnX, notesY);
+
+  const drawTableHeader = (top: number) => {
+    doc.setFillColor(blue[0], blue[1], blue[2]);
+    doc.rect(margin, top, contentWidth, 8, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.text('Article et variante', margin + 4, top + 5.5);
+    doc.text('Qté', 126, top + 5.5, { align: 'center' });
+    doc.text('Prix unit. (FCFA)', 158, top + 5.5, { align: 'right' });
+    doc.text('Total (FCFA)', pageWidth - margin - 4, top + 5.5, { align: 'right' });
+  };
+
+  let y = clientBoxBottom + 8;
+  if (y > pageHeight - 74) {
     doc.addPage();
     y = 20;
   }
-  const totalsBoxX = pageWidth - 90;
-  const boxHeight = totalSavings > 0 ? 32 : 26;
-  doc.setFillColor(241, 245, 249);
-  doc.roundedRect(totalsBoxX, y, 76, boxHeight, 2, 2, 'F');
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.text('Sous-total articles fermes :', totalsBoxX + 4, y + 7);
-  doc.text(`${order.estimatedTotal.toLocaleString('fr-FR')} FCFA`, pageWidth - 18, y + 7, { align: 'right' });
-  
-  let currentBoxY = y + 7;
-  if (totalSavings > 0) {
-    currentBoxY += 6;
-    doc.setTextColor(5, 150, 105);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Économie Volume Clinique :', totalsBoxX + 4, currentBoxY);
-    doc.text(`-${totalSavings.toLocaleString('fr-FR')} FCFA`, pageWidth - 18, currentBoxY, { align: 'right' });
+  drawTableHeader(y);
+  y += 8;
+
+  let totalSavings = 0;
+  let itemsSubtotal = 0;
+  const items = order.items || [];
+  items.forEach((item, index) => {
+    const itemLabel = item.variant && item.variant !== 'Standard'
+      ? `${text(item.productName)} (${text(item.variant)})`
+      : text(item.productName);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    const labelLines = doc.splitTextToSize(itemLabel || 'Article', 99);
+    const rowHeight = Math.max(8, labelLines.length * 4.2 + 3.5);
+    if (y + rowHeight > pageHeight - 28) {
+      doc.addPage();
+      y = 20;
+      drawTableHeader(y);
+      y += 8;
+    }
+    if (index % 2 === 1) {
+      doc.setFillColor(248, 250, 252);
+      doc.rect(margin, y, contentWidth, rowHeight, 'F');
+    }
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, y + rowHeight, pageWidth - margin, y + rowHeight);
+    doc.setTextColor(ink[0], ink[1], ink[2]);
+    doc.setFont('helvetica', 'normal');
+    doc.text(labelLines, margin + 4, y + 5.2);
+    const valueY = y + Math.min(rowHeight - 1.5, Math.max(5.2, rowHeight / 2 + 1));
+    doc.text(String(item.quantity), 126, valueY, { align: 'center' });
+    if (item.isQuote) {
+      doc.setTextColor(180, 83, 9);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Sur devis', 158, valueY, { align: 'right' });
+      doc.text('Sur devis', pageWidth - margin - 4, valueY, { align: 'right' });
+    } else {
+      const unitPrice = Number(item.price) || 0;
+      const lineTotal = Number(item.total) || 0;
+      itemsSubtotal += lineTotal;
+      totalSavings += Number(item.savings) || 0;
+      doc.setTextColor(ink[0], ink[1], ink[2]);
+      doc.setFont('helvetica', 'normal');
+      doc.text(formatPdfAmount(unitPrice), 158, valueY, { align: 'right' });
+      doc.text(formatPdfAmount(lineTotal), pageWidth - margin - 4, valueY, { align: 'right' });
+    }
+    y += rowHeight;
+  });
+
+  y += 6;
+  const deliveryFee = Number(order.deliveryFee ?? order.customer.deliveryFee) || 0;
+  const orderTotal = Number(order.estimatedTotal) || itemsSubtotal + deliveryFee;
+  const totalsRows = 2 + (deliveryFee > 0 ? 1 : 0) + (totalSavings > 0 ? 1 : 0);
+  const boxHeight = 8 + totalsRows * 6;
+  if (y + boxHeight > pageHeight - 23) {
+    doc.addPage();
+    y = 22;
   }
 
-  currentBoxY += 8;
+  const totalsBoxX = pageWidth - margin - 92;
+  const totalsBoxWidth = 92;
+  doc.setFillColor(241, 245, 249);
+  doc.roundedRect(totalsBoxX, y, totalsBoxWidth, boxHeight, 2, 2, 'F');
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(ink[0], ink[1], ink[2]);
+  let totalY = y + 7;
+  doc.text('Sous-total articles', totalsBoxX + 4, totalY);
+  doc.text(`${formatPdfAmount(itemsSubtotal)} FCFA`, pageWidth - margin - 4, totalY, { align: 'right' });
+  if (deliveryFee > 0) {
+    totalY += 6;
+    doc.text('Livraison', totalsBoxX + 4, totalY);
+    doc.text(`${formatPdfAmount(deliveryFee)} FCFA`, pageWidth - margin - 4, totalY, { align: 'right' });
+  }
+  if (totalSavings > 0) {
+    totalY += 6;
+    doc.setTextColor(5, 150, 105);
+    doc.text(`Remise volume incluse : -${formatPdfAmount(totalSavings)} FCFA`, totalsBoxX + 4, totalY);
+  }
+  totalY += 7;
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(blueDark[0], blueDark[1], blueDark[2]);
-  doc.setFontSize(10.5);
-  doc.text('TOTAL ESTIMÉ :', totalsBoxX + 4, currentBoxY);
-  doc.text(`${order.estimatedTotal.toLocaleString('fr-FR')} FCFA`, pageWidth - 18, currentBoxY, { align: 'right' });
+  doc.setFontSize(10);
+  doc.setTextColor(blue[0], blue[1], blue[2]);
+  doc.text('TOTAL ESTIM�?', totalsBoxX + 4, totalY);
+  doc.text(`${formatPdfAmount(orderTotal)} FCFA`, pageWidth - margin - 4, totalY, { align: 'right' });
 
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'italic');
-  doc.setTextColor(slateMuted[0], slateMuted[1], slateMuted[2]);
-  doc.text('Prix en FCFA hors taxes - Non soumis à la TVA', totalsBoxX + 4, currentBoxY + 6);
+  const pageCount = doc.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page += 1) {
+    doc.setPage(page);
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, pageHeight - 14, pageWidth - margin, pageHeight - 14);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text('Prix en FCFA hors taxes. Commande à confirmer par Gloryday Pharma.', margin, pageHeight - 9);
+    doc.text(`${text(order.reference)} | Page ${page}/${pageCount}`, pageWidth - margin, pageHeight - 9, { align: 'right' });
+  }
 
   const blob = doc.output('blob');
-  const dataUrl = doc.output('dataurlstring');
+  const dataUrl = await readBlobAsDataUrl(blob);
   return { blob, dataUrl };
 }
-
 /**
  * Générateur du Bon de Demande d'Achat & Visa Interne
  * Formaté pour approbation hiérarchique au sein de la clinique/hôpital
@@ -205,21 +268,14 @@ export async function generateInternalPurchaseOrderPdf(
   doc.setFillColor(30, 41, 59); // Slate-800
   doc.rect(0, 0, pageWidth, 28, 'F');
 
-  // Official Gloryday Pharma Vector Emblem in Internal Order PDF Header
-  doc.setFillColor(255, 255, 255);
-  doc.roundedRect(14, 5.5, 16, 16, 3, 3, 'F');
-  doc.setFillColor(blueDark[0], blueDark[1], blueDark[2]);
-  doc.roundedRect(20.6, 8.5, 2.8, 10, 0.8, 0.8, 'F');
-  doc.roundedRect(17, 12.1, 10, 2.8, 0.8, 0.8, 'F');
-
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(14);
+  doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
-  doc.text('FICHE DE DEMANDE D\'ENGAGEMENT & VISA INTERNE', 34, 13);
+  doc.text('FICHE DE DEMANDE D\'ENGAGEMENT & VISA INTERNE', 14, 14);
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'normal');
-  doc.text('Gloryday Pharma Gabon · Circuit de Validation Hiérarchique Clinique & Hôpital', 34, 19.5);
-  doc.text(`Réf : ${order.reference}`, pageWidth - 14, 19.5, { align: 'right' });
+  doc.text('Gloryday Pharma Gabon · Circuit de Validation Hiérarchique Clinique & Hôpital', 14, 21);
+  doc.text(`Réf : ${order.reference}`, pageWidth - 14, 21, { align: 'right' });
 
   // Établissement & Service Demandeur Box
   doc.setFillColor(248, 250, 252);

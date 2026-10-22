@@ -72,15 +72,15 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
 
   const nonCancelledOrders = orders.filter(o => o.status !== 'Annulée');
-  const totalSpent = nonCancelledOrders.reduce((sum, o) => sum + o.estimatedTotal, 0);
+  const totalOrdered = nonCancelledOrders.reduce((sum, o) => sum + o.estimatedTotal, 0);
   const pendingOrders = orders.filter(o => o.status === 'À confirmer' || o.status === 'Confirmée' || o.status === 'En préparation');
   const deliveredOrders = orders.filter(o => o.status === 'Livrée');
   const unpaidOrders = orders.filter(o => !o.isPaid && o.status !== 'Annulée');
   
   // Find active ongoing order for direct delivery spotlight
   const activeDeliveryOrder = orders.find(
-    o => o.status !== 'Annulée' && o.status !== 'Livrée'
-  ) || (orders.length > 0 ? orders[0] : null);
+    o => o.status === 'Confirmée' || o.status === 'En préparation'
+  ) || null;
 
   const deliverySteps = [
     { key: 'preparation', label: '1. Colisage & Validation', desc: 'En préparation au dépôt' },
@@ -98,12 +98,8 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
 
   const handleSaveMobilePayment = async (details: MobilePaymentDetails) => {
     if (!selectedPaymentOrder) return;
-    try {
-      await api.updateOrderMobilePayment(selectedPaymentOrder.id, details);
-      onRefreshOrders();
-    } catch (e) {
-      console.error('Failed to update mobile payment', e);
-    }
+    await api.updateOrderMobilePayment(selectedPaymentOrder.id, details);
+    onRefreshOrders();
   };
 
   // Filtered orders list
@@ -237,7 +233,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
 
         <div className="bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/20 shadow-2xs hover:shadow-xs transition-all">
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-[11px] uppercase tracking-wider font-bold text-[#0d44e8]">En cours d'envoi</span>
+            <span className="text-[11px] uppercase tracking-wider font-bold text-[#0d44e8]">Commandes en cours</span>
             <div className="w-8 h-8 rounded-xl bg-blue-100 text-[#0d44e8] flex items-center justify-center">
               <Truck className="w-4 h-4" />
             </div>
@@ -245,23 +241,23 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           <div className="text-2xl font-black text-[#0d44e8]">{pendingOrders.length}</div>
           <div className="text-[11px] text-blue-700 mt-1 flex items-center gap-1 font-medium">
             <Clock className="w-3.5 h-3.5" />
-            <span>Livraison express Libreville</span>
+            <span>En attente de confirmation ou livraison</span>
           </div>
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-all">
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-[11px] uppercase tracking-wider font-bold">Dépenses Cumulées</span>
+            <span className="text-[11px] uppercase tracking-wider font-bold">Montant commandé</span>
             <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
           <div className="text-xl sm:text-2xl font-black text-slate-900 tabular-nums">
-            {totalSpent.toLocaleString('fr-FR')} <span className="text-xs font-bold text-slate-500">FCFA</span>
+            {totalOrdered.toLocaleString('fr-FR')} <span className="text-xs font-bold text-slate-500">FCFA</span>
           </div>
           <div className="text-[11px] text-emerald-700 mt-1 flex items-center gap-1 font-semibold">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Facturation conforme OHADA</span>
+            <span>Total des commandes hors annulées</span>
           </div>
         </div>
 
@@ -286,7 +282,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-[#0d44e8] border border-blue-200">
-                  Suivi Direct en Temps Réel
+                  Suivi de la commande
                 </span>
                 <span className="text-xs text-slate-500">
                   Réf : <strong className="text-slate-900 font-mono">{activeDeliveryOrder.reference}</strong>
@@ -308,7 +304,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                   className="py-2 px-3.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
                 >
                   <Truck className="w-4 h-4" />
-                  <span>Détails & Géolocalisation</span>
+                  <span>Détails du suivi</span>
                 </button>
               )}
               <span className={`px-3 py-1 rounded-full text-xs font-extrabold ${
@@ -372,7 +368,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 </div>
                 <div>
                   <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-slate-900">Coursier Certifié : {activeDeliveryOrder.courier.name}</span>
+                    <span className="text-xs font-bold text-slate-900">Coursier : {activeDeliveryOrder.courier.name}</span>
                     <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-slate-200 text-slate-700">
                       {activeDeliveryOrder.courier.matricule}
                     </span>
@@ -403,10 +399,10 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className="font-bold text-base text-slate-900">
-              Historique des Commandes & Facturation ({filteredOrders.length})
+              Historique des commandes ({filteredOrders.length})
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Consultez vos reçus, téléchargez vos bons de commande PDF et effectuez un réassort en 1 clic.
+              Consultez vos commandes et téléchargez les bons de commande PDF.
             </p>
           </div>
 
@@ -481,6 +477,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
               const isMobilePayment = order.customer.paymentMethod === 'airtel_money' || 
                                      order.customer.paymentMethod === 'moov_money' || 
                                      !!mp;
+              const paymentVerified = Boolean(order.isPaid || mp?.status === 'verified');
 
               return (
                 <div key={order.id} className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-slate-50/80 transition-colors">
@@ -556,14 +553,14 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                         type="button"
                         onClick={() => setSelectedPaymentOrder(order)}
                         className={`py-1.5 px-3 rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer border shadow-2xs transition-colors ${
-                          mp?.transactionReference
+                          paymentVerified
                             ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
                             : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
                         }`}
-                        title="Vérifier ou valider la référence de paiement mobile"
+                        title={paymentVerified ? 'Paiement vérifié par Gloryday Pharma.' : mp?.transactionReference ? 'Référence transmise, en attente de vérification.' : 'Transmettre une référence de paiement pour vérification.'}
                       >
-                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>{mp?.transactionReference ? 'Réf. Validée' : 'Régler par SMS'}</span>
+                        <ShieldCheck className={`w-3.5 h-3.5 ${paymentVerified ? 'text-emerald-600' : 'text-amber-600'}`} />
+                        <span>{paymentVerified ? 'Paiement vérifié' : mp?.transactionReference ? 'Réf. en attente' : 'Soumettre une référence'}</span>
                       </button>
                     )}
 
@@ -639,14 +636,15 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           onClose={() => setSelectedPaymentOrder(null)}
           order={selectedPaymentOrder}
           allOrders={orders}
-          onPaymentConfirmed={async (transactionId, operator, status) => {
+          onPaymentConfirmed={async (transactionId, operator) => {
             await handleSaveMobilePayment({
               provider: operator,
               merchantPhone: operator === 'moov_money' ? '066240399' : '077003004',
               transactionReference: transactionId,
               senderPhone: selectedPaymentOrder.customer.phone,
-              status: status || 'submitted',
-              validatedAt: new Date().toISOString()
+              isPrePaid: false,
+              status: 'submitted',
+              amount: selectedPaymentOrder.estimatedTotal
             });
           }}
         />

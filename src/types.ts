@@ -1,4 +1,4 @@
-export type AppRole = 'client' | 'Super-Admin' | 'Commercial' | 'Gestionnaire Catalogue' | 'Logistique';
+export type AppRole = 'client' | 'Super-Admin' | 'Admin simple' | 'Commercial' | 'Gestionnaire Catalogue' | 'Logistique';
 
 export type FacilityType = 
   | 'Clinique' 
@@ -87,6 +87,8 @@ export interface CartItem {
 export interface Coordinates {
   lat: number;
   lng: number;
+  accuracy?: number;
+  source?: 'checkout';
 }
 
 export interface MobilePaymentDetails {
@@ -180,9 +182,27 @@ export interface InvoiceRecord {
 
 export interface DeliveryProof {
   receivedBy: string;
+  receiptReference?: string;
   signatureUrl?: string;
   photoUrl?: string;
   timestamp: string;
+}
+
+export interface DeliveryLocationPoint {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  recordedAt: string;
+}
+
+export interface CourierTrackingInfo {
+  orderReference: string;
+  courierName: string;
+  facilityName: string;
+  deliveryAddress: string;
+  contactName: string;
+  contactPhone: string;
+  expiresAt: string;
 }
 
 export interface OrderDraft {
@@ -221,6 +241,7 @@ export interface Order {
   assignedCommercialId?: string;
   mobilePayment?: MobilePaymentDetails;
   deliveryStage?: DeliveryStage;
+  stockReserved?: boolean;
   courier?: CourierInfo;
   deliveryZone?: string;
   deliveryEstimated?: string;
@@ -379,6 +400,7 @@ export interface DirectMessage {
   id: string;
   senderId: string;
   senderName: string;
+  senderRole?: AppRole;
   recipientId?: string;
   recipientFacilityName?: string;
   recipientPhone?: string;
@@ -391,7 +413,8 @@ export interface DirectMessage {
 export interface AppNotification {
   id: string;
   timestamp: string;
-  type: 'order_created' | 'status_changed' | 'payment_updated' | 'quote_created' | 'inactivity_reminder' | 'admin_message' | 'promotion';
+  type: 'order_created' | 'status_changed' | 'payment_updated' | 'quote_created' | 'inactivity_reminder' | 'admin_message' | 'promotion' | 'password_recovery';
+  title?: string;
   orderId?: string;
   orderReference?: string;
   message: string;

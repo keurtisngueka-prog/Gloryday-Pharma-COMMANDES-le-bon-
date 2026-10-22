@@ -13,7 +13,6 @@ import {
   LogOut
 } from 'lucide-react';
 import { User as UserType, AppNotification } from '../types';
-import { BrandLogo } from './BrandLogo';
 
 interface NavbarProps {
   activeTab: string;
@@ -29,7 +28,6 @@ interface NavbarProps {
   onLogoClick?: () => void;
   onOpenDraftsModal?: () => void;
   draftsCount?: number;
-  cartBounceEvent?: { id: number; addedQty: number } | null;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -43,42 +41,19 @@ export const Navbar: React.FC<NavbarProps> = ({
   notifications,
   onOpenNotifications,
   onToggleSidebar,
-  onLogoClick,
-  cartBounceEvent
+  onLogoClick
 }) => {
   const unreadCount = notifications.filter(n => !n.read).length;
   const role = currentUser?.role || 'client';
 
-  // Cart Bounce Animation on item addition from catalog grid
+  // Subtle Cart Animation on item addition
   const [isCartBumping, setIsCartBumping] = useState(false);
-  const [bounceKey, setBounceKey] = useState(0);
-  const [lastAddedQty, setLastAddedQty] = useState<number | null>(null);
   const prevCountRef = useRef(cartCount);
 
   useEffect(() => {
-    if (cartBounceEvent) {
+    if (cartCount > prevCountRef.current) {
       setIsCartBumping(true);
-      setBounceKey(prev => prev + 1);
-      setLastAddedQty(cartBounceEvent.addedQty);
-      const timer = setTimeout(() => {
-        setIsCartBumping(false);
-        setLastAddedQty(null);
-      }, 750);
-      prevCountRef.current = cartCount;
-      return () => clearTimeout(timer);
-    }
-  }, [cartBounceEvent]);
-
-  useEffect(() => {
-    if (cartCount > prevCountRef.current && !isCartBumping) {
-      const diff = cartCount - prevCountRef.current;
-      setIsCartBumping(true);
-      setBounceKey(prev => prev + 1);
-      setLastAddedQty(diff > 0 ? diff : 1);
-      const timer = setTimeout(() => {
-        setIsCartBumping(false);
-        setLastAddedQty(null);
-      }, 750);
+      const timer = setTimeout(() => setIsCartBumping(false), 650);
       prevCountRef.current = cartCount;
       return () => clearTimeout(timer);
     }
@@ -95,7 +70,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               Gloryday Pharma Gabon
             </span>
             <span className="text-slate-500">·</span>
-            <span>Fournisseur certifié d'équipements & consommables hospitaliers</span>
+            <span>Équipements & consommables hospitaliers</span>
           </div>
           <div className="flex items-center gap-4">
             <a 
@@ -107,6 +82,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </a>
             {currentUser ? (
               <span className="text-slate-400 flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${role === 'Super-Admin' ? 'bg-purple-400' : 'bg-emerald-400'}`}></span>
                 {role === 'Super-Admin' ? (
                   <span>
                     Session : <strong className="text-white">Direction Générale Gloryday</strong> [Super-Admin]
@@ -119,6 +95,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             ) : (
               <span className="text-slate-400 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
                 <span>Mode : <strong className="text-slate-200">Visiteur Invité</strong></span>
                 <button
                   type="button"
@@ -133,10 +110,10 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Main Bar */}
+      {/* Main Bar (56px) */}
       <div className="max-w-7xl mx-auto px-3 sm:px-6">
         <div className="flex items-center justify-between h-14 sm:h-16 gap-3">
-          {/* Left Zone: Menu Toggle & Complete Brand Logo */}
+          {/* Left Zone: Menu Toggle & Brand Wordmark */}
           <div className="flex items-center gap-2.5 sm:gap-3">
             <button
               type="button"
@@ -159,10 +136,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                   }
                 }
               }}
-              className="cursor-pointer"
-              title="GLORYDAY Pharma Gabon · Retour à l'accueil"
+              className="flex items-center gap-2 cursor-pointer select-none group"
+              title="GLORYDAY Pharma · Clic pour réinitialiser le panier à 0 et revenir à l'accueil"
             >
-              <BrandLogo variant="light" size="md" showSubtitle={true} />
+              <div className="w-8 h-8 rounded-lg bg-[#0d44e8] text-white flex items-center justify-center font-black text-sm shadow-xs group-hover:scale-105 transition-transform">
+                +
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="font-extrabold text-base sm:text-lg text-[#000000] tracking-tight">
+                  GLORYDAY
+                </span>
+                <span className="text-[11px] font-bold text-[#0d44e8] uppercase tracking-wider">
+                  Pharma
+                </span>
+              </div>
             </div>
           </div>
 
@@ -250,61 +237,28 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Right Zone: Notifications, Cart, Profile */}
           <div className="flex items-center gap-1.5 sm:gap-2">
-            {/* Cart Button with Bounce Animation on Product Addition */}
+            {/* Desktop Cart Button with Subtle Bounce & Pulse */}
             <button
               type="button"
               onClick={() => setActiveTab('cart')}
-              className={`relative flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold transition-all duration-300 cursor-pointer ${
-                isCartBumping
-                  ? 'scale-105 shadow-lg ring-2 ring-[#0d44e8] bg-blue-50 text-[#0d44e8]'
-                  : activeTab === 'cart'
-                    ? 'bg-[#0d44e8] text-white shadow-xs'
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-900'
+              className={`hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all duration-300 cursor-pointer ${
+                isCartBumping ? 'scale-105 shadow-md ring-2 ring-[#0d44e8] bg-blue-50' : ''
+              } ${
+                activeTab === 'cart'
+                  ? 'bg-[#0d44e8] text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-900'
               }`}
-              title="Voir mon panier de commande"
             >
-              {/* Floating +Qty confirmation badge on bounce */}
-              {isCartBumping && lastAddedQty && (
-                <span
-                  key={`float-${bounceKey}`}
-                  className="pointer-events-none absolute -top-3.5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-black shadow-md animate-cart-plus-float whitespace-nowrap z-20"
-                >
-                  +{lastAddedQty}
-                </span>
-              )}
-
-              <span
-                key={`icon-${bounceKey}`}
-                className={`inline-flex items-center justify-center ${
-                  isCartBumping ? 'animate-cart-bounce' : ''
-                }`}
-              >
-                <ShoppingBag
-                  className={`w-4 h-4 transition-colors duration-200 ${
-                    isCartBumping
-                      ? 'text-[#0d44e8] animate-bounce'
-                      : activeTab === 'cart'
-                        ? 'text-white'
-                        : 'text-slate-800'
-                  }`}
-                />
-              </span>
-
-              <span className="hidden sm:inline tabular-nums">
-                {cartTotal > 0 ? `${cartTotal.toLocaleString('fr-FR')} F` : 'Panier'}
-              </span>
-
+              <ShoppingBag className={`w-4 h-4 transition-transform duration-300 ${
+                isCartBumping ? 'scale-125 -rotate-12 text-[#0d44e8]' : ''
+              }`} />
+              <span>{cartTotal > 0 ? `${cartTotal.toLocaleString('fr-FR')} F` : 'Panier'}</span>
               {cartCount > 0 && (
-                <span
-                  key={`badge-${bounceKey}`}
-                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-black tabular-nums transition-all duration-300 ${
-                    isCartBumping
-                      ? 'animate-cart-bounce bg-emerald-600 text-white ring-4 ring-[#0d44e8]/30 shadow-xs'
-                      : activeTab === 'cart'
-                        ? 'bg-white text-[#0d44e8]'
-                        : 'bg-[#0d44e8] text-white'
-                  }`}
-                >
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black transition-all duration-300 ${
+                  isCartBumping 
+                    ? 'scale-125 ring-4 ring-[#0d44e8]/50 bg-emerald-600 text-white animate-pulse'
+                    : (activeTab === 'cart' ? 'bg-white text-[#0d44e8]' : 'bg-[#0d44e8] text-white')
+                }`}>
                   {cartCount}
                 </span>
               )}

@@ -59,9 +59,12 @@ export function ProductDetailModal({
     }, 600);
   };
 
-  const isLatexFree = product.specifications?.latexFree ?? (product.name.toLowerCase().includes('nitrile') || !product.name.toLowerCase().includes('latex'));
-  const sterilityText = product.specifications?.sterility || (product.name.toLowerCase().includes('stérile') || product.description?.toLowerCase().includes('stérile') ? 'Stérile (Oxyde d’Éthylène)' : 'Non stérile / Dispositif médical');
-  const packagingText = product.specifications?.packaging || currentVariant.label || 'Emballage unitaire sous blister pelable';
+  const sterilityText = product.specifications?.sterility || 'Non renseignée';
+  const latexText = product.specifications?.latexFree === undefined
+    ? 'Non renseignée'
+    : product.specifications.latexFree ? 'Sans latex' : 'Contient du latex';
+  const packagingText = product.specifications?.packaging || 'Non renseigné';
+  const storageText = product.specifications?.storage || 'Non renseignées';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-sm overflow-y-auto">
@@ -102,7 +105,7 @@ export function ProductDetailModal({
                 ) : (
                   <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 p-4 text-center">
                     <ShieldCheck className="w-12 h-12 mb-2 stroke-[1.5]" />
-                    <span className="text-xs font-medium">Dispositif Médical Certifié</span>
+                    <span className="text-xs font-medium">Image du produit non disponible</span>
                   </div>
                 )}
                 
@@ -142,7 +145,7 @@ export function ProductDetailModal({
                   {product.name}
                 </h3>
                 <p className="mt-1.5 text-xs text-slate-500 leading-relaxed">
-                  {product.description || 'Dispositif médical à usage professionnel destiné aux hôpitaux, cliniques et centres de santé de Libreville.'}
+                  {product.description || 'Description à compléter.'}
                 </p>
               </div>
 
@@ -156,15 +159,21 @@ export function ProductDetailModal({
                 </div>
                 <div className="flex items-center justify-between text-slate-700">
                   <span className="text-slate-500 flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-[#0d44e8]" /> Formule :
+                    <Layers className="w-3.5 h-3.5 text-[#0d44e8]" /> Présence de latex :
                   </span>
-                  <span className="font-semibold">{isLatexFree ? 'Sans Latex (Hypoallergénique)' : 'Latex naturel haute résistance'}</span>
+                  <span className="font-semibold">{latexText}</span>
+                </div>
+                <div className="flex items-center justify-between text-slate-700">
+                  <span className="text-slate-500 flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-[#0d44e8]" /> Conditionnement :
+                  </span>
+                  <span className="font-semibold">{packagingText}</span>
                 </div>
                 <div className="flex items-center justify-between text-slate-700">
                   <span className="text-slate-500 flex items-center gap-1.5">
                     <Thermometer className="w-3.5 h-3.5 text-[#0d44e8]" /> Stockage :
                   </span>
-                  <span className="font-semibold">15°C - 30°C au sec</span>
+                  <span className="font-semibold">{storageText}</span>
                 </div>
               </div>
 

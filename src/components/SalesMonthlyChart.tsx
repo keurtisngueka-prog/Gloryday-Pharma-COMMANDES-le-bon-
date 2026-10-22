@@ -44,19 +44,9 @@ export const SalesMonthlyChart: React.FC<SalesMonthlyChartProps> = ({ orders, st
       });
     }
 
-    // Default realistic baseline to complement demo data
-    const baselineAmounts: Record<number, number> = {
-      0: 980000,
-      1: 1150000,
-      2: 1320000,
-      3: 1480000,
-      4: 1650000,
-      5: 1890000
-    };
-
     const validOrders = orders.filter(o => o.status !== 'Annulée');
 
-    return months.map((m, idx) => {
+    return months.map((m) => {
       // Find orders matching this month
       const matchingOrders = validOrders.filter(o => {
         try {
@@ -70,10 +60,8 @@ export const SalesMonthlyChart: React.FC<SalesMonthlyChartProps> = ({ orders, st
       const actualRevenue = matchingOrders.reduce((sum, o) => sum + (o.estimatedTotal || 0), 0);
       const actualCount = matchingOrders.length;
 
-      // Blend actual data with realistic baseline for past months
-      const baseRev = baselineAmounts[idx] || 1200000;
-      const finalRevenue = actualRevenue > 0 ? actualRevenue + Math.round(baseRev * 0.4) : baseRev;
-      const finalCount = actualCount > 0 ? actualCount + Math.round(finalRevenue / 65000) : Math.round(baseRev / 65000);
+      const finalRevenue = actualRevenue;
+      const finalCount = actualCount;
       const finalBasket = finalCount > 0 ? Math.round(finalRevenue / finalCount) : 0;
 
       return {
@@ -118,7 +106,7 @@ export const SalesMonthlyChart: React.FC<SalesMonthlyChartProps> = ({ orders, st
             {label}
           </span>
           <div className="flex justify-between items-center text-slate-300">
-            <span>Chiffre d'Affaires :</span>
+            <span>Montant des commandes :</span>
             <strong className="text-white font-mono text-xs">
               {data.revenue.toLocaleString('fr-FR')} FCFA
             </strong>
@@ -155,7 +143,7 @@ export const SalesMonthlyChart: React.FC<SalesMonthlyChartProps> = ({ orders, st
             </h3>
           </div>
           <p className="text-xs text-[#6a6a6b] mt-0.5">
-            Suivi consolidé du chiffre d'affaires et de la cadence d'approvisionnement des cliniques
+            Suivi consolidé de la valeur des commandes et de la cadence d'approvisionnement
           </p>
         </div>
 
@@ -171,7 +159,7 @@ export const SalesMonthlyChart: React.FC<SalesMonthlyChartProps> = ({ orders, st
             }`}
           >
             <DollarSign className="w-3.5 h-3.5 text-[#0d44e8]" />
-            <span>Chiffre d'Affaires</span>
+            <span>Montant des commandes</span>
           </button>
           <button
             type="button"

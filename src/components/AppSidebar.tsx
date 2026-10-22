@@ -22,7 +22,6 @@ import {
   Database
 } from 'lucide-react';
 import { User, AppRole } from '../types';
-import { BrandLogo } from './BrandLogo';
 
 interface AppSidebarProps {
   isOpen: boolean;
@@ -76,7 +75,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
         }`}
       >
         <div className="overflow-y-auto flex-1">
-          {/* 1. Header with Complete Brand Logo & Close Button */}
+          {/* 1. Header with Brand & Close Button */}
           <div className="p-4 px-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
             <div 
               onClick={() => {
@@ -87,10 +86,20 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 }
                 onClose();
               }}
-              className="cursor-pointer"
-              title="GLORYDAY Pharma Gabon · Retour à l'accueil"
+              className="flex items-center gap-2.5 cursor-pointer select-none group"
+              title="GLORYDAY Pharma · Clic pour réinitialiser le panier à 0 et revenir à l'accueil"
             >
-              <BrandLogo variant="light" size="md" showSubtitle={true} />
+              <div className="w-8 h-8 rounded-lg bg-[#0d44e8] text-white flex items-center justify-center font-black text-sm group-hover:scale-105 transition-transform">
+                +
+              </div>
+              <div>
+                <span className="font-extrabold text-base tracking-tight text-[#000000] block leading-none">
+                  GLORYDAY
+                </span>
+                <span className="text-[10px] text-[#0d44e8] font-bold uppercase tracking-wider">
+                  Pharma Gabon
+                </span>
+              </div>
             </div>
             <button
               type="button"
@@ -139,7 +148,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
             >
               <div className="flex items-center gap-2.5">
                 <Layers className="w-4 h-4 text-[#0d44e8]" />
-                <span>Catalogue Médical (215 articles)</span>
+                <span>Catalogue médical</span>
               </div>
               <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
             </button>
@@ -305,6 +314,20 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
 
                   <button
                     type="button"
+                    onClick={() => handleNav('admin-staff')}
+                    className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                      activeTab === 'admin-staff' ? 'bg-purple-100 text-purple-900 font-bold' : 'text-slate-700 hover:bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Users className="w-4 h-4 text-purple-600" />
+                      <span>Comptes employés & rôles</span>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => handleNav('admin-deploy')}
                     className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
                       activeTab === 'admin-deploy' ? 'bg-emerald-100 text-emerald-900 font-bold' : 'text-slate-700 hover:bg-white'
@@ -317,6 +340,53 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                     <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
                 </>
+              )}
+
+              {role === 'Admin simple' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => handleNav('admin')}
+                    className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                      activeTab === 'admin' ? 'bg-purple-100 text-purple-900 font-bold' : 'text-slate-700 hover:bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <ShieldCheck className="w-4 h-4 text-purple-600" />
+                      <span>Tableau de bord</span>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleNav('admin-orders')}
+                    className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                      activeTab === 'admin-orders' ? 'bg-purple-100 text-purple-900 font-bold' : 'text-slate-700 hover:bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Truck className="w-4 h-4 text-purple-600" />
+                      <span>Commandes & livraisons</span>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+                </>
+              )}
+
+              {role === 'Logistique' && (
+                <button
+                  type="button"
+                  onClick={() => handleNav('admin-orders')}
+                  className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                    activeTab === 'admin-orders' ? 'bg-purple-100 text-purple-900 font-bold' : 'text-slate-700 hover:bg-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Truck className="w-4 h-4 text-purple-600" />
+                    <span>Commandes & livraisons</span>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
               )}
             </div>
           )}

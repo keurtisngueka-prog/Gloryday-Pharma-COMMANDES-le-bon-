@@ -38,7 +38,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       ? initialProduct.quantityAvailable
       : typeof initialProduct?.stockQuantity === 'number'
         ? initialProduct.stockQuantity
-        : 50
+        : 0
   );
   const [alertThreshold, setAlertThreshold] = useState<number>(
     typeof initialProduct?.alertThreshold === 'number'
@@ -307,11 +307,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   type="number"
                   min="0"
                   required
-                  placeholder="ex: 50"
+                  placeholder="Saisir le stock réel"
                   value={quantityAvailable}
                   onChange={(e) => setQuantityAvailable(parseInt(e.target.value, 10) || 0)}
                   className="w-full p-2 rounded-lg border border-slate-300 font-mono text-xs bg-white"
                 />
+                <p className="mt-1 text-[10px] text-slate-500">Un stock nul ou non renseigné bloque les commandes.</p>
               </div>
 
               <div>

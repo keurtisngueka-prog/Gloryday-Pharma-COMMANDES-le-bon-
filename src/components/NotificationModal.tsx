@@ -10,7 +10,8 @@ import {
   AlertTriangle, 
   FileText, 
   Send,
-  ExternalLink 
+  ExternalLink,
+  KeyRound
 } from 'lucide-react';
 import { AppNotification } from '../types';
 
@@ -62,7 +63,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                 )}
               </h3>
               <p className="text-[11px] text-slate-500">
-                Suivi automatique des commandes & alertes réductions
+                Commandes, annonces et demandes d’assistance
               </p>
             </div>
           </div>
@@ -149,18 +150,19 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                   {n.type === 'inactivity_reminder' && <AlertTriangle className="w-4 h-4" />}
                   {n.type === 'quote_created' && <FileText className="w-4 h-4" />}
                   {n.type === 'admin_message' && <Send className="w-4 h-4" />}
+                  {n.type === 'password_recovery' && <KeyRound className="w-4 h-4" />}
                 </div>
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-1 mb-0.5">
                     <span className="font-bold text-slate-900 truncate">
-                      {n.type === 'promotion' 
+                      {n.title || (n.type === 'promotion' 
                         ? 'Offre Promotionnelle' 
                         : n.type === 'status_changed' 
                           ? 'Suivi de Commande' 
                           : n.type === 'inactivity_reminder'
                             ? 'Alerte Réassort'
-                            : 'Information Gloryday'}
+                            : 'Information Gloryday')}
                     </span>
                     {n.discountBadge && (
                       <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white font-extrabold text-[9px]">
@@ -191,7 +193,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
         {/* Modal Footer */}
         <div className="p-3 px-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between text-xs shrink-0">
           <span className="text-[11px] text-slate-500">
-            Notifications push automatiques actives
+            Mises à jour consultées dans l'application; notifications push non configurées
           </span>
           <button
             type="button"

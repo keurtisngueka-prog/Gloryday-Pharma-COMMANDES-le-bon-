@@ -1,7 +1,9 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-export const SUPABASE_PROJECT_REF = 'kqvfoltosjrjvghaizpd';
-export const DEFAULT_SUPABASE_URL = `https://${SUPABASE_PROJECT_REF}.supabase.co`;
+const metaEnv = (typeof import.meta !== 'undefined' && (import.meta as any).env) || {};
+const procEnv = (typeof process !== 'undefined' && process.env) || {};
+export const SUPABASE_PROJECT_REF = metaEnv.VITE_SUPABASE_PROJECT_REF || procEnv.VITE_SUPABASE_PROJECT_REF || '';
+export const DEFAULT_SUPABASE_URL = SUPABASE_PROJECT_REF ? `https://${SUPABASE_PROJECT_REF}.supabase.co` : '';
 
 function isTestOrLocalHost(hostname: string): boolean {
   const lower = hostname.toLowerCase();
@@ -35,12 +37,12 @@ export function normalizeSupabaseUrl(raw?: string): string {
     return DEFAULT_SUPABASE_URL;
   }
 
-  // If only the project ref (e.g., kqvfoltosjrjvghaizpd) was provided
+  // If only a Supabase project reference was provided
   if (/^[a-z0-9]{15,30}$/i.test(cleaned)) {
     return `https://${cleaned.toLowerCase()}.supabase.co`;
   }
 
-  // If domain without protocol (e.g., kqvfoltosjrjvghaizpd.supabase.co) was provided
+  // If a Supabase project domain without a protocol was provided
   const candidate = /^[a-z0-9-]+\.supabase\.co(\/.*)?$/i.test(cleaned)
     ? `https://${cleaned}`
     : cleaned;
@@ -79,9 +81,6 @@ export function normalizeSupabaseKey(raw?: string): string {
   }
   return cleaned;
 }
-
-const metaEnv = (typeof import.meta !== 'undefined' && (import.meta as any).env) || {};
-const procEnv = (typeof process !== 'undefined' && process.env) || {};
 
 const rawEnvUrl =
   metaEnv.VITE_SUPABASE_URL ||

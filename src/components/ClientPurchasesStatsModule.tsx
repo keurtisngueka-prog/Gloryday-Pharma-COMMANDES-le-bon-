@@ -221,7 +221,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3.5">
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
           <span className="text-[10px] font-bold text-[#6a6a6b] uppercase block">
-            Volume d'Achats Cumulé
+            Valeur des commandes
           </span>
           <div className="text-base sm:text-xl font-extrabold text-[#0f0f12] mt-1 tabular-nums">
             {globalKPIs.totalRevenue.toLocaleString('fr-FR')} <span className="text-xs font-bold text-slate-500">FCFA</span>
@@ -239,7 +239,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
             {globalKPIs.averageBasket.toLocaleString('fr-FR')} <span className="text-xs font-bold text-slate-500">FCFA</span>
           </div>
           <p className="text-[10px] text-slate-500 mt-0.5">
-            Dépense moyenne par bon
+            Valeur moyenne par commande
           </p>
         </div>
 
@@ -434,7 +434,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
 
                     <div>
                       <span className="text-[10px] font-bold text-[#6a6a6b] uppercase block">
-                        Total Acheté
+                        Montant commandé
                       </span>
                       <span className="font-extrabold text-sm text-[#000000] tabular-nums">
                         {client.totalSpent.toLocaleString('fr-FR')} <span className="text-[10px]">F</span>
@@ -519,7 +519,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
                   <span className="text-base font-extrabold text-slate-900">{selectedClientDetail.totalOrdersCount}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Total Acheté</span>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Montant commandé</span>
                   <span className="text-base font-extrabold text-slate-900 tabular-nums">
                     {selectedClientDetail.totalSpent.toLocaleString('fr-FR')} F
                   </span>

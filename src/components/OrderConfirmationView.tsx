@@ -13,10 +13,16 @@ import { Order } from '../types';
 import { generateWhatsAppOrderUrl } from '../utils/whatsapp';
 import { computeDeliveryTimeWindow } from '../data/librevilleZones';
 import { MobilePaymentModal } from './MobilePaymentModal';
+import { api } from '../api';
+import { createPdfObjectUrl } from '../utils/pdfGenerator';
 
 interface OrderConfirmationViewProps {
   order: Order;
   pdfDataUrl?: string;
+  pdfPreparing?: boolean;
+  pdfGenerationFailed?: boolean;
+  pdfStorageFailed?: boolean;
+  onRetryPdf?: () => void;
   onNewOrder: () => void;
   onViewDashboard: () => void;
   onTrackOrder?: (order: Order) => void;
@@ -25,6 +31,10 @@ interface OrderConfirmationViewProps {
 export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
   order,
   pdfDataUrl,
+  pdfPreparing = false,
+  pdfGenerationFailed = false,
+  pdfStorageFailed = false,
+  onRetryPdf,
   onNewOrder,
   onViewDashboard,
   onTrackOrder
@@ -32,6 +42,7 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
   const [copied, setCopied] = useState(false);
   const [useSecondaryNumber, setUseSecondaryNumber] = useState(false);
   const [isMobilePaymentOpen, setIsMobilePaymentOpen] = useState(false);
+  const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
 
   const primaryUrl = generateWhatsAppOrderUrl(order, order.pdfUrl, false);
   const secondaryUrl = generateWhatsAppOrderUrl(order, order.pdfUrl, true);
@@ -44,23 +55,20 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
   };
 
   const handleDownloadPdf = () => {
-    if (!pdfDataUrl) return;
+    if (!pdfDataUrl || pdfPreparing) return;
+    const objectUrl = createPdfObjectUrl(pdfDataUrl);
     const link = document.createElement('a');
-    link.href = pdfDataUrl;
+    link.href = objectUrl;
     link.download = `Bon_de_Commande_${order.reference}.pdf`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
   };
 
   const handleOpenPdf = () => {
-    if (!pdfDataUrl) return;
-    const win = window.open();
-    if (win) {
-      win.document.write(
-        `<iframe src="${pdfDataUrl}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`
-      );
-    }
+    if (!pdfDataUrl || pdfPreparing) return;
+    setIsPdfPreviewOpen(true);
   };
 
   return (
@@ -74,7 +82,7 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
         Commande enregistrée
       </h1>
       <p className="text-xs text-slate-500 max-w-sm mx-auto mb-5">
-        Votre demande a été enregistrée avec succès. Transmettez-la sur WhatsApp pour confirmation instantanée.
+        Votre demande a été enregistrée et reste en attente de confirmation par Gloryday Pharma.
       </p>
 
       {/* Reference Card */}
@@ -144,13 +152,14 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
       {/* PDF Actions */}
       <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-left">
         <span className="text-xs font-bold text-slate-900 block mb-2">
-          Bon de commande officiel (PDF)
+          Bon de commande (PDF)
         </span>
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
             onClick={handleDownloadPdf}
-            className="h-10 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            disabled={!pdfDataUrl || pdfPreparing}
+            className="h-10 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Download className="w-3.5 h-3.5 text-slate-500" />
             Télécharger PDF
@@ -158,12 +167,37 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
           <button
             type="button"
             onClick={handleOpenPdf}
-            className="h-10 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            disabled={!pdfDataUrl || pdfPreparing}
+            className="h-10 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Eye className="w-3.5 h-3.5 text-slate-500" />
             Visualiser
           </button>
         </div>
+        {pdfPreparing && <p role="status" className="mt-2 text-xs text-blue-700">Preparation du bon PDF en cours...</p>}
+        {!pdfDataUrl && !pdfGenerationFailed && !pdfPreparing && (
+          <p role="status" className="mt-2 text-xs text-slate-500">Le bon PDF n'est pas encore pret.</p>
+        )}
+        {pdfGenerationFailed && onRetryPdf && (
+          <button
+            type="button"
+            onClick={onRetryPdf}
+            disabled={pdfPreparing}
+            className="mt-2 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-50 disabled:opacity-50"
+          >
+            Reessayer la preparation du PDF
+          </button>
+        )}
+        {pdfGenerationFailed && (
+          <p role="status" className="mt-2 text-xs text-amber-800">
+            La commande est enregistrée, mais le PDF n’a pas pu être préparé. Vous pourrez le réessayer depuis « Mes commandes ».
+          </p>
+        )}
+        {pdfStorageFailed && pdfDataUrl && (
+          <p role="status" className="mt-2 text-xs text-amber-800">
+            Le PDF est prêt au téléchargement, mais son lien de partage n’a pas pu être enregistré.
+          </p>
+        )}
       </div>
 
       {/* WhatsApp Transmission */}
@@ -174,7 +208,7 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
           </div>
           <div>
             <h3 className="font-bold text-slate-900 text-sm sm:text-base">
-              Transmission sur WhatsApp
+              Message prêt à envoyer par WhatsApp
             </h3>
             <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
               Cliquez ci-dessous pour ouvrir le message préformaté dans WhatsApp et valider l'envoi auprès de notre service commercial.
@@ -220,7 +254,7 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
 
         <div className="mt-2.5 flex items-center gap-1 text-[11px] text-emerald-800 font-medium">
           <Clock className="w-3 h-3 shrink-0" />
-          <span>Confirmation et délai de livraison en moins de 2 minutes.</span>
+          <span>La confirmation et le délai de livraison seront communiqués par l’équipe après réception de votre demande.</span>
         </div>
       </div>
 
@@ -266,7 +300,60 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
           isOpen={isMobilePaymentOpen}
           order={order}
           onClose={() => setIsMobilePaymentOpen(false)}
+          onPaymentConfirmed={async (transactionId, operator) => {
+            await api.updateOrderMobilePayment(order.id, {
+              provider: operator,
+              merchantPhone: operator === 'moov_money' ? '066240399' : '077003004',
+              transactionReference: transactionId,
+              senderPhone: order.customer.phone,
+              isPrePaid: false,
+              status: 'submitted',
+              amount: order.estimatedTotal
+            });
+          }}
         />
+      )}
+
+      {/* In-App PDF Viewer Modal */}
+      {isPdfPreviewOpen && pdfDataUrl && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6">
+          <div className="bg-white rounded-2xl w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
+            <div className="p-3.5 sm:px-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="text-left">
+                <h3 className="text-sm font-black text-slate-900">
+                  Bon de Commande — {order.reference}
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  {order.customer.facilityName} · {order.estimatedTotal.toLocaleString('fr-FR')} FCFA
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadPdf}
+                  className="px-3 py-1.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Télécharger PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPdfPreviewOpen(false)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold cursor-pointer"
+                >
+                  Fermer ✕
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 bg-slate-100 overflow-hidden">
+              <iframe
+                src={pdfDataUrl}
+                title={`Bon de commande ${order.reference}`}
+                className="w-full h-full border-0"
+              />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

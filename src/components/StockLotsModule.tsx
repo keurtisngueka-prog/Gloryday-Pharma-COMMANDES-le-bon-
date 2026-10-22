@@ -100,7 +100,7 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
         <div className="bg-white p-4 rounded-2xl border border-emerald-200 bg-emerald-50/20 shadow-2xs">
           <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">En Stock Disponible</span>
           <div className="text-2xl font-black text-emerald-900 mt-1 tabular-nums">{availableProducts.length}</div>
-          <span className="text-[11px] text-emerald-700">Prêts pour livraison express</span>
+          <span className="text-[11px] text-emerald-700">Disponibles selon le stock renseigné</span>
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-rose-200 bg-rose-50/20 shadow-2xs">

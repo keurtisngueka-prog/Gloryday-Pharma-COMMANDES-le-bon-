@@ -191,7 +191,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
             ) : (
               <>
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Confirmer & Générer le Bon (PDF + WhatsApp)</span>
+                <span>Enregistrer la commande et préparer le bon PDF</span>
               </>
             )}
           </button>

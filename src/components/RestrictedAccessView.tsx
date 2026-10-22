@@ -99,7 +99,7 @@ export const RestrictedAccessView: React.FC<RestrictedAccessViewProps> = ({
             Accès Administrateur Dédié
           </div>
           <p className="text-[11px] text-blue-800 leading-relaxed">
-            Identifiant administrateur : <code className="bg-white px-1.5 py-0.5 rounded border border-blue-200 font-mono text-[10px] font-bold text-slate-900">admin</code> ou téléphone <code className="bg-white px-1.5 py-0.5 rounded border border-blue-200 font-mono text-[10px] font-bold text-slate-900">+24177003004</code> avec le mot de passe Super-Admin configuré.
+            Utilisez l’identifiant administrateur communiqué par Gloryday et le mot de passe Super-Admin configuré.
           </p>
         </div>
 
@@ -128,8 +128,8 @@ export const RestrictedAccessView: React.FC<RestrictedAccessViewProps> = ({
         <div className="text-center pt-2 border-t border-slate-100">
           <p className="text-[11px] text-slate-400">
             Besoin d'assistance ? Contactez le support Gloryday Pharma au{' '}
-            <a href="tel:+24177000000" className="text-slate-600 hover:text-[#0d44e8] font-bold inline-flex items-center gap-1">
-              <Phone className="w-3 h-3 inline" /> +241 77 00 00 00
+            <a href="tel:+24177003004" className="text-slate-600 hover:text-[#0d44e8] font-bold inline-flex items-center gap-1">
+              <Phone className="w-3 h-3 inline" /> +241 77 003 004
             </a>
           </p>
         </div>

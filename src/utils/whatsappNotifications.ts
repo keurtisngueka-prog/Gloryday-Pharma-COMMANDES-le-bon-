@@ -81,9 +81,9 @@ Votre commande n° *${ref}* est en cours d'emballage et de scellé médical à n
 📍 *Zone de livraison :* *${neighborhood}*
 ⏱️ *Créneau d'arrivée prévu :* *${timeWindow}* (${estimatedTime})
 
-Le colis médical est vérifié selon les normes hospitalières et sera remis au coursier dédié dans quelques minutes.
+Votre commande est en cours de préparation. Les modalités de remise vous seront confirmées.
 
-Gloryday Pharma Gabon · Fournisseur Hospitalier Certifié`;
+Gloryday Pharma Gabon`;
 
       return {
         stageKey: 'preparation',
@@ -102,14 +102,14 @@ Gloryday Pharma Gabon · Fournisseur Hospitalier Certifié`;
 ----------------------------------------
 Bonjour *${contact}* (*${facility}*),
 
-Votre commande n° *${ref}* a été remise à notre coursier médicalisé.
+Votre commande n° *${ref}* a été remise au coursier chargé de la livraison.
 
 👤 *Livreur assigné :* *${courierName}*
 📞 *Contact direct livreur :* *${courierPhone}*
 📍 *Destination :* ${order.customer.deliveryAddress} (*${neighborhood}*)
 ⏱️ *Créneau d'arrivée estimé :* *${timeWindow}*
 
-Le coursier dispose du caisson isotherme / scellé médical d'origine. Merci de préparer l'accueil pour la réception.
+Merci de vous organiser pour réceptionner la commande à l'adresse indiquée.
 
 Gloryday Pharma Gabon · Service Expéditions`;
 
@@ -126,24 +126,24 @@ Gloryday Pharma Gabon · Service Expéditions`;
 
     case 'in_transit': {
       const text = 
-`🚚 *GLORYDAY PHARMA GABON* · *Arrivée Imminente à votre Établissement*
+`🚚 *GLORYDAY PHARMA GABON* · *Commande en cours d'acheminement*
 ----------------------------------------
 Bonjour *${contact}* (*${facility}*),
 
-Notre coursier *${courierName}* est actuellement en approche immédiate de votre structure à *${neighborhood}*.
+Notre coursier *${courierName}* est en route vers votre établissement à *${neighborhood}*.
 
 📍 *Adresse :* ${order.customer.deliveryAddress}
 📦 *Commande :* *${ref}* (${itemsCount} article(s))
 📞 *Numéro du coursier :* ${courierPhone}
 
-Merci de vous assurer de la disponibilité de la personne en charge de la réception médicale et de l'émargement du bordereau.
+Merci de vous organiser pour réceptionner la commande et signer le bordereau.
 
 À tout de suite !
 Gloryday Pharma Gabon`;
 
       return {
         stageKey: 'in_transit',
-        stageTitle: 'En Approche Imminente',
+        stageTitle: 'En cours d’acheminement',
         recipientRole: 'client',
         recipientName: contact,
         recipientPhone: rawClientPhone,
@@ -160,8 +160,8 @@ Bonjour *${contact}* (*${facility}*),
 
 Nous confirmons que votre commande médicale n° *${ref}* a bien été livrée et réceptionnée à *${facility}* (${neighborhood}).
 
-📄 *Bordereau & Facture :*
-Les documents certifiés ont été remis avec le colis et restent consultables sur votre espace client Gloryday.
+📄 *Documents de commande :*
+Pour obtenir les documents relatifs à cette commande, contactez le service client Gloryday.
 
 Nous vous remercions pour votre confiance continue au service de la santé au Gabon !
 

@@ -51,7 +51,7 @@ export const DataExportModule: React.FC<DataExportModuleProps> = ({
 }) => {
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
-  const [activeGuideTab, setActiveGuideTab] = useState<'vercel' | 'supabase' | 'netlify'>('vercel');
+  const [activeGuideTab, setActiveGuideTab] = useState<'vercel' | 'supabase'>('vercel');
   const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
   const [sqlCopied, setSqlCopied] = useState(false);
 
@@ -85,19 +85,10 @@ export const DataExportModule: React.FC<DataExportModuleProps> = ({
     setTimeout(() => setDownloadSuccess(null), 3000);
   };
 
-  const vercelConfigExample = `{
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
-  ]
-}`;
-
-  const envExample = `# Supabase / PostgreSQL Credentials
-VITE_SUPABASE_URL=https://votre-projet.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabase.com:6543/postgres`;
+  const envExample = `SUPABASE_URL=https://<votre-projet>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<secret-privé-Vercel>
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=<secret-unique-de-8-a-85-caracteres>`;
 
   return (
     <div className="space-y-6">
@@ -121,12 +112,12 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
                 <h2 className="text-base sm:text-lg font-black tracking-tight">
                   Centre d'Exportation & Déploiement Cloud
                 </h2>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  Prêt pour Production
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  Configuration requise avant production
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-                Exportez vos données médicales au format de votre choix et suivez le guide pas-à-pas pour héberger gratuitement votre site sur <strong>Vercel</strong> avec une base <strong>PostgreSQL (Supabase)</strong>.
+                Exportez vos données et consultez les conditions de déploiement. L'API actuelle requiert un serveur Node.js et un volume persistant privé.
               </p>
             </div>
           </div>
@@ -193,12 +184,12 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
                       const content = event.target?.result as string;
                       if (!content) return;
                       const res = restoreBackupJSON(content);
+                      setDownloadSuccess(res.message);
                       if (res.success) {
-                        alert(res.message);
-                        if (onDataRestored) onDataRestored();
-                        else window.location.reload();
-                      } else {
-                        alert(res.message);
+                        setTimeout(() => {
+                          if (onDataRestored) onDataRestored();
+                          else window.location.reload();
+                        }, 1200);
                       }
                     };
                     reader.readAsText(file);
@@ -347,7 +338,7 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
               <span>2. Guide de Déploiement : Où et Comment Héberger ?</span>
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Recommandation Gloryday : Vercel (Frontend gratuit) + Supabase (PostgreSQL gratuit)
+              Vercel héberge le site et l’API; Supabase conserve les données et les sessions.
             </p>
           </div>
 
@@ -360,7 +351,7 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
                 activeGuideTab === 'vercel' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              ▲ Vercel
+              Vercel (site + API)
             </button>
             <button
               type="button"
@@ -369,16 +360,7 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
                 activeGuideTab === 'supabase' ? 'bg-white text-emerald-800 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              ⚡ Supabase (SQL)
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveGuideTab('netlify')}
-              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                activeGuideTab === 'netlify' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              ◈ Netlify
+              Supabase (base à configurer)
             </button>
           </div>
         </div>
@@ -390,9 +372,9 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
               <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3.5 flex items-start gap-3">
                 <Sparkles className="w-4 h-4 text-[#0d44e8] shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="font-bold text-slate-900">Pourquoi Vercel est idéal pour votre site :</h4>
+                  <h4 className="font-bold text-slate-900">Tout le site et son API sont sur Vercel :</h4>
                   <p className="text-slate-600 text-[11px] mt-0.5">
-                    Hébergement gratuit, HTTPS automatique, support complet de la PWA mobile et rechargement ultra-rapide grâce au réseau CDN mondial.
+                    Les pages sont publiées depuis dist et les appels /api utilisent une fonction Vercel. Aucun deuxième hébergeur n’est requis.
                   </p>
                 </div>
               </div>
@@ -401,9 +383,9 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
                 <div className="flex items-start gap-3">
                   <span className="w-6 h-6 rounded-full bg-slate-900 text-white font-bold flex items-center justify-center shrink-0 text-xs">1</span>
                   <div>
-                    <h5 className="font-bold text-slate-900">Pousser votre projet sur GitHub</h5>
+                    <h5 className="font-bold text-slate-900">Relier le projet à Vercel</h5>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      Créez un dépôt sur <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="text-[#0d44e8] underline">github.com</a> et poussez votre code source.
+                      Importez le dépôt Git privé du projet dans Vercel. Si vous avez seulement l’archive ZIP, il faut d’abord placer le code dans un dépôt Git privé.
                     </p>
                   </div>
                 </div>
@@ -411,9 +393,9 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
                 <div className="flex items-start gap-3">
                   <span className="w-6 h-6 rounded-full bg-slate-900 text-white font-bold flex items-center justify-center shrink-0 text-xs">2</span>
                   <div>
-                    <h5 className="font-bold text-slate-900">Connecter à Vercel</h5>
+                    <h5 className="font-bold text-slate-900">Importer le projet</h5>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      Rendez-vous sur <a href="https://vercel.com" target="_blank" rel="noopener noreferrer" className="text-[#0d44e8] underline">vercel.com</a>, connectez-vous avec GitHub et cliquez sur <strong>« Add New Project »</strong> puis sélectionnez votre dépôt.
+                      Importez le dépôt Git dans Vercel. Le fichier vercel.json configure la construction du site et les routes API.
                     </p>
                   </div>
                 </div>
@@ -421,11 +403,12 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
                 <div className="flex items-start gap-3">
                   <span className="w-6 h-6 rounded-full bg-slate-900 text-white font-bold flex items-center justify-center shrink-0 text-xs">3</span>
                   <div>
-                    <h5 className="font-bold text-slate-900">Paramètres de Build & Déploiement</h5>
+                    <h5 className="font-bold text-slate-900">Construction Vercel</h5>
                     <div className="mt-1.5 p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-[11px] space-y-1">
-                      <div>Framework Preset : <span className="text-amber-400">Vite</span></div>
+                      <div>Install Command : <span className="text-emerald-400">npm ci</span></div>
                       <div>Build Command : <span className="text-emerald-400">npm run build</span></div>
                       <div>Output Directory : <span className="text-blue-400">dist</span></div>
+                      <div>API : <span className="text-amber-400">fonction Vercel /api/*</span></div>
                     </div>
                   </div>
                 </div>
@@ -434,18 +417,18 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
                   <span className="w-6 h-6 rounded-full bg-slate-900 text-white font-bold flex items-center justify-center shrink-0 text-xs">4</span>
                   <div className="flex-1">
                     <div className="flex items-center justify-between mb-1">
-                      <h5 className="font-bold text-slate-900">Fichier de redirection SPA (vercel.json) inclus à la racine :</h5>
+                      <h5 className="font-bold text-slate-900">Variables privées à saisir dans Vercel :</h5>
                       <button
                         type="button"
-                        onClick={() => copyToClipboard(vercelConfigExample, 'vercel-json')}
+                        onClick={() => copyToClipboard(envExample, 'vercel-env')}
                         className="text-[11px] text-[#0d44e8] font-bold hover:underline flex items-center gap-1 cursor-pointer"
                       >
-                        {copiedSection === 'vercel-json' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                        <span>{copiedSection === 'vercel-json' ? 'Copié !' : 'Copier'}</span>
+                        {copiedSection === 'vercel-env' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedSection === 'vercel-env' ? 'Copié !' : 'Copier l’exemple'}</span>
                       </button>
                     </div>
                     <pre className="p-2.5 rounded-xl bg-slate-100 text-slate-800 font-mono text-[11px] overflow-x-auto">
-                      {vercelConfigExample}
+                      {envExample}
                     </pre>
                   </div>
                 </div>
@@ -459,9 +442,9 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
               <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 flex items-start gap-3">
                 <Database className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="font-bold text-emerald-950">Pourquoi Supabase est le meilleur choix pour votre base :</h4>
+                  <h4 className="font-bold text-emerald-950">Raccordement Supabase préparé, activation en attente :</h4>
                   <p className="text-emerald-800 text-[11px] mt-0.5">
-                    PostgreSQL complet, hébergé dans le cloud avec 500 Mo gratuits (largement suffisant pour des millions de lignes médicales), sauvegardes automatiques et interface conviviale.
+                    Le serveur enregistre les données et les sessions dans Supabase. L’activation attend l’application des migrations et la configuration de la clé privée dans les variables Vercel.
                   </p>
                 </div>
               </div>
@@ -470,9 +453,9 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
                 <div className="flex items-start gap-3">
                   <span className="w-6 h-6 rounded-full bg-emerald-700 text-white font-bold flex items-center justify-center shrink-0 text-xs">1</span>
                   <div>
-                    <h5 className="font-bold text-slate-900">Créer un compte Supabase</h5>
+                    <h5 className="font-bold text-slate-900">Appliquer la migration du projet</h5>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      Allez sur <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" className="text-[#0d44e8] underline">supabase.com</a> et créez un projet gratuit nommé <strong>« gloryday-pharma »</strong> en choisissant la région Europe (Francfort ou Londres).
+                      Appliquez les migrations ajoutées dans supabase/migrations dans l'ordre des noms de fichiers, jusqu'à la plus récente. Ne relancez pas les anciennes migrations de création.
                     </p>
                   </div>
                 </div>
@@ -480,9 +463,9 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
                 <div className="flex items-start gap-3">
                   <span className="w-6 h-6 rounded-full bg-emerald-700 text-white font-bold flex items-center justify-center shrink-0 text-xs">2</span>
                   <div className="flex-1">
-                    <h5 className="font-bold text-slate-900">Exécuter le script SQL de vos données</h5>
+                    <h5 className="font-bold text-slate-900">Exporter les données actuelles (facultatif)</h5>
                     <p className="text-[11px] text-slate-500 mt-0.5 mb-2">
-                      Téléchargez le script SQL avec le bouton ci-dessus, ouvrez le <strong>SQL Editor</strong> dans Supabase, collez le contenu et cliquez sur <strong>RUN</strong>.
+                      Le bouton ci-dessous génère un export SQL des données actuellement chargées. Cet export n’applique pas les migrations et ne remplace pas la configuration Supabase dans Vercel.
                     </p>
                     <button
                       type="button"
@@ -499,7 +482,7 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
                   <span className="w-6 h-6 rounded-full bg-emerald-700 text-white font-bold flex items-center justify-center shrink-0 text-xs">3</span>
                   <div className="flex-1">
                     <div className="flex items-center justify-between mb-1">
-                      <h5 className="font-bold text-slate-900">Variables d'environnement de connexion (.env) :</h5>
+                    <h5 className="font-bold text-slate-900">Variables privées de Vercel :</h5>
                       <button
                         type="button"
                         onClick={() => copyToClipboard(envExample, 'env-example')}
@@ -518,45 +501,6 @@ DATABASE_URL=postgresql://postgres.xxx:motdepasse@aws-0-eu-west-1.pooler.supabas
             </div>
           )}
 
-          {/* NETLIFY GUIDE */}
-          {activeGuideTab === 'netlify' && (
-            <div className="space-y-4">
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex items-start gap-3">
-                <Cloud className="w-4 h-4 text-slate-700 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="font-bold text-slate-900">Alternative Netlify :</h4>
-                  <p className="text-slate-600 text-[11px] mt-0.5">
-                    Netlify est une excellente alternative à Vercel avec déploiement continu depuis GitHub et gestion DNS simplifiée.
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-start gap-3">
-                  <span className="w-6 h-6 rounded-full bg-slate-900 text-white font-bold flex items-center justify-center shrink-0 text-xs">1</span>
-                  <div>
-                    <h5 className="font-bold text-slate-900">Importer depuis GitHub sur Netlify</h5>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      Connectez votre compte sur <a href="https://netlify.com" target="_blank" rel="noopener noreferrer" className="text-[#0d44e8] underline">netlify.com</a> et sélectionnez le dépôt.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <span className="w-6 h-6 rounded-full bg-slate-900 text-white font-bold flex items-center justify-center shrink-0 text-xs">2</span>
-                  <div className="flex-1">
-                    <h5 className="font-bold text-slate-900">Configuration netlify.toml incluse :</h5>
-                    <pre className="mt-1 p-2.5 rounded-xl bg-slate-100 text-slate-800 font-mono text-[11px] overflow-x-auto">
-{`[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200`}
-                    </pre>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 

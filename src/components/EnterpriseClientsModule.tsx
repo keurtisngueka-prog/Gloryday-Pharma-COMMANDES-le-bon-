@@ -99,7 +99,7 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
         'statut_client',
         'Accès Direction Structure',
         targetUser.id,
-        `Validation officielle de l'accès Direction pour ${targetUser.contactName || targetUser.phone} (${targetUser.facilityName})`,
+        `Validation de l'accès Direction pour ${targetUser.contactName || targetUser.phone} (${targetUser.facilityName})`,
         'En attente',
         'Directeur validé'
       );

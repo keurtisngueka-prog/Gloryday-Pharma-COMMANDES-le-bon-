@@ -10,8 +10,7 @@ import {
   Filter,
   CheckCircle2,
   FileText,
-  Stethoscope,
-  Plus
+  Stethoscope
 } from 'lucide-react';
 import { 
   Product, 
@@ -27,15 +26,16 @@ import {
   OrderStatus,
   CommercialQuote,
   AppRole,
-  DeliveryStage
+  DeliveryStage,
+  CourierInfo,
+  DeliveryProof
 } from './types';
-import { api, setStoredToken, getStoredCustomerInfo } from './api';
+import { api } from './api';
 import { matchesProductSearch } from './utils/search';
-import { generateOrderPdf } from './utils/pdfGenerator';
+import { createPdfObjectUrl, generateOrderPdf } from './utils/pdfGenerator';
 import { getStoredDrafts, deleteDraft } from './utils/draftsStorage';
 import { CATEGORIES, CONSUMABLE_SUBCATEGORIES, MEDICAL_SPECIALTIES } from './data/initialProducts';
 import { getProductSpecialty } from './utils/specialties';
-import { ensureProductionCleanSlateOnBoot } from './utils/productionCleanup';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -44,21 +44,22 @@ import { AppSidebar } from './components/AppSidebar';
 import { AuthModal } from './components/AuthModal';
 import { ProductCard } from './components/ProductCard';
 import { ProductDetailModal } from './components/ProductDetailModal';
-import { PacksSection } from './components/PacksSection';
-import { CartView } from './components/CartView';
-import { BulkOrderView } from './components/BulkOrderView';
 import { DeliveryTrackingModal } from './components/DeliveryTrackingModal';
 import { OrderPreviewModal } from './components/OrderPreviewModal';
 import { OrderConfirmationView } from './components/OrderConfirmationView';
-import { ClientDashboard } from './components/ClientDashboard';
-import { AdminDashboard } from './components/AdminDashboard';
-import { CommercialQuotesModule } from './components/CommercialQuotesModule';
 import { BestClientsModule } from './components/BestClientsModule';
 import { NotificationModal } from './components/NotificationModal';
 import { ProductFormModal } from './components/ProductFormModal';
 import { DraftsManagerModal } from './components/DraftsManagerModal';
 import { PWAInstallBanner, OfflineIndicator } from './components/PWAInstallBanner';
 import { RestrictedAccessView } from './components/RestrictedAccessView';
+
+const PacksSection = React.lazy(() => import('./components/PacksSection').then(module => ({ default: module.PacksSection })));
+const CartView = React.lazy(() => import('./components/CartView').then(module => ({ default: module.CartView })));
+const BulkOrderView = React.lazy(() => import('./components/BulkOrderView').then(module => ({ default: module.BulkOrderView })));
+const ClientDashboard = React.lazy(() => import('./components/ClientDashboard').then(module => ({ default: module.ClientDashboard })));
+const AdminDashboard = React.lazy(() => import('./components/AdminDashboard').then(module => ({ default: module.AdminDashboard })));
+const CommercialQuotesModule = React.lazy(() => import('./components/CommercialQuotesModule').then(module => ({ default: module.CommercialQuotesModule })));
 
 export type AppTab = 
   | 'catalog' 
@@ -71,12 +72,14 @@ export type AppTab =
   | 'clients-list' 
   | 'admin-catalog' 
   | 'admin-orders'
+  | 'admin-staff'
   | 'admin-deploy';
 
 export const ADMIN_TABS: AppTab[] = [
   'admin',
   'admin-orders',
   'admin-catalog',
+  'admin-staff',
   'admin-deploy'
 ];
 
@@ -94,6 +97,7 @@ const getTabFromHash = (): AppTab => {
     'clients-list', 
     'admin-catalog', 
     'admin-orders', 
+    'admin-staff',
     'admin-deploy'
   ];
   if (validTabs.includes(raw as AppTab)) {
@@ -115,22 +119,8 @@ export default function App() {
   const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
 
   // Current User
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    try {
-      const saved = localStorage.getItem('gloryday_current_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  useEffect(() => {
-    if (currentUser) {
-      try {
-        localStorage.setItem('gloryday_current_user', JSON.stringify(currentUser));
-      } catch {}
-    }
-  }, [currentUser]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const authGeneration = useRef(0);
 
   // Global Product Creation Modal State
   const [isGlobalProductModalOpen, setIsGlobalProductModalOpen] = useState(false);
@@ -197,6 +187,7 @@ export default function App() {
 
   // Modals & Flows
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authInitialMode, setAuthInitialMode] = useState<'guest_choice' | 'login' | 'register' | 'admin' | 'google_complete'>('guest_choice');
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [isDraftsModalOpen, setIsDraftsModalOpen] = useState(false);
   const [draftsCount, setDraftsCount] = useState<number>(() => {
@@ -206,10 +197,23 @@ export default function App() {
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<Order | null>(null);
   const [confirmedPdfDataUrl, setConfirmedPdfDataUrl] = useState<string | undefined>(undefined);
+  const [confirmedPdfFailed, setConfirmedPdfFailed] = useState(false);
+  const [confirmedPdfStorageFailed, setConfirmedPdfStorageFailed] = useState(false);
+  const [isPreparingConfirmedPdf, setIsPreparingConfirmedPdf] = useState(false);
   const [activeDeliveryOrder, setActiveDeliveryOrder] = useState<Order | null>(null);
   const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
   const [pendingCustomerInfo, setPendingCustomerInfo] = useState<CustomerInfo | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [previewPdfOrder, setPreviewPdfOrder] = useState<{ order: Order; dataUrl: string } | null>(null);
+  const [showZipDownloadBar, setShowZipDownloadBar] = useState(true);
+  const [toastBanner, setToastBanner] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
+
+  const showToast = (message: string, type: 'error' | 'success' | 'info' = 'info') => {
+    setToastBanner({ message, type });
+    setTimeout(() => {
+      setToastBanner(current => (current?.message === message ? null : current));
+    }, 4500);
+  };
 
   // Sync drafts count on mount, user change, or storage / custom events
   useEffect(() => {
@@ -235,69 +239,40 @@ export default function App() {
   const [sortBy, setSortBy] = useState<'default' | 'price-asc' | 'price-desc' | 'name-asc'>('default');
   const [priceRange, setPriceRange] = useState<'all' | 'promotions' | 'under10k' | '10k-50k' | 'over50k' | 'quote'>('all');
   const [inspectedProduct, setInspectedProduct] = useState<Product | null>(null);
-  const [selectedProductsMap, setSelectedProductsMap] = useState<
-    Record<string, { product: Product; variant: ProductVariant; quantity: number }>
-  >({});
 
-  const handleToggleProductSelection = (product: Product, variant: ProductVariant, quantity: number) => {
-    setSelectedProductsMap(prev => {
-      const next = { ...prev };
-      if (next[product.id]) {
-        delete next[product.id];
-      } else {
-        next[product.id] = { product, variant, quantity };
-      }
-      return next;
-    });
-  };
-
-  const handleUpdateProductSelection = (product: Product, variant: ProductVariant, quantity: number) => {
-    setSelectedProductsMap(prev => {
-      if (!prev[product.id]) return prev;
-      return {
-        ...prev,
-        [product.id]: { product, variant, quantity }
-      };
-    });
-  };
-
-  const handleAddSelectedProductsToCart = () => {
-    const entries = Object.values(selectedProductsMap);
-    if (entries.length === 0) return;
-    handleAddMultipleToCart(entries);
-    setSelectedProductsMap({});
-  };
-
-  // Notifications (Clean production state - populated only by real events)
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const lastEventTimestamp = useRef<number>(Date.now() - 60000);
+  const lastEventTimestamp = useRef<number>(0);
 
   // Initial Data Load
   const loadInitialData = async () => {
+    const generation = authGeneration.current;
     try {
       const [prodsData, packsData, authData] = await Promise.all([
         api.getProducts(),
         api.getPacks(),
         api.getCurrentUser()
       ]);
+      if (generation !== authGeneration.current) return;
       setProducts(prodsData);
       setPacks(packsData);
 
       if (authData) {
         setCurrentUser(authData.user);
         setCartItems(loadCartForUser(authData.user));
-        const userOrders = await api.getOrders(authData.user.role === 'client' ? authData.user.phone : undefined);
+        const userOrders = await api.getOrders(authData.user.phone);
+        if (generation !== authGeneration.current) return;
         setOrders(userOrders);
-        if (authData.role === 'Super-Admin') {
+        if (authData.role === 'Super-Admin' || authData.role === 'Admin simple') {
           api.getAdminStats().then(setAdminStats).catch(() => {});
         }
-        if (authData.role !== 'client') {
+        if (authData.role === 'Super-Admin' || authData.role === 'Admin simple' || authData.role === 'Commercial') {
           api.getClients().then(setClients).catch(() => {});
+        }
+        if (authData.role === 'Super-Admin' || authData.role === 'Commercial') {
           api.getQuotes().then(setQuotes).catch(() => {});
         }
       } else {
-        const guestOrders = await api.getOrders();
-        setOrders(guestOrders);
+        setOrders([]);
       }
     } catch (err) {
       console.error('Initialization error', err);
@@ -305,42 +280,60 @@ export default function App() {
   };
 
   useEffect(() => {
-    ensureProductionCleanSlateOnBoot().finally(() => {
-      loadInitialData();
-    });
-
-    const handleProductionCleaned = () => {
-      setOrders([]);
-      setQuotes([]);
-      setNotifications([]);
-      loadInitialData();
-    };
-    window.addEventListener('gloryday_production_cleaned', handleProductionCleaned);
-    return () => window.removeEventListener('gloryday_production_cleaned', handleProductionCleaned);
+    loadInitialData();
   }, []);
 
   // Notifications 20s Polling
   useEffect(() => {
-    const interval = setInterval(async () => {
+    if (!currentUser) {
+      setNotifications([]);
+      lastEventTimestamp.current = 0;
+      return;
+    }
+
+    let cancelled = false;
+    const pollNotifications = async () => {
+      const generation = authGeneration.current;
       try {
         const events = await api.getEvents(lastEventTimestamp.current);
+        if (cancelled || generation !== authGeneration.current) return;
         if (events && events.length > 0) {
-          lastEventTimestamp.current = Date.now();
-          setNotifications(prev => [...events, ...prev]);
-          if (currentUser?.role === 'Super-Admin') {
+          const latestTimestamp = Math.max(...events.map(event => Date.parse(event.timestamp)).filter(Number.isFinite));
+          if (Number.isFinite(latestTimestamp)) {
+            lastEventTimestamp.current = Math.max(lastEventTimestamp.current, latestTimestamp);
+          }
+          setNotifications(prev => {
+            const byId = new Map(prev.map(notification => [notification.id, notification]));
+            events.forEach(event => byId.set(event.id, event));
+            return Array.from(byId.values())
+              .sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp))
+              .slice(0, 30);
+          });
+          if (currentUser?.role === 'Super-Admin' || currentUser?.role === 'Admin simple') {
             api.getAdminStats().then(setAdminStats).catch(() => {});
           }
-          api.getOrders(currentUser ? currentUser.phone : undefined).then(setOrders).catch(() => {});
+          api.getOrders(currentUser ? currentUser.phone : undefined)
+            .then(data => { if (generation === authGeneration.current) setOrders(data); })
+            .catch(() => {});
         }
       } catch (e) {
         // quiet polling failure
       }
-    }, 20000);
-    return () => clearInterval(interval);
+    };
+
+    void pollNotifications();
+    const interval = setInterval(pollNotifications, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [currentUser]);
 
   // Auth Handlers
   const handleAuthSuccess = (user: User) => {
+    const generation = ++authGeneration.current;
+    lastEventTimestamp.current = 0;
+    setNotifications([]);
     setCurrentUser(user);
     // Load isolated cart belonging strictly to this user
     const userCart = loadCartForUser(user);
@@ -351,29 +344,47 @@ export default function App() {
         setActiveTab('admin');
       }
       api.getAdminStats().then(setAdminStats).catch(() => {});
-      api.getOrders().then(setOrders).catch(() => {});
+      api.getOrders().then(data => { if (generation === authGeneration.current) setOrders(data); }).catch(() => {});
       api.getClients().then(setClients).catch(() => {});
       api.getQuotes().then(setQuotes).catch(() => {});
+    } else if (user.role === 'Admin simple') {
+      setActiveTab('admin');
+      api.getAdminStats().then(setAdminStats).catch(() => {});
+      api.getOrders().then(data => { if (generation === authGeneration.current) setOrders(data); }).catch(() => {});
+      api.getClients().then(setClients).catch(() => {});
+    } else if (user.role === 'Logistique') {
+      setActiveTab('admin-orders');
+      api.getOrders().then(data => { if (generation === authGeneration.current) setOrders(data); }).catch(() => {});
     } else if (user.role === 'Commercial') {
       setActiveTab('commercial-quotes');
       api.getQuotes().then(setQuotes).catch(() => {});
       api.getClients().then(setClients).catch(() => {});
     } else {
       setActiveTab('dashboard');
-      api.getOrders(user.phone).then(setOrders).catch(() => {});
+      api.getOrders(user.phone).then(data => { if (generation === authGeneration.current) setOrders(data); }).catch(() => {});
     }
   };
 
   const handleLogout = () => {
+    authGeneration.current += 1;
     // Persist current cart for this user before logging out
     if (currentUser) {
       try {
         localStorage.setItem(getCartStorageKey(currentUser), JSON.stringify(cartItems));
       } catch {}
     }
-    setStoredToken(null);
+    void api.logout().catch(() => {});
     localStorage.removeItem('gloryday_current_user');
+    localStorage.removeItem('gloryday_customer_info');
+    localStorage.removeItem('gloryday_drafts_guest');
+    localStorage.removeItem('gloryday_autodraft_guest');
     setCurrentUser(null);
+    lastEventTimestamp.current = 0;
+    setNotifications([]);
+    setOrders([]);
+    setClients([]);
+    setQuotes([]);
+    setAdminStats(null);
     // Reset active cart for the next guest visitor as confirmed by user
     setCartItems([]);
     try {
@@ -381,61 +392,18 @@ export default function App() {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     } catch {}
     setActiveTab('catalog');
-    api.getOrders().then(setOrders).catch(() => {});
   };
 
-  const handleDemoSwitchRole = async (targetRole: AppRole) => {
-    try {
-      if (currentUser) {
-        try {
-          localStorage.setItem(getCartStorageKey(currentUser), JSON.stringify(cartItems));
-        } catch {}
-      }
-
-      if (targetRole === 'client') {
-        const res = await api.login('+24177001122', 'client123');
-        setCurrentUser(res.user);
-        setCartItems(loadCartForUser(res.user));
-        loadInitialData();
-        setActiveTab('catalog');
-      } else {
-        const res = await api.adminLogin('gloryday-admin-2026', targetRole);
-        setCurrentUser(res.user);
-        setCartItems(loadCartForUser(res.user));
-        api.getClients().then(setClients).catch(console.warn);
-        api.getQuotes().then(setQuotes).catch(console.warn);
-        api.getAdminStats().then(setAdminStats).catch(console.warn);
-        if (targetRole === 'Super-Admin') {
-          setActiveTab('admin');
-        } else if (targetRole === 'Commercial') {
-          setActiveTab('commercial-quotes');
-        } else {
-          setActiveTab('catalog');
-        }
-      }
-    } catch (e) {
-      console.error('Error switching role', e);
-    }
-  };
-
-  // Cart Operations & Visual Bounce Trigger
-  const [cartBounceEvent, setCartBounceEvent] = useState<{ id: number; addedQty: number } | null>(null);
-
-  const triggerCartBounce = (addedQty: number) => {
-    setCartBounceEvent({ id: Date.now() + Math.random(), addedQty: Math.max(1, addedQty) });
-  };
-
+  // Cart Operations
   const handleAddToCart = (product: Product, variant: ProductVariant, quantity: number) => {
     if (product.status === 'rupture') return;
-    const validQty = Math.min(9999, Math.max(1, quantity));
-    triggerCartBounce(validQty);
     setCartItems(prev => {
       const existingIndex = prev.findIndex(
         it => it.productId === product.id && it.variant === variant.label
       );
       if (existingIndex > -1) {
         const copy = [...prev];
-        copy[existingIndex].quantity = Math.min(9999, copy[existingIndex].quantity + validQty);
+        copy[existingIndex].quantity = Math.min(9999, copy[existingIndex].quantity + quantity);
         return copy;
       } else {
         const newItem: CartItem = {
@@ -444,7 +412,7 @@ export default function App() {
           category: product.category,
           variant: variant.label,
           price: variant.price,
-          quantity: validQty,
+          quantity: Math.min(9999, Math.max(1, quantity)),
           isQuote: variant.price === 0
         };
         return [...prev, newItem];
@@ -483,10 +451,6 @@ export default function App() {
   };
 
   const handleAddMultipleToCart = (itemsToAdd: { product: Product; variant: ProductVariant; quantity: number }[]) => {
-    const totalAdded = itemsToAdd.reduce((sum, entry) => sum + Math.max(1, entry.quantity), 0);
-    if (totalAdded > 0) {
-      triggerCartBounce(totalAdded);
-    }
     setCartItems(prev => {
       let copy = [...prev];
       itemsToAdd.forEach(({ product, variant, quantity }) => {
@@ -511,49 +475,15 @@ export default function App() {
     });
   };
 
-  const handleUpdateDeliveryStage = async (orderId: string, stage: DeliveryStage) => {
-    try {
-      const updated = await api.updateOrderDeliveryStage(orderId, stage);
-      setOrders(prev => prev.map(o => o.id === orderId ? updated : o));
-      if (activeDeliveryOrder?.id === orderId) {
-        setActiveDeliveryOrder(updated);
-      }
-
-      const stageNameMap: Record<DeliveryStage, string> = {
-        preparation: 'En préparation à l’entrepôt',
-        picked_up: 'Prise en charge par le coursier',
-        in_transit: 'En cours d’acheminement',
-        delivered: 'Livrée à l’établissement'
-      };
-
-      const waNotif: AppNotification = {
-        id: `notif-wa-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        type: 'status_changed',
-        orderId,
-        orderReference: updated.reference,
-        message: `📱 Notification WhatsApp automatique expédiée à ${updated.customer.facilityName} (${updated.customer.phone}) : étape « ${stageNameMap[stage] || stage} ».`,
-        targetRole: 'Super-Admin',
-        read: false
-      };
-
-      if (stage === 'delivered') {
-        const notif: AppNotification = {
-          id: `notif-deliv-${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          type: 'status_changed',
-          orderId,
-          orderReference: updated.reference,
-          message: `🎉 Commande ${updated.reference} livrée avec succès à ${updated.customer.facilityName} !`,
-          targetRole: 'all',
-          read: false
-        };
-        setNotifications(prev => [notif, waNotif, ...prev]);
-      } else {
-        setNotifications(prev => [waNotif, ...prev]);
-      }
-    } catch (e) {
-      console.error('Failed to update delivery stage', e);
+  const handleUpdateDeliveryStage = async (
+    orderId: string,
+    stage: DeliveryStage,
+    options?: { courier?: CourierInfo; deliveryProof?: DeliveryProof }
+  ) => {
+    const updated = await api.updateOrderDeliveryStage(orderId, stage, options);
+    setOrders(prev => prev.map(o => o.id === orderId ? updated : o));
+    if (activeDeliveryOrder?.id === orderId) {
+      setActiveDeliveryOrder(updated);
     }
   };
 
@@ -586,46 +516,53 @@ export default function App() {
     setIsPreviewModalOpen(true);
   };
 
+  const prepareConfirmedOrderPdf = async (order: Order) => {
+    setIsPreparingConfirmedPdf(true);
+    setConfirmedPdfFailed(false);
+    setConfirmedPdfStorageFailed(false);
+    try {
+      const { dataUrl } = await generateOrderPdf(order);
+      setConfirmedPdfDataUrl(dataUrl);
+      if (currentUser?.role === 'client') {
+        try {
+          const pdfUrl = await api.uploadOrderPdf(order.reference, dataUrl);
+          const savedOrder = { ...order, pdfUrl };
+          setConfirmedOrder(current => current?.id === order.id ? savedOrder : current);
+          setOrders(previous => previous.map(existing => existing.id === order.id ? savedOrder : existing));
+        } catch (storageError) {
+          console.warn('PDF prêt sur cet appareil, mais sa sauvegarde pour le partage a échoué.', storageError);
+          setConfirmedPdfStorageFailed(true);
+        }
+      }
+    } catch (pdfError) {
+      console.error('La commande est enregistrée, mais le PDF n’a pas pu être préparé.', pdfError);
+      setConfirmedPdfDataUrl(undefined);
+      setConfirmedPdfFailed(true);
+    } finally {
+      setIsPreparingConfirmedPdf(false);
+    }
+  };
+
   const handleConfirmAndSubmitOrder = async () => {
     if (!pendingCustomerInfo || cartItems.length === 0) return;
+    if (!currentUser || currentUser.role !== 'client') {
+      setIsAuthModalOpen(true);
+      return;
+    }
     try {
       setIsSubmittingOrder(true);
+      // createOrder resolves only after the API has returned its saved order; PDF work starts after that confirmation.
       const newOrder = await api.createOrder(pendingCustomerInfo, cartItems);
-      const { dataUrl } = await generateOrderPdf(newOrder);
-      setConfirmedPdfDataUrl(dataUrl);
-      api.uploadOrderPdf(newOrder.reference, dataUrl).then(url => {
-        newOrder.pdfUrl = url;
-      }).catch(() => {});
       setCartItems([]);
       setIsPreviewModalOpen(false);
       setConfirmedOrder(newOrder);
+      setConfirmedPdfDataUrl(undefined);
+      setConfirmedPdfFailed(false);
 
-      // Automated notifications dispatch (Client confirmation & Staff alert)
-      const clientConfirmationNotif: AppNotification = {
-        id: `notif-${Date.now()}-client`,
-        timestamp: new Date().toISOString(),
-        type: 'order_created',
-        orderId: newOrder.id,
-        orderReference: newOrder.reference,
-        message: `Votre commande ${newOrder.reference} d'un montant de ${newOrder.estimatedTotal.toLocaleString('fr-FR')} FCFA a été validée avec succès. Notre service logistique prépare votre colis.`,
-        targetRole: 'client',
-        read: false
-      };
-      const adminOrderAlertNotif: AppNotification = {
-        id: `notif-${Date.now()}-admin`,
-        timestamp: new Date().toISOString(),
-        type: 'order_created',
-        orderId: newOrder.id,
-        orderReference: newOrder.reference,
-        message: `Nouvelle commande médicale : ${newOrder.reference} (${pendingCustomerInfo.facilityName}) - ${newOrder.estimatedTotal.toLocaleString('fr-FR')} FCFA.`,
-        targetRole: 'Super-Admin',
-        read: false
-      };
-      setNotifications(prev => [clientConfirmationNotif, adminOrderAlertNotif, ...prev]);
-
-      api.getOrders(currentUser ? currentUser.phone : pendingCustomerInfo.phone).then(setOrders).catch(() => {});
-    } catch (err: any) {
-      alert(err.message || 'Erreur lors de la confirmation.');
+      await prepareConfirmedOrderPdf(newOrder);
+      api.getOrders(currentUser.phone).then(setOrders).catch(() => {});
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Erreur réseau ou serveur lors de la confirmation. Vérifiez « Mes commandes » avant de réessayer.', 'error');
     } finally {
       setIsSubmittingOrder(false);
     }
@@ -652,6 +589,10 @@ export default function App() {
   };
 
   const handleDirectSubmitDraft = async (draft: OrderDraft) => {
+    if (!currentUser || currentUser.role !== 'client') {
+      setIsAuthModalOpen(true);
+      return;
+    }
     if (!draft.customerInfo?.facilityName || !draft.customerInfo?.phone) {
       handleLoadDraftToCart(draft);
       return;
@@ -671,32 +612,19 @@ export default function App() {
 
     setIsSubmittingOrder(true);
     try {
+      // Keep the draft until the API confirms persistence, then prepare its PDF.
       const newOrder = await api.createOrder(completeCustomerInfo, draft.items);
-      const { dataUrl } = await generateOrderPdf(newOrder);
-      setConfirmedPdfDataUrl(dataUrl);
-      api.uploadOrderPdf(newOrder.reference, dataUrl).then(url => {
-        newOrder.pdfUrl = url;
-      }).catch(() => {});
-      
       deleteDraft(draft.id, currentUser?.phone);
       setDraftsCount(getStoredDrafts(currentUser?.phone).length);
       setIsDraftsModalOpen(false);
       setConfirmedOrder(newOrder);
+      setConfirmedPdfDataUrl(undefined);
+      setConfirmedPdfFailed(false);
 
-      const clientConfirmationNotif: AppNotification = {
-        id: `notif-${Date.now()}-client`,
-        timestamp: new Date().toISOString(),
-        type: 'order_created',
-        orderId: newOrder.id,
-        orderReference: newOrder.reference,
-        message: `Votre commande ${newOrder.reference} (brouillon synchronisé) d'un montant de ${newOrder.estimatedTotal.toLocaleString('fr-FR')} FCFA a été validée avec succès.`,
-        targetRole: 'client',
-        read: false
-      };
-      setNotifications(prev => [clientConfirmationNotif, ...prev]);
-      api.getOrders(currentUser ? currentUser.phone : completeCustomerInfo.phone).then(setOrders).catch(() => {});
-    } catch (err: any) {
-      alert(err.message || 'Erreur lors de la synchronisation de la commande.');
+      await prepareConfirmedOrderPdf(newOrder);
+      api.getOrders(currentUser.phone).then(setOrders).catch(() => {});
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Erreur réseau ou serveur. Le brouillon est conservé; vérifiez « Mes commandes » avant de réessayer.', 'error');
     } finally {
       setIsSubmittingOrder(false);
     }
@@ -705,14 +633,10 @@ export default function App() {
   const handleViewOrderPdf = async (order: Order) => {
     try {
       const { dataUrl } = await generateOrderPdf(order);
-      const link = document.createElement('a');
-      link.href = dataUrl;
-      link.download = `Bon_Commande_${order.reference}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      setPreviewPdfOrder({ order, dataUrl });
     } catch (e) {
-      console.error('Impossible de générer le PDF', e);
+      console.error('Erreur génération PDF:', e);
+      showToast('Impossible de générer le document PDF.', 'error');
     }
   };
 
@@ -724,20 +648,6 @@ export default function App() {
     const stats = await api.getAdminStats();
     setAdminStats(stats);
 
-    // Automated client notification on order status change
-    const targetOrder = updated.find(o => o.id === orderId);
-    const refStr = targetOrder?.reference || orderId;
-    const statusChangeNotif: AppNotification = {
-      id: `notif-${Date.now()}-status`,
-      timestamp: new Date().toISOString(),
-      type: 'status_changed',
-      orderId,
-      orderReference: refStr,
-      message: `Mise à jour commande ${refStr} : Statut passé à « ${status} ».${reason ? ` (Motif : ${reason})` : ''}`,
-      targetRole: 'all',
-      read: false
-    };
-    setNotifications(prev => [statusChangeNotif, ...prev]);
   };
 
   const handleAdminUpdatePayment = async (orderId: string, isPaid: boolean) => {
@@ -819,10 +729,7 @@ export default function App() {
       result = result.filter(p => p.subcategory === selectedSubcategory);
     }
     if (onlySelected) {
-      const selectedIds = new Set([
-        ...cartItems.map(it => it.productId),
-        ...Object.keys(selectedProductsMap)
-      ]);
+      const selectedIds = new Set(cartItems.map(it => it.productId));
       result = result.filter(p => selectedIds.has(p.id));
     }
     if (onlyPromotions || priceRange === 'promotions') {
@@ -849,7 +756,7 @@ export default function App() {
       result = [...result].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
     }
     return result;
-  }, [products, searchQuery, selectedSpecialty, selectedCategory, selectedSubcategory, onlySelected, onlyPromotions, priceRange, sortBy, cartItems, selectedProductsMap]);
+  }, [products, searchQuery, selectedSpecialty, selectedCategory, selectedSubcategory, onlySelected, onlyPromotions, priceRange, sortBy, cartItems]);
 
   return (
     <div className="min-h-screen flex flex-col bg-white text-slate-900 font-['Plus_Jakarta_Sans',sans-serif]">
@@ -863,7 +770,6 @@ export default function App() {
         cartCount={cartCount}
         onLogout={handleLogout}
         onOpenAuth={() => setIsAuthModalOpen(true)}
-        onSwitchRole={handleDemoSwitchRole}
         onOpenCreateProduct={() => setIsGlobalProductModalOpen(true)}
         onOpenDraftsModal={() => setIsDraftsModalOpen(true)}
         draftsCount={draftsCount}
@@ -871,6 +777,38 @@ export default function App() {
 
       {/* PWA In-App Install Prompt Banner */}
       <PWAInstallBanner />
+
+      {/* Direct Corrected Project ZIP Download Bar */}
+      {showZipDownloadBar && (
+        <div className="bg-[#0f0f12] text-white border-b border-slate-800 px-3 sm:px-6 py-2">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="font-semibold text-slate-200">
+                Archive complète corrigée prête : <strong className="text-white font-mono">gloryday-pharma-corrige-20261022.zip</strong>
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <a
+                href="/api/download-project-zip"
+                download="gloryday-pharma-corrige-20261022.zip"
+                className="px-3 py-1 rounded-lg bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-[11px] flex items-center gap-1.5 shadow-xs transition-colors"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Télécharger le fichier ZIP corrigé</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => setShowZipDownloadBar(false)}
+                className="text-slate-400 hover:text-white px-1.5 py-0.5 rounded text-xs"
+                aria-label="Masquer la barre"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Top Navbar */}
       <Navbar
@@ -886,23 +824,30 @@ export default function App() {
         onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
         onOpenDraftsModal={() => setIsDraftsModalOpen(true)}
         draftsCount={draftsCount}
-        cartBounceEvent={cartBounceEvent}
       />
 
       {/* Main Content Area */}
+      <React.Suspense fallback={<div className="mx-auto w-full max-w-7xl px-3 py-12 text-center text-sm font-bold text-slate-500">Chargement de la page…</div>}>
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 md:pb-12">
         {/* VIEW 1: ORDER CONFIRMATION VIEW */}
         {confirmedOrder ? (
           <OrderConfirmationView
             order={confirmedOrder}
             pdfDataUrl={confirmedPdfDataUrl}
+            pdfPreparing={isPreparingConfirmedPdf}
+            pdfGenerationFailed={confirmedPdfFailed}
+            pdfStorageFailed={confirmedPdfStorageFailed}
+            onRetryPdf={() => { void prepareConfirmedOrderPdf(confirmedOrder); }}
             onNewOrder={() => {
               setConfirmedOrder(null);
               setConfirmedPdfDataUrl(undefined);
+              setConfirmedPdfFailed(false);
+              setConfirmedPdfStorageFailed(false);
               setActiveTab('catalog');
             }}
             onViewDashboard={() => {
               setConfirmedOrder(null);
+              setConfirmedPdfStorageFailed(false);
               setActiveTab('dashboard');
             }}
           />
@@ -995,7 +940,7 @@ export default function App() {
                     {currentUser?.role === 'Commercial' ? 'Mes Clients Assignés' : 'Gestion des Établissements & Relances'}
                   </h1>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Suivi de l'activité, détection d'inactivité &gt; 10 jours et relance WhatsApp immédiate.
+                    Suivi de l'activité, détection d'inactivité &gt; 10 jours et préparation d'une relance WhatsApp manuelle.
                   </p>
                 </div>
                 <BestClientsModule
@@ -1010,47 +955,60 @@ export default function App() {
 
             {/* VIEW 7: ADMIN DASHBOARD (STRICTLY GUARDED FOR SUPER-ADMIN) */}
             {ADMIN_TABS.includes(activeTab) && (
-              currentUser?.role === 'Super-Admin' ? (
-                <AdminDashboard
-                  stats={adminStats}
-                  orders={orders}
-                  packs={packs}
-                  products={products}
-                  clients={clients}
-                  currentUser={currentUser}
-                  onUpdateStatus={handleAdminUpdateStatus}
-                  onUpdatePayment={handleAdminUpdatePayment}
-                  onCreatePack={handleAdminCreatePack}
-                  onUpdatePack={handleAdminUpdatePack}
-                  onDeletePack={handleAdminDeletePack}
-                  onDeleteProduct={handleAdminDeleteProduct}
-                  onProductSaved={handleAdminProductSaved}
-                  onToggleProductStock={handleAdminToggleStock}
-                  onRefresh={() => {
-                    api.getAdminStats().then(setAdminStats);
-                    api.getOrders().then(setOrders);
-                    api.getClients().then(setClients);
-                  }}
-                  defaultSubTab={
-                    activeTab === 'admin-catalog'
-                      ? 'stock'
-                      : activeTab === 'admin-orders'
-                        ? 'orders'
-                        : activeTab === 'admin-deploy'
-                          ? 'export-deploy'
-                          : 'kpi'
-                  }
-                  notifications={notifications}
-                  onOpenDeliveryModal={(order: Order) => {
-                    setActiveDeliveryOrder(order);
-                    setIsDeliveryModalOpen(true);
-                  }}
-                />
+              currentUser && (
+                currentUser.role === 'Super-Admin' ||
+                (currentUser.role === 'Admin simple' && ['admin', 'admin-orders'].includes(activeTab)) ||
+                (currentUser.role === 'Logistique' && activeTab === 'admin-orders')
+              ) ? (
+                <React.Suspense fallback={<div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-sm font-bold text-slate-500">Chargement du tableau de bord…</div>}>
+                  <AdminDashboard
+                    stats={adminStats}
+                    orders={orders}
+                    packs={packs}
+                    products={products}
+                    clients={clients}
+                    currentUser={currentUser}
+                    onUpdateStatus={handleAdminUpdateStatus}
+                    onUpdatePayment={handleAdminUpdatePayment}
+                    onCreatePack={handleAdminCreatePack}
+                    onUpdatePack={handleAdminUpdatePack}
+                    onDeletePack={handleAdminDeletePack}
+                    onDeleteProduct={handleAdminDeleteProduct}
+                    onProductSaved={handleAdminProductSaved}
+                    onToggleProductStock={handleAdminToggleStock}
+                    onRefresh={() => {
+                      if (currentUser.role === 'Super-Admin' || currentUser.role === 'Admin simple') {
+                        api.getAdminStats().then(setAdminStats);
+                        api.getClients().then(setClients);
+                      }
+                      api.getOrders().then(setOrders);
+                    }}
+                    defaultSubTab={
+                      activeTab === 'admin-catalog'
+                        ? 'stock'
+                        : activeTab === 'admin-orders'
+                          ? 'orders'
+                          : activeTab === 'admin-deploy'
+                            ? 'export-deploy'
+                          : activeTab === 'admin-staff'
+                            ? 'staff'
+                            : 'kpi'
+                    }
+                    notifications={notifications}
+                    onOpenDeliveryModal={(order: Order) => {
+                      setActiveDeliveryOrder(order);
+                      setIsDeliveryModalOpen(true);
+                    }}
+                  />
+                </React.Suspense>
               ) : (
                 <RestrictedAccessView
                   requestedTab={activeTab}
                   currentUser={currentUser}
-                  onOpenAuth={() => setIsAuthModalOpen(true)}
+                  onOpenAuth={() => {
+                    setAuthInitialMode('admin');
+                    setIsAuthModalOpen(true);
+                  }}
                   onReturnToCatalog={() => {
                     setActiveTab('catalog');
                     try {
@@ -1068,14 +1026,14 @@ export default function App() {
                 <div className="py-2 sm:py-6 px-1">
                   <div className="max-w-2xl">
                     <span className="text-[10px] font-bold text-[#0d44e8] uppercase tracking-wider block mb-1">
-                      Fournisseur médical certifié · Libreville
+                      Fournisseur de matériel médical · Libreville
                     </span>
                     <h1 className="text-2xl sm:text-4xl font-extrabold text-[#000000] tracking-tight leading-tight">
                       Le matériel médical, <br className="hidden sm:inline" />
                       commandé <span className="text-[#0d44e8]">simplement.</span>
                     </h1>
                     <p className="text-xs sm:text-sm text-[#6a6a6b] mt-2 leading-relaxed">
-                      Consommables, équipements et réactifs pour cliniques, pharmacies et laboratoires. Bon de commande PDF et transmission immédiate sur WhatsApp.
+                      Consommables, équipements et réactifs pour cliniques, pharmacies et laboratoires. Bon de commande PDF et message WhatsApp préparé pour envoi.
                     </p>
                   </div>
                 </div>
@@ -1215,33 +1173,10 @@ export default function App() {
                         }`}
                       >
                         <Check className="w-3 h-3" />
-                        <span>
-                          Ma sélection ({new Set([...cartItems.map(it => it.productId), ...Object.keys(selectedProductsMap)]).size})
-                        </span>
+                        <span>Ma sélection ({cartItems.length})</span>
                       </button>
 
-                      {Object.keys(selectedProductsMap).length > 0 && (
-                        <button
-                          type="button"
-                          onClick={handleAddSelectedProductsToCart}
-                          className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
-                        >
-                          <Plus className="w-3 h-3" />
-                          <span>Ajouter les {Object.keys(selectedProductsMap).length} coché(s) au panier</span>
-                        </button>
-                      )}
-
-                      {Object.keys(selectedProductsMap).length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedProductsMap({})}
-                          className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold transition-all cursor-pointer"
-                        >
-                          Tout décocher
-                        </button>
-                      )}
-
-                      {/* PROMOTIONS FAST ACCESS BUTTON */}
+                      {/* PROMOTIONS FAST ACCESS BUTTON (Positioned right next to Ma sélection as requested) */}
                       <button
                         type="button"
                         onClick={() => setOnlyPromotions(!onlyPromotions)}
@@ -1317,7 +1252,6 @@ export default function App() {
                   <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
                     {filteredProducts.map((prod) => {
                       const cartItem = cartItems.find(it => it.productId === prod.id);
-                      const isProdSelected = Boolean(selectedProductsMap[prod.id]);
                       return (
                         <ProductCard
                           key={prod.id}
@@ -1325,55 +1259,9 @@ export default function App() {
                           onAddToCart={handleAddToCart}
                           isInCart={Boolean(cartItem)}
                           cartQuantity={cartItem?.quantity || 0}
-                          isSelected={isProdSelected}
-                          onToggleSelect={handleToggleProductSelection}
-                          onSelectionChange={handleUpdateProductSelection}
                         />
                       );
                     })}
-                  </div>
-                )}
-
-                {/* FLOATING MULTI-SELECTION ACTION BAR */}
-                {Object.keys(selectedProductsMap).length > 0 && (
-                  <div className="fixed bottom-16 md:bottom-5 left-3 right-3 z-40 max-w-2xl mx-auto">
-                    <div className="bg-[#0f0f12] text-white rounded-2xl p-3 sm:px-5 sm:py-3.5 shadow-2xl border border-slate-700/80 flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-xs sm:text-sm font-extrabold flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded-md bg-[#0d44e8] text-white text-xs font-black tabular-nums">
-                            {Object.keys(selectedProductsMap).length}
-                          </span>
-                          <span className="truncate">article(s) sélectionné(s)</span>
-                        </div>
-                        <div className="text-[11px] text-slate-300 mt-0.5 tabular-nums">
-                          Total sélection :{' '}
-                          <strong className="text-white">
-                            {Object.values(selectedProductsMap)
-                              .reduce((sum, entry) => sum + (entry.variant?.price || 0) * entry.quantity, 0)
-                              .toLocaleString('fr-FR')}{' '}
-                            FCFA
-                          </strong>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedProductsMap({})}
-                          className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-bold transition-colors cursor-pointer"
-                        >
-                          Annuler
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleAddSelectedProductsToCart}
-                          className="px-4 py-2 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white text-xs font-extrabold flex items-center gap-1.5 shadow-md transition-colors cursor-pointer"
-                        >
-                          <Plus className="w-4 h-4 stroke-[2.5]" />
-                          <span>Tout ajouter au panier</span>
-                        </button>
-                      </div>
-                    </div>
                   </div>
                 )}
               </div>
@@ -1381,6 +1269,7 @@ export default function App() {
           </>
         )}
       </main>
+      </React.Suspense>
 
       {/* MOBILE BOTTOM NAVIGATION BAR (FIXED 5 TABS) */}
       <MobileBottomNav
@@ -1389,13 +1278,16 @@ export default function App() {
         cartCount={cartCount}
         onOpenSidebar={() => setIsSidebarOpen(true)}
         draftsCount={draftsCount}
-        cartBounceEvent={cartBounceEvent}
       />
 
       {/* MODALS */}
       <AuthModal
         isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
+        initialMode={authInitialMode}
+        onClose={() => {
+          setIsAuthModalOpen(false);
+          setAuthInitialMode('guest_choice');
+        }}
         onSuccess={handleAuthSuccess}
       />
 
@@ -1433,7 +1325,11 @@ export default function App() {
         onClose={() => setIsNotificationModalOpen(false)}
         notifications={notifications}
         onMarkAllAsRead={() => {
-          setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+          const unreadIds = notifications.filter(notification => !notification.read).map(notification => notification.id);
+          if (unreadIds.length === 0 || !currentUser) return;
+          void api.markNotificationsRead(unreadIds)
+            .then(() => setNotifications(prev => prev.map(notification => ({ ...notification, read: true }))))
+            .catch(() => {});
         }}
         onSelectNotificationAction={(n) => {
           setIsNotificationModalOpen(false);
@@ -1441,11 +1337,13 @@ export default function App() {
             setActiveTab('catalog');
             setOnlyPromotions(true);
           } else if (n.type === 'order_created' || n.type === 'status_changed') {
-            if (currentUser?.role === 'Super-Admin' || currentUser?.role === 'Logistique') {
+            if (currentUser?.role === 'Super-Admin' || currentUser?.role === 'Admin simple' || currentUser?.role === 'Logistique') {
               setActiveTab('admin-orders');
             } else {
               setActiveTab('dashboard');
             }
+          } else if (n.type === 'password_recovery' && currentUser?.role === 'Super-Admin') {
+            setActiveTab('clients-list');
           }
         }}
       />
@@ -1466,12 +1364,84 @@ export default function App() {
             setActiveDeliveryOrder(null);
           }}
           onUpdateStage={handleUpdateDeliveryStage}
-          isAdmin={Boolean(currentUser && currentUser.role !== 'client')}
+          isAdmin={Boolean(currentUser && (currentUser.role === 'Super-Admin' || currentUser.role === 'Admin simple' || currentUser.role === 'Logistique'))}
         />
       )}
 
       {/* Offline Connectivity Status Indicator */}
       <OfflineIndicator />
+
+      {/* In-App Order PDF Viewer Modal */}
+      {previewPdfOrder && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6">
+          <div className="bg-white rounded-2xl w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
+            <div className="p-3.5 sm:px-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div>
+                <h3 className="text-sm font-black text-slate-900">
+                  Bon de Commande — {previewPdfOrder.order.reference}
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  {previewPdfOrder.order.customer.facilityName} · {previewPdfOrder.order.estimatedTotal.toLocaleString('fr-FR')} FCFA
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const objectUrl = createPdfObjectUrl(previewPdfOrder.dataUrl);
+                    const link = document.createElement('a');
+                    link.href = objectUrl;
+                    link.download = `Bon_de_Commande_${previewPdfOrder.order.reference}.pdf`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>Télécharger PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewPdfOrder(null)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold cursor-pointer"
+                >
+                  Fermer ✕
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 bg-slate-100 overflow-hidden">
+              <iframe
+                src={previewPdfOrder.dataUrl}
+                title={`Bon de commande ${previewPdfOrder.order.reference}`}
+                className="w-full h-full border-0"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification Banner */}
+      {toastBanner && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-md w-[92%] pointer-events-auto transition-all animate-in fade-in slide-in-from-top-2">
+          <div className={`p-3.5 rounded-2xl shadow-xl flex items-center justify-between gap-3 text-xs font-semibold backdrop-blur-md border ${
+            toastBanner.type === 'error'
+              ? 'bg-rose-900/95 text-white border-rose-700/50'
+              : toastBanner.type === 'success'
+              ? 'bg-emerald-900/95 text-white border-emerald-700/50'
+              : 'bg-slate-900/95 text-white border-slate-700/50'
+          }`}>
+            <span className="flex-1">{toastBanner.message}</span>
+            <button
+              onClick={() => setToastBanner(null)}
+              className="text-white/80 hover:text-white px-2 py-1 rounded-md text-xs font-bold cursor-pointer"
+              aria-label="Fermer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

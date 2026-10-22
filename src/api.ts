@@ -11,124 +11,88 @@ import {
   DirectMessage,
   AppRole,
   DeliveryStage,
-  WhatsAppNotificationLog,
-  CourierInfo
+  CourierInfo,
+  DeliveryProof,
+  DeliveryLocationPoint,
+  CourierTrackingInfo
 } from './types';
-import { INITIAL_PRODUCTS, INITIAL_PACKS } from './data/initialProducts';
-import { getEstimatedDeliveryText, detectNeighborhoodFromAddress } from './data/librevilleZones';
-import { calculateCartVolumeSummary, calculateItemVolumePrice } from './utils/volumeDiscount';
-import { generateWhatsAppMessageForStage } from './utils/whatsappNotifications';
-import { recordAuditLog } from './utils/auditLogger';
-import { isDemoOrder, DEMO_ACCOUNT_IDS, executeProductionCleanup, CleanupReport } from './utils/productionCleanup';
 
-const TOKEN_KEY = 'gloryday_auth_token';
-const GUEST_ORDERS_KEY = 'gloryday_guest_orders';
-const GUEST_INFO_KEY = 'gloryday_customer_info';
-const REGISTERED_USERS_KEY = 'gloryday_registered_users';
+export type StaffRole = Extract<AppRole, 'Admin simple' | 'Commercial' | 'Gestionnaire Catalogue' | 'Logistique'>;
 
-export interface StoredAccount {
-  user: User;
-  passwordHash: string;
+export interface StaffAccountSummary {
+  id: string;
+  identifier: string;
+  name: string;
+  role: StaffRole;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  source: 'managed' | 'environment';
 }
 
-export function normalizePhone(p: string): string {
-  return (p || '').replace(/[\s\-\.\(\)]/g, '').toLowerCase();
-}
-
-export function getRegisteredAccounts(): StoredAccount[] {
+export function clearLocalDraftsAndCaches(): void {
+  if (typeof window === 'undefined') return;
   try {
-    const raw = localStorage.getItem(REGISTERED_USERS_KEY);
-    if (!raw) {
-      return [];
-    }
-    const accounts: StoredAccount[] = JSON.parse(raw);
-    const cleaned = Array.isArray(accounts)
-      ? accounts.filter(a => a?.user && !DEMO_ACCOUNT_IDS.has(a.user.id))
-      : [];
-    if (cleaned.length !== accounts.length) {
-      localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(cleaned));
-    }
-    return cleaned;
-  } catch {
-    return [];
-  }
+    localStorage.removeItem('gloryday_auth_token');
+    localStorage.removeItem('gloryday_registered_users');
+    localStorage.removeItem('gloryday_guest_orders');
+    localStorage.removeItem('gloryday_customer_info');
+    localStorage.removeItem('gloryday_drafts_guest');
+    localStorage.removeItem('gloryday_autodraft_guest');
+    localStorage.removeItem('gloryday_current_user');
+  } catch {}
 }
+
+if (typeof window !== 'undefined') {
+  clearLocalDraftsAndCaches();
+}
+
+let memoryToken: string | null = null;
 
 export function getStoredToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setStoredToken(token: string | null) {
-  if (token) {
-    localStorage.setItem(TOKEN_KEY, token);
-  } else {
-    localStorage.removeItem(TOKEN_KEY);
-  }
-}
-
-export function getStoredCustomerInfo() {
+  if (memoryToken) return memoryToken;
   try {
-    const raw = localStorage.getItem(GUEST_INFO_KEY);
-    return raw ? JSON.parse(raw) : null;
+    return localStorage.getItem('gloryday_session_token');
   } catch {
     return null;
   }
 }
 
-export function setStoredCustomerInfo(info: any) {
+export function setStoredToken(token: string | null) {
+  memoryToken = token;
   try {
-    localStorage.setItem(GUEST_INFO_KEY, JSON.stringify(info));
-  } catch (e) {
-    console.error('Failed to save customer info', e);
-  }
-}
-
-export function getLocalGuestOrders(): Order[] {
-  try {
-    const raw = localStorage.getItem(GUEST_ORDERS_KEY);
-    if (!raw) {
-      return [];
+    if (token) {
+      localStorage.setItem('gloryday_session_token', token);
+    } else {
+      localStorage.removeItem('gloryday_session_token');
     }
-    const parsed: Order[] = JSON.parse(raw);
-    const cleaned = Array.isArray(parsed)
-      ? parsed.filter(o => o && !isDemoOrder(o))
-      : [];
-    if (cleaned.length !== parsed.length) {
-      localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(cleaned));
-    }
-    return cleaned;
-  } catch {
-    return [];
-  }
-}
-
-export function saveLocalGuestOrder(order: Order) {
-  try {
-    const current = getLocalGuestOrders();
-    const filtered = current.filter(o => o.reference !== order.reference);
-    filtered.unshift(order);
-    localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(filtered.slice(0, 30)));
-  } catch (e) {
-    console.error('Failed to save local guest order', e);
-  }
+  } catch {}
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = getStoredToken();
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string> || {})
   };
+  const token = getStoredToken();
+  if (token && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   if (!(options.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      ...options,
+      headers,
+      credentials: 'include'
+    });
+  } catch (error) {
+    const networkError = new Error('Le serveur est injoignable pour le moment. Vérifiez votre connexion puis réessayez.');
+    (networkError as Error & { status?: number; cause?: unknown }).status = 0;
+    (networkError as Error & { cause?: unknown }).cause = error;
+    throw networkError;
   }
-
-  const response = await fetch(endpoint, {
-    ...options,
-    headers
-  });
 
   if (!response.ok) {
     let errorMsg = `Erreur (${response.status})`;
@@ -138,40 +102,30 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     } catch {
       // ignore
     }
-    throw new Error(errorMsg);
+    const serverError = new Error(errorMsg);
+    (serverError as Error & { status?: number }).status = response.status;
+    throw serverError;
   }
-  return response.json();
+  try {
+    return await response.json();
+  } catch (cause) {
+    const invalidResponse = new Error('Le serveur a renvoyé une réponse illisible.');
+    (invalidResponse as Error & { status?: number; cause?: unknown }).status = response.status;
+    (invalidResponse as Error & { cause?: unknown }).cause = cause;
+    throw invalidResponse;
+  }
 }
 
 export const api = {
   async getProducts(): Promise<Product[]> {
-    try {
-      return await request<Product[]>('/api/products');
-    } catch (err) {
-      return INITIAL_PRODUCTS;
-    }
+    return request<Product[]>('/api/products');
   },
 
   async createProduct(productData: Partial<Product>): Promise<Product> {
-    try {
-      return await request<Product>('/api/products', {
-        method: 'POST',
-        body: JSON.stringify(productData)
-      });
-    } catch (e) {
-      const newProd: Product = {
-        id: `prod-${Date.now()}`,
-        name: productData.name || 'Produit Médical',
-        category: productData.category || 'Consommables médicaux',
-        subcategory: productData.subcategory,
-        variants: productData.variants || [{ label: 'Boîte de 100', price: 7500 }],
-        status: productData.status || 'disponible',
-        image: productData.image,
-        thumbnailUrl: productData.thumbnailUrl || productData.image,
-        description: productData.description
-      };
-      return newProd;
-    }
+    return request<Product>('/api/products', {
+      method: 'POST',
+      body: JSON.stringify(productData)
+    });
   },
 
   async updateProduct(id: string, productData: Partial<Product>): Promise<Product> {
@@ -225,11 +179,7 @@ export const api = {
   },
 
   async getPacks(): Promise<Pack[]> {
-    try {
-      return await request<Pack[]>('/api/packs');
-    } catch (err) {
-      return INITIAL_PACKS;
-    }
+    return request<Pack[]>('/api/packs');
   },
 
   async createPack(packData: Omit<Pack, 'id'>): Promise<Pack> {
@@ -259,85 +209,29 @@ export const api = {
     password: string;
     deliveryAddress?: string;
     coordinates?: { lat: number; lng: number };
-  }): Promise<{ token: string; user: User }> {
-    const cleanPhone = normalizePhone(registrationData.phone);
-    const cleanPass = (registrationData.password || '').trim();
-
-    if (!cleanPhone || !cleanPass) {
-      throw new Error('Numéro de téléphone et mot de passe obligatoires.');
-    }
-    if (!registrationData.facilityName) {
-      throw new Error('Nom de l\'établissement obligatoire.');
-    }
-
-    const accounts = getRegisteredAccounts();
-    const existing = accounts.find(a => normalizePhone(a.user.phone) === cleanPhone);
-    if (existing) {
-      throw new Error('Un compte existe déjà avec ce numéro de téléphone. Veuillez vous connecter.');
-    }
-
-    const newUser: User = {
-      id: `usr-${Date.now()}`,
-      phone: registrationData.phone.trim(),
-      facilityName: registrationData.facilityName.trim(),
-      contactName: registrationData.contactName?.trim() || 'Responsable Approvisionnement',
-      facilityType: (registrationData.facilityType as any) || 'Clinique',
-      facilityTypeOther: registrationData.facilityTypeOther,
-      role: 'client',
-      deliveryAddress: registrationData.deliveryAddress || 'Libreville, Gabon',
-      coordinates: registrationData.coordinates || { lat: 0.3924, lng: 9.4536 },
-      createdAt: new Date().toISOString()
-    };
-
-    accounts.push({
-      user: newUser,
-      passwordHash: cleanPass
+  }): Promise<{ token?: string; user: User }> {
+    const res = await request<{ user: User; token?: string }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(registrationData)
     });
-
-    try {
-      localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(accounts));
-      localStorage.setItem('gloryday_current_user', JSON.stringify(newUser));
-    } catch {}
-
-    const token = `usr-token-${newUser.id}-${Date.now()}`;
-    setStoredToken(token);
-    return { token, user: newUser };
+    if (res.token) setStoredToken(res.token);
+    return res;
   },
 
-  async login(phone: string, password: string): Promise<{ token: string; user: User }> {
-    const cleanPhone = normalizePhone(phone);
-    const cleanPass = (password || '').trim();
+  async login(phone: string, password: string): Promise<{ token?: string; user: User }> {
+    const res = await request<{ user: User; token?: string }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ phone, password })
+    });
+    if (res.token) setStoredToken(res.token);
+    return res;
+  },
 
-    if (!cleanPhone || !cleanPass) {
-      throw new Error('Veuillez renseigner votre numéro de téléphone et votre mot de passe.');
-    }
-
-    // Check if it's admin credentials entered in the client login tab
-    if (
-      (cleanPhone === 'admin' || cleanPhone === '+24177003004' || cleanPhone === '077003004' || cleanPhone === '24177003004') &&
-      (cleanPass === 'admin' || cleanPass === 'gloryday2026')
-    ) {
-      return this.adminLogin('admin', cleanPass, 'Super-Admin');
-    }
-
-    // Check against registered accounts in local storage
-    const accounts = getRegisteredAccounts();
-    const found = accounts.find(a => normalizePhone(a.user.phone) === cleanPhone);
-
-    if (!found) {
-      throw new Error('Aucun compte trouvé avec ce numéro. Si vous êtes nouveau client, veuillez créer un compte.');
-    }
-
-    if (found.passwordHash !== cleanPass) {
-      throw new Error('Mot de passe incorrect. Veuillez vérifier votre saisie.');
-    }
-
-    const token = `usr-token-${found.user.id}-${Date.now()}`;
-    setStoredToken(token);
-    try {
-      localStorage.setItem('gloryday_current_user', JSON.stringify(found.user));
-    } catch {}
-    return { token, user: found.user };
+  async requestPasswordRecovery(phone: string): Promise<void> {
+    await request<{ success: boolean }>('/api/auth/recovery-request', {
+      method: 'POST',
+      body: JSON.stringify({ phone })
+    });
   },
 
   async loginWithGoogle(googleProfile: {
@@ -345,31 +239,8 @@ export const api = {
     name: string;
     avatarUrl?: string;
   }): Promise<{ isNewUser: boolean; token?: string; user?: User; profileData: { email: string; name: string; avatarUrl?: string } }> {
-    const cleanEmail = (googleProfile.email || '').trim().toLowerCase();
-    const accounts = getRegisteredAccounts();
-    const found = accounts.find(a => (a.user.email || '').trim().toLowerCase() === cleanEmail);
-
-    if (found && found.user) {
-      const token = `google-token-${found.user.id}-${Date.now()}`;
-      setStoredToken(token);
-      if (googleProfile.avatarUrl && !found.user.avatarUrl) {
-        found.user.avatarUrl = googleProfile.avatarUrl;
-      }
-      try {
-        localStorage.setItem('gloryday_current_user', JSON.stringify(found.user));
-      } catch {}
-      return {
-        isNewUser: false,
-        token,
-        user: found.user,
-        profileData: googleProfile
-      };
-    }
-
-    return {
-      isNewUser: true,
-      profileData: googleProfile
-    };
+    await request('/api/auth/google', { method: 'POST', body: JSON.stringify(googleProfile) });
+    return { isNewUser: false, profileData: googleProfile };
   },
 
   async completeGoogleRegistration(data: {
@@ -382,188 +253,65 @@ export const api = {
     facilityType?: string;
     deliveryAddress?: string;
     coordinates?: { lat: number; lng: number };
-  }): Promise<{ token: string; user: User }> {
-    const cleanEmail = (data.email || '').trim().toLowerCase();
-    const cleanPhone = normalizePhone(data.phone);
-    if (!cleanPhone) {
-      throw new Error('Numéro de téléphone gabonais (+241) obligatoire.');
-    }
-    if (!data.facilityName?.trim()) {
-      throw new Error('Le nom de l\'établissement de santé est obligatoire.');
-    }
-
-    const accounts = getRegisteredAccounts();
-    const existing = accounts.find(
-      a => normalizePhone(a.user.phone) === cleanPhone || (a.user.email || '').toLowerCase() === cleanEmail
-    );
-    if (existing) {
-      existing.user.email = cleanEmail;
-      existing.user.facilityName = data.facilityName.trim();
-      if (data.avatarUrl) existing.user.avatarUrl = data.avatarUrl;
-      if (data.contactName) existing.user.contactName = data.contactName;
-      existing.user.authProvider = 'google';
-      const token = `google-token-${existing.user.id}-${Date.now()}`;
-      setStoredToken(token);
-      try {
-        localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(accounts));
-        localStorage.setItem('gloryday_current_user', JSON.stringify(existing.user));
-      } catch {}
-      return { token, user: existing.user };
-    }
-
-    const newUser: User = {
-      id: `usr-google-${Date.now()}`,
-      email: cleanEmail,
-      phone: data.phone.trim(),
-      facilityName: data.facilityName.trim(),
-      contactName: data.contactName?.trim() || data.name?.trim() || 'Responsable Pharmacie',
-      facilityType: (data.facilityType as any) || 'Clinique',
-      role: 'client',
-      authProvider: 'google',
-      avatarUrl: data.avatarUrl || undefined,
-      deliveryAddress: data.deliveryAddress || 'Libreville, Gabon',
-      coordinates: data.coordinates || { lat: 0.3924, lng: 9.4536 },
-      createdAt: new Date().toISOString()
-    };
-
-    accounts.push({
-      user: newUser,
-      passwordHash: 'google_oauth_auth'
-    });
-
-    try {
-      localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(accounts));
-      localStorage.setItem('gloryday_current_user', JSON.stringify(newUser));
-    } catch {}
-
-    const token = `google-token-${newUser.id}-${Date.now()}`;
-    setStoredToken(token);
-    return { token, user: newUser };
+  }): Promise<{ token?: string; user: User }> {
+    const res = await request<{ user: User; token?: string }>('/api/auth/google/complete', { method: 'POST', body: JSON.stringify(data) });
+    if (res.token) setStoredToken(res.token);
+    return res;
   },
 
-  async adminLogin(identifier: string, passwordOrRole?: string | AppRole, roleOption?: AppRole): Promise<{ token: string; user: User }> {
+  async adminLogin(identifier: string, passwordOrRole?: string | AppRole, _roleOption?: AppRole): Promise<{ token?: string; user: User }> {
     const password = typeof passwordOrRole === 'string' && !['client', 'Super-Admin', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'].includes(passwordOrRole)
       ? passwordOrRole
-      : undefined;
-    const role: AppRole = (roleOption || (typeof passwordOrRole === 'string' && ['client', 'Super-Admin', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'].includes(passwordOrRole) ? passwordOrRole as AppRole : 'Super-Admin'));
-
-    const cleanId = (identifier || '').trim().toLowerCase();
-    const cleanPass = (password || '').trim();
-
-    if (password) {
-      try {
-        const res = await request<{ token: string; user: User }>('/api/auth/admin', {
-          method: 'POST',
-          body: JSON.stringify({ identifier: cleanId, password: cleanPass, role })
-        });
-        setStoredToken(res.token);
-        try {
-          localStorage.setItem('gloryday_current_user', JSON.stringify(res.user));
-        } catch {}
-        recordAuditLog({
-          category: 'auth',
-          action: 'Connexion Portail Direction',
-          actorName: res.user.contactName || 'Direction Générale',
-          actorRole: res.user.role,
-          details: `Ouverture de session avec le rôle [${res.user.role}] (${cleanId}).`,
-          status: 'success'
-        });
-        return res;
-      } catch (err: any) {
-        // Fallback local verification if offline
-        const storedCustomPass = (() => {
-          try {
-            return localStorage.getItem('gloryday_admin_custom_password');
-          } catch {
-            return null;
-          }
-        })();
-        const validIds = ['admin', 'admin@glorydaypharma.ga', 'direction@glorydaypharma.ga', '+24177003004', '24177003004', '077003004', 'gloryday-admin-2026'];
-        const isIdValid = validIds.includes(cleanId) || validIds.includes(normalizePhone(cleanId));
-        const activeSecret = storedCustomPass || 'Gloryday@2026!';
-        const isPassValid =
-          cleanPass === activeSecret ||
-          (!storedCustomPass && (cleanPass === 'Gloryday@2026!' || cleanPass === 'admin' || cleanPass === 'gloryday2026'));
-
-        if (!isIdValid || !isPassValid) {
-          throw new Error('Identifiants administrateur ou mot de passe de sécurité incorrects.');
-        }
-      }
-    }
-
-    const assignedRole = role || 'Super-Admin';
-    const staffUser: User = {
-      id: `staff-${assignedRole.toLowerCase().replace(/\s+/g, '-')}`,
-      phone: '+24177003004',
-      facilityName: `Direction Générale Gloryday`,
-      contactName: `Direction & Staff [${assignedRole}]`,
-      role: assignedRole,
-      createdAt: new Date().toISOString()
-    };
-    const token = `staff-token-${Date.now()}`;
-    setStoredToken(token);
-    try {
-      localStorage.setItem('gloryday_current_user', JSON.stringify(staffUser));
-    } catch {}
-    return { token, user: staffUser };
+      : '';
+    const res = await request<{ user: User; token?: string }>('/api/auth/admin', {
+      method: 'POST',
+      body: JSON.stringify({ identifier, password })
+    });
+    if (res.token) setStoredToken(res.token);
+    return res;
   },
 
-  async updateAdminPassword(newPassword: string): Promise<{ success: boolean }> {
-    const cleanNew = (newPassword || '').trim();
-    if (cleanNew.length < 6) {
-      throw new Error('Le nouveau mot de passe administrateur doit comporter au moins 6 caractères.');
-    }
-    try {
-      localStorage.setItem('gloryday_admin_custom_password', cleanNew);
-    } catch {}
-    try {
-      await request<{ success: boolean }>('/api/auth/admin-password', {
-        method: 'PUT',
-        body: JSON.stringify({ newPassword: cleanNew })
-      });
-    } catch {
-      // Saved locally if server temporarily unreachable
-    }
-    recordAuditLog({
-      category: 'settings',
-      action: 'Mise à jour Mot de Passe Administrateur',
-      actorName: 'Direction Générale',
-      actorRole: 'Super-Admin',
-      details: 'Le mot de passe secret du Portail Direction a été personnalisé et synchronisé.',
-      status: 'success'
+  async getStaffAccounts(): Promise<StaffAccountSummary[]> {
+    return request<StaffAccountSummary[]>('/api/admin/staff');
+  },
+
+  async createStaffAccount(input: { identifier: string; name: string; role: StaffRole; password: string }): Promise<StaffAccountSummary> {
+    return request<StaffAccountSummary>('/api/admin/staff', {
+      method: 'POST',
+      body: JSON.stringify(input)
     });
-    return { success: true };
+  },
+
+  async updateStaffAccount(id: string, input: { identifier?: string; name?: string; role?: StaffRole; active?: boolean; password?: string }): Promise<StaffAccountSummary> {
+    return request<StaffAccountSummary>(`/api/admin/staff/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input)
+    });
+  },
+
+  async getLatestMigrationSql(): Promise<string> {
+    const result = await request<{ sql: string }>('/api/supabase/migration-sql');
+    return result.sql;
   },
 
   async getCurrentUser(): Promise<{ user: User; role: AppRole } | null> {
-    const token = getStoredToken();
-    if (!token) return null;
     try {
-      const savedUserStr = localStorage.getItem('gloryday_current_user');
-      if (savedUserStr) {
-        const user: User = JSON.parse(savedUserStr);
-        return { user, role: user.role };
-      }
-    } catch {}
-    return null;
+      const result = await request<{ user: User | null }>('/api/auth/session');
+      return result.user ? { user: result.user, role: result.user.role } : null;
+    } catch { return null; }
   },
 
-  async getClients(): Promise<any[]> {
+  async logout(): Promise<void> {
     try {
-      return await request<any[]>('/api/clients');
-    } catch {
-      return getRegisteredAccounts().map(acc => ({
-        ...acc.user,
-        totalOrdersCount: 0,
-        totalSpent: 0,
-        daysSinceLastOrder: 0,
-        isInactive10Days: false
-      }));
+      await request('/api/auth/logout', { method: 'POST', body: '{}' });
+    } finally {
+      setStoredToken(null);
+      clearLocalDraftsAndCaches();
     }
   },
 
-  async cleanupProductionData(fullReset = true): Promise<CleanupReport> {
-    return executeProductionCleanup({ fullReset });
+  async getClients(): Promise<any[]> {
+    return request<any[]>('/api/clients');
   },
 
   async assignClientToCommercial(clientId: string, commercialId: string): Promise<any> {
@@ -581,11 +329,7 @@ export const api = {
   },
 
   async getQuotes(): Promise<CommercialQuote[]> {
-    try {
-      return await request<CommercialQuote[]>('/api/quotes');
-    } catch {
-      return [];
-    }
+    return request<CommercialQuote[]>('/api/quotes');
   },
 
   async updateQuoteStatus(quoteId: string, status: string): Promise<CommercialQuote> {
@@ -607,311 +351,122 @@ export const api = {
   },
 
   async createOrder(customer: Order['customer'], items: CartItem[]): Promise<Order> {
-    const zoneName = customer.neighborhoodName || 
-      (customer.deliveryAddress ? detectNeighborhoodFromAddress(customer.deliveryAddress)?.name : null) || 
-      'Grand Libreville';
-    const estimatedTime = getEstimatedDeliveryText(customer.neighborhoodId, customer.deliveryAddress);
-
     try {
-      const order = await request<Order>('/api/orders', {
+      return await request<Order>('/api/orders', {
         method: 'POST',
         body: JSON.stringify({ customer, items })
       });
-      if (!order.deliveryZone) order.deliveryZone = zoneName;
-      if (!order.deliveryEstimated) order.deliveryEstimated = estimatedTime;
-      if (customer.mobilePayment && !order.mobilePayment) {
-        order.mobilePayment = customer.mobilePayment;
+    } catch (error) {
+      const requestStatus = (error as Error & { status?: number }).status;
+      if (requestStatus === 0) {
+        throw new Error('La connexion a été interrompue avant la confirmation de la commande. Consultez « Mes commandes » avant de réessayer pour éviter un doublon.');
       }
-      saveLocalGuestOrder(order);
-      return order;
-    } catch (err: any) {
-      const year = new Date().getFullYear();
-      const localCounter = Math.floor(1000 + Math.random() * 9000);
-      const fallbackRef = `GP-${year}-P${localCounter}`;
-      const volumeSummary = calculateCartVolumeSummary(items);
-      const deliveryFee = customer.deliveryFee || 0;
-      const finalTotal = volumeSummary.netTotal + deliveryFee;
-
-      const isMobilePrePaid = !!(customer.mobilePayment?.isPrePaid && customer.mobilePayment?.transactionReference);
-
-      const localOrder: Order = {
-        id: `ord-offline-${Date.now()}`,
-        reference: fallbackRef,
-        createdAt: new Date().toISOString(),
-        customer,
-        items: items.map(it => {
-          const calc = calculateItemVolumePrice(it.price, it.quantity, it.isQuote);
-          return {
-            productId: it.productId,
-            productName: it.productName,
-            variant: it.variant,
-            price: calc.discountedUnitPrice,
-            quantity: it.quantity,
-            total: it.isQuote ? 0 : calc.totalWithDiscount,
-            isQuote: it.isQuote,
-            discountPercent: calc.discountPercent,
-            savings: calc.savings
-          };
-        }),
-        estimatedTotal: finalTotal,
-        hasQuoteItems: items.some(it => it.isQuote),
-        status: 'À confirmer',
-        isPaid: isMobilePrePaid,
-        mobilePayment: customer.mobilePayment,
-        deliveryStage: 'preparation',
-        deliveryZone: zoneName,
-        deliveryEstimated: estimatedTime,
-        deliveryFee,
-        courier: {
-          name: 'Alexandre Moundounga (Livreur Médical)',
-          phone: '+24177003004',
-          vehicle: 'Moto Médicale GP-04',
-          matricule: 'LOG-LBV-04',
-          currentZone: 'Dépôt Central Oloumi',
-          estimatedTime
-        }
-      };
-      saveLocalGuestOrder(localOrder);
-      return localOrder;
+      if (requestStatus !== undefined && requestStatus >= 200 && requestStatus < 300) {
+        throw new Error('Le serveur a répondu sans fournir la confirmation lisible de la commande. Consultez « Mes commandes » avant de réessayer pour éviter un doublon.');
+      }
+      throw error;
     }
   },
 
   async uploadOrderPdf(orderReference: string, pdfBase64: string): Promise<string> {
-    try {
-      const res = await request<{ success: boolean; pdfUrl: string }>('/api/orders/upload-pdf', {
-        method: 'POST',
-        body: JSON.stringify({ orderReference, pdfBase64 })
-      });
-      return res.pdfUrl;
-    } catch {
-      return pdfBase64;
-    }
+    const res = await request<{ success: boolean; pdfUrl: string }>('/api/orders/upload-pdf', {
+      method: 'POST',
+      body: JSON.stringify({ orderReference, pdfBase64 })
+    });
+    return res.pdfUrl;
   },
 
   async getOrders(phone?: string): Promise<Order[]> {
-    try {
-      const query = phone ? `?phone=${encodeURIComponent(phone)}` : '';
-      return await request<Order[]>(`/api/orders${query}`);
-    } catch {
-      return getLocalGuestOrders();
-    }
+    const query = phone ? `?phone=${encodeURIComponent(phone)}` : '';
+    return request<Order[]>(`/api/orders${query}`);
   },
 
   async updateOrderStatus(orderId: string, status: Order['status'], cancellationReason?: string): Promise<Order> {
-    try {
-      return await request<Order>(`/api/orders/${orderId}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status, cancellationReason })
-      });
-    } catch {
-      const orders = getLocalGuestOrders();
-      const idx = orders.findIndex(o => o.id === orderId || o.reference === orderId);
-      if (idx > -1) {
-        orders[idx].status = status;
-        if (cancellationReason) orders[idx].cancellationReason = cancellationReason;
-        localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(orders));
-        return orders[idx];
-      }
-      throw new Error('Commande non trouvée');
-    }
+    return request<Order>(`/api/orders/${orderId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, cancellationReason })
+    });
   },
 
-  async triggerAutomatedWhatsAppNotification(orderId: string, stage: DeliveryStage): Promise<Order> {
-    const STAGE_LABELS: Record<DeliveryStage, string> = {
-      preparation: 'En préparation à l’entrepôt',
-      picked_up: 'Pris en charge par le coursier',
-      in_transit: 'En cours d’acheminement',
-      delivered: 'Livré à l’établissement'
-    };
-
-    const orders = getLocalGuestOrders();
-    const idx = orders.findIndex(o => o.id === orderId || o.reference === orderId);
-    if (idx > -1) {
-      const stagePayload = generateWhatsAppMessageForStage(orders[idx], stage);
-      const logEntry: WhatsAppNotificationLog = {
-        id: `wlog-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        stage,
-        stageLabel: STAGE_LABELS[stage] || stage,
-        recipientRole: 'client',
-        recipientPhone: orders[idx].customer?.phone || '+24177001122',
-        recipientName: orders[idx].customer?.facilityName || 'Client Médical',
-        timestamp: new Date().toISOString(),
-        status: 'sent',
-        messagePreview: stagePayload.messageText.length > 140 
-          ? stagePayload.messageText.slice(0, 140) + '...' 
-          : stagePayload.messageText,
-        triggeredBy: 'Automate API Logistique (Gloryday)'
-      };
-
-      if (!orders[idx].whatsappLogs) {
-        orders[idx].whatsappLogs = [];
-      }
-      orders[idx].whatsappLogs = [logEntry, ...orders[idx].whatsappLogs];
-      orders[idx].lastWhatsAppNotifiedStage = stage;
-      localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(orders));
-      return orders[idx];
-    }
-    throw new Error('Commande non trouvée pour envoi WhatsApp');
+  async updateOrderDeliveryStage(
+    orderId: string,
+    deliveryStage: DeliveryStage,
+    options: { courier?: CourierInfo; deliveryProof?: DeliveryProof } = {}
+  ): Promise<Order> {
+    return request<Order>(`/api/orders/${orderId}/delivery-stage`, {
+      method: 'PATCH',
+      body: JSON.stringify({ deliveryStage, ...options })
+    });
   },
 
-  async updateOrderDeliveryStage(orderId: string, deliveryStage: DeliveryStage, courier?: CourierInfo): Promise<Order> {
-    const STAGE_LABELS: Record<DeliveryStage, string> = {
-      preparation: 'En préparation à l’entrepôt',
-      picked_up: 'Pris en charge par le coursier',
-      in_transit: 'En cours d’acheminement',
-      delivered: 'Livré à l’établissement'
+  async getDeliveryLocationHistory(orderId: string): Promise<DeliveryLocationPoint[]> {
+    const result = await request<{ points: DeliveryLocationPoint[] }>(`/api/orders/${encodeURIComponent(orderId)}/live-location`);
+    return result.points;
+  },
+
+  async createCourierTrackingLink(orderId: string): Promise<{ url: string; expiresAt: string }> {
+    const result = await request<{ token: string; expiresAt: string }>(`/api/orders/${encodeURIComponent(orderId)}/tracking-link`, {
+      method: 'POST',
+      body: '{}'
+    });
+    return {
+      url: new URL(`/courier-track/${encodeURIComponent(result.token)}`, window.location.origin).href,
+      expiresAt: result.expiresAt,
     };
+  },
 
-    try {
-      await request<Order>(`/api/orders/${orderId}/delivery-stage`, {
-        method: 'PATCH',
-        body: JSON.stringify({ deliveryStage, courier })
-      });
-      return await this.triggerAutomatedWhatsAppNotification(orderId, deliveryStage);
-    } catch {
-      const orders = getLocalGuestOrders();
-      const idx = orders.findIndex(o => o.id === orderId || o.reference === orderId);
-      if (idx > -1) {
-        orders[idx].deliveryStage = deliveryStage;
-        if (deliveryStage === 'delivered') {
-          orders[idx].status = 'Livrée';
-        } else if (deliveryStage === 'preparation' || deliveryStage === 'picked_up' || deliveryStage === 'in_transit') {
-          orders[idx].status = 'En préparation';
-        }
-        if (courier) {
-          orders[idx].courier = { ...orders[idx].courier, ...courier };
-        }
+  async getCourierTrackingStatus(orderId: string): Promise<{ active: boolean; expiresAt?: string }> {
+    return request<{ active: boolean; expiresAt?: string }>(`/api/orders/${encodeURIComponent(orderId)}/tracking-link`);
+  },
 
-        // Automated WhatsApp Notification Triggering Logic via api
-        const stagePayload = generateWhatsAppMessageForStage(orders[idx], deliveryStage);
-        const logEntry: WhatsAppNotificationLog = {
-          id: `wlog-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          stage: deliveryStage,
-          stageLabel: STAGE_LABELS[deliveryStage] || deliveryStage,
-          recipientRole: 'client',
-          recipientPhone: orders[idx].customer?.phone || '+24177001122',
-          recipientName: orders[idx].customer?.facilityName || 'Client Médical',
-          timestamp: new Date().toISOString(),
-          status: 'sent',
-          messagePreview: stagePayload.messageText.length > 140 
-            ? stagePayload.messageText.slice(0, 140) + '...' 
-            : stagePayload.messageText,
-          triggeredBy: 'Automate API Logistique (Gloryday)'
-        };
+  async revokeCourierTracking(orderId: string): Promise<void> {
+    await request<{ success: boolean }>(`/api/orders/${encodeURIComponent(orderId)}/tracking-link`, { method: 'DELETE' });
+  },
 
-        if (!orders[idx].whatsappLogs) {
-          orders[idx].whatsappLogs = [];
-        }
-        orders[idx].whatsappLogs = [logEntry, ...orders[idx].whatsappLogs];
-        orders[idx].lastWhatsAppNotifiedStage = deliveryStage;
+  async getCourierTrackingInfo(token: string): Promise<CourierTrackingInfo> {
+    return request<CourierTrackingInfo>(`/api/courier-tracking/${encodeURIComponent(token)}`);
+  },
 
-        recordAuditLog({
-          category: 'delivery',
-          action: `Transition Logistique : ${STAGE_LABELS[deliveryStage] || deliveryStage}`,
-          actorName: 'Équipe Logistique Gloryday',
-          actorRole: 'Logistique',
-          targetReference: orders[idx].reference,
-          details: `Mise à jour de l'étape de livraison et déclenchement automatique WhatsApp vers ${orders[idx].customer?.facilityName} (${orders[idx].customer?.phone}).`,
-          status: 'success'
-        });
-
-        localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(orders));
-        return orders[idx];
-      }
-      throw new Error('Commande non trouvée');
-    }
+  async postCourierTrackingLocation(token: string, point: Pick<DeliveryLocationPoint, 'latitude' | 'longitude' | 'accuracy'>): Promise<void> {
+    await request<{ success: boolean }>(`/api/courier-tracking/${encodeURIComponent(token)}`, {
+      method: 'POST',
+      body: JSON.stringify(point)
+    });
   },
 
   async updateOrderPayment(orderId: string, isPaid: boolean): Promise<Order> {
-    try {
-      return await request<Order>(`/api/orders/${orderId}/payment`, {
-        method: 'PATCH',
-        body: JSON.stringify({ isPaid })
-      });
-    } catch {
-      const orders = getLocalGuestOrders();
-      const idx = orders.findIndex(o => o.id === orderId || o.reference === orderId);
-      if (idx > -1) {
-        orders[idx].isPaid = isPaid;
-        if (orders[idx].mobilePayment) {
-          orders[idx].mobilePayment.status = isPaid ? 'verified' : 'pending';
-          if (isPaid && !orders[idx].mobilePayment.validatedAt) {
-            orders[idx].mobilePayment.validatedAt = new Date().toISOString();
-          }
-        }
-        recordAuditLog({
-          category: 'order',
-          action: isPaid ? 'Validation Encaissement Commande' : 'Annulation Statut Paiement',
-          actorName: 'Direction Générale Gloryday',
-          actorRole: 'Super-Admin',
-          targetReference: orders[idx].reference,
-          details: `Statut de paiement de la commande ${orders[idx].reference} (${orders[idx].customer?.facilityName}) passé à : ${isPaid ? 'PAYÉE' : 'NON PAYÉE'}.`,
-          status: isPaid ? 'success' : 'warning'
-        });
-        localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(orders));
-        return orders[idx];
-      }
-      throw new Error('Commande non trouvée');
-    }
+    return request<Order>(`/api/orders/${orderId}/payment`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isPaid })
+    });
   },
 
   async updateOrderMobilePayment(orderId: string, mobilePayment: import('./types').MobilePaymentDetails): Promise<Order> {
-    try {
-      return await request<Order>(`/api/orders/${orderId}/mobile-payment`, {
-        method: 'PATCH',
-        body: JSON.stringify({ mobilePayment })
-      });
-    } catch {
-      const orders = getLocalGuestOrders();
-      const idx = orders.findIndex(o => o.id === orderId || o.reference === orderId);
-      if (idx > -1) {
-        orders[idx].mobilePayment = mobilePayment;
-        orders[idx].customer.mobilePayment = mobilePayment;
-        if (mobilePayment.isPrePaid || mobilePayment.status === 'verified') {
-          orders[idx].isPaid = true;
-        }
-        localStorage.setItem(GUEST_ORDERS_KEY, JSON.stringify(orders));
-        return orders[idx];
-      }
-      throw new Error('Commande non trouvée');
-    }
+    return request<Order>(`/api/orders/${orderId}/mobile-payment`, {
+      method: 'PATCH',
+      body: JSON.stringify({ mobilePayment })
+    });
   },
 
   async getAdminStats(): Promise<AdminStats> {
-    try {
-      return await request<AdminStats>('/api/admin/stats');
-    } catch {
-      const orders = getLocalGuestOrders();
-      const validOrders = orders.filter(o => o.status !== 'Annulée');
-      const totalRevenue = validOrders.reduce((s, o) => s + o.estimatedTotal, 0);
-      const ordersToConfirm = orders.filter(o => o.status === 'À confirmer').length;
-      return {
-        totalRevenue,
-        ordersToConfirm,
-        monthOrdersCount: validOrders.length,
-        averageBasket: validOrders.length > 0 ? Math.round(totalRevenue / validOrders.length) : 0,
-        totalClients: getRegisteredAccounts().length,
-        pendingPaymentAmount: validOrders.filter(o => !o.isPaid).reduce((s, o) => s + o.estimatedTotal, 0),
-        salesLast14Days: [],
-        ordersByStatus: {
-          'À confirmer': orders.filter(o => o.status === 'À confirmer').length,
-          'Confirmée': orders.filter(o => o.status === 'Confirmée').length,
-          'En préparation': orders.filter(o => o.status === 'En préparation').length,
-          'Livrée': orders.filter(o => o.status === 'Livrée').length,
-          'Annulée': orders.filter(o => o.status === 'Annulée').length
-        },
-        topProducts: [],
-        priorityOrders: orders.filter(o => o.status === 'À confirmer').slice(0, 5),
-        inactiveClientsCount: 0
-      };
-    }
+    return request<AdminStats>('/api/admin/stats');
   },
 
   async getEvents(since = 0): Promise<AppNotification[]> {
-    try {
-      return await request<AppNotification[]>(`/api/events?since=${since}`);
-    } catch {
-      return [];
-    }
+    return request<AppNotification[]>(`/api/events?since=${since}`);
+  },
+
+  async sendClientAnnouncement(title: string, message: string): Promise<{ sentCount: number }> {
+    return request<{ sentCount: number }>('/api/events/announcement', {
+      method: 'POST',
+      body: JSON.stringify({ title, message })
+    });
+  },
+
+  async markNotificationsRead(ids: string[]): Promise<void> {
+    await request<{ updated: number }>('/api/events/read', {
+      method: 'POST',
+      body: JSON.stringify({ ids })
+    });
   }
 };
