@@ -12,6 +12,8 @@ export const ClientAnnouncementModal: React.FC<ClientAnnouncementModalProps> = (
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [sentCount, setSentCount] = useState<number | null>(null);
+  const [pushSentCount, setPushSentCount] = useState<number | null>(null);
+  const [pushConfigured, setPushConfigured] = useState(false);
   const [error, setError] = useState('');
 
   if (!isOpen) return null;
@@ -28,6 +30,8 @@ export const ClientAnnouncementModal: React.FC<ClientAnnouncementModalProps> = (
       setError('');
       const result = await api.sendClientAnnouncement(title.trim(), message.trim());
       setSentCount(result.sentCount);
+      setPushSentCount(result.pushSentCount);
+      setPushConfigured(result.pushConfigured);
     } catch (err: any) {
       setError(err.message || 'L’information n’a pas pu être envoyée.');
     } finally {
@@ -65,6 +69,11 @@ export const ClientAnnouncementModal: React.FC<ClientAnnouncementModalProps> = (
               <h3 className="font-bold text-slate-900">Information envoyée</h3>
               <p className="text-sm text-slate-600 mt-1">Elle a été ajoutée aux notifications de {sentCount} compte(s) client(s).</p>
             </div>
+            <p className="text-xs text-slate-600">
+              {pushConfigured
+                ? `${pushSentCount || 0} notification(s) push envoyée(s) aux appareils activés.`
+                : 'Notification push en attente de configuration VAPID et de la migration Supabase.'}
+            </p>
             <button type="button" onClick={onClose} className="px-5 py-2.5 rounded-xl bg-slate-950 text-white text-sm font-bold">Terminer</button>
           </div>
         ) : (
@@ -76,7 +85,7 @@ export const ClientAnnouncementModal: React.FC<ClientAnnouncementModalProps> = (
               </div>
             )}
             <div className="p-3 rounded-xl bg-blue-50 border border-blue-100 text-xs text-blue-900">
-              Tous les comptes clients recevront cette annonce dans la cloche de l’application. Ce formulaire n’envoie ni SMS, ni WhatsApp, ni notification push.
+              Annonce ajoutee dans la cloche; push envoye seulement aux appareils actifs.
             </div>
             <label className="block text-sm font-semibold text-slate-700">
               Titre

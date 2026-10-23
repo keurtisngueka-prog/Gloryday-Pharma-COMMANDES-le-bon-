@@ -31,7 +31,9 @@ import {
   DeliveryProof
 } from './types';
 import { api } from './api';
-import { matchesProductSearch } from './utils/search';
+import { matchesProductSearch, scoreProductSearch } from './utils/search';
+import { createPushSubscription, getExistingPushSubscription, getPushSupportStatus } from './utils/pushNotifications';
+import type { PushNotificationStatus } from './utils/pushNotifications';
 import { generateOrderPdf } from './utils/pdfGenerator';
 import { getStoredDrafts, deleteDraft } from './utils/draftsStorage';
 import { CATEGORIES, CONSUMABLE_SUBCATEGORIES, MEDICAL_SPECIALTIES } from './data/initialProducts';
@@ -294,7 +296,45 @@ export default function App() {
   const [inspectedProduct, setInspectedProduct] = useState<Product | null>(null);
 
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [pushStatus, setPushStatus] = useState<PushNotificationStatus>('unconfigured');
+  const [pushError, setPushError] = useState<string | null>(null);
   const lastEventTimestamp = useRef<number>(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentUser) {
+      setPushStatus('signed-out');
+      setPushError(null);
+      return () => { cancelled = true; };
+    }
+
+    const capability = getPushSupportStatus();
+    if (capability !== 'available') {
+      setPushStatus(capability);
+      setPushError(null);
+      return () => { cancelled = true; };
+    }
+
+    setPushStatus('loading');
+    void getExistingPushSubscription().then(async subscription => {
+      if (subscription) {
+        await api.registerPushSubscription({
+          endpoint: subscription.endpoint,
+          expirationTime: subscription.expirationTime,
+          keys: {
+            p256dh: subscription.toJSON().keys?.p256dh || '',
+            auth: subscription.toJSON().keys?.auth || ''
+          }
+        });
+      }
+      if (!cancelled) setPushStatus(subscription ? 'enabled' : capability);
+    }).catch(error => {
+      if (cancelled) return;
+      setPushStatus('error');
+      setPushError(error instanceof Error ? error.message : 'Impossible de vérifier cet abonnement push.');
+    });
+    return () => { cancelled = true; };
+  }, [currentUser?.id]);
 
   // Initial Data Load
   const loadInitialData = async () => {
@@ -857,7 +897,9 @@ export default function App() {
     } else if (priceRange === 'quote') {
       result = result.filter(p => p.variants.some(v => v.price === 0));
     }
-    if (sortBy === 'price-asc') {
+    if (sortBy === 'default' && searchQuery.trim()) {
+      result = [...result].sort((a, b) => scoreProductSearch(b, searchQuery) - scoreProductSearch(a, searchQuery));
+    } else if (sortBy === 'price-asc') {
       result = [...result].sort((a, b) => (a.variants[0]?.price || 0) - (b.variants[0]?.price || 0));
     } else if (sortBy === 'price-desc') {
       result = [...result].sort((a, b) => (b.variants[0]?.price || 0) - (a.variants[0]?.price || 0));
@@ -1406,6 +1448,40 @@ export default function App() {
         isOpen={isNotificationModalOpen}
         onClose={() => setIsNotificationModalOpen(false)}
         notifications={notifications}
+        pushStatus={currentUser ? pushStatus : 'signed-out'}
+        pushError={pushError}
+        onEnablePush={async () => {
+          if (!currentUser) return;
+          setPushStatus('loading');
+          setPushError(null);
+          try {
+            const subscription = await createPushSubscription();
+            await api.registerPushSubscription(subscription);
+            setPushStatus('enabled');
+          } catch (error) {
+            const capability = getPushSupportStatus();
+            setPushStatus(capability === 'permission-denied' ? capability : 'error');
+            setPushError(error instanceof Error ? error.message : 'Impossible d’activer les notifications push.');
+          }
+        }}
+        onDisablePush={async () => {
+          setPushStatus('loading');
+          setPushError(null);
+          try {
+            const subscription = await getExistingPushSubscription();
+            if (subscription) {
+              try {
+                await api.removePushSubscription(subscription.endpoint);
+              } finally {
+                await subscription.unsubscribe();
+              }
+            }
+            setPushStatus(getPushSupportStatus());
+          } catch (error) {
+            setPushStatus('error');
+            setPushError(error instanceof Error ? error.message : 'Impossible de désactiver les notifications push.');
+          }
+        }}
         onMarkAllAsRead={() => {
           const unreadIds = notifications.filter(notification => !notification.read).map(notification => notification.id);
           if (unreadIds.length === 0 || !currentUser) return;

@@ -28,7 +28,6 @@ import {
   Megaphone,
   Activity,
   FileText,
-  GitBranch,
   RefreshCw,
   ArrowUpRight
 } from 'lucide-react';
@@ -134,47 +133,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [clientsModuleView, setClientsModuleView] = useState<'directory' | 'purchase-history'>('directory');
   const [clientDirectorySearch, setClientDirectorySearch] = useState('');
   const [isRefreshingData, setIsRefreshingData] = useState(false);
-  const [isGitHubPushModalOpen, setIsGitHubPushModalOpen] = useState(false);
-  const [githubTokenInput, setGithubTokenInput] = useState('');
-  const [githubCommitMessage, setGithubCommitMessage] = useState(
-    'Mise à jour Gloryday Pharma : activity_logs Supabase, RLS Admin, PDF & Historique Client'
-  );
-  const [isPushingGitHub, setIsPushingGitHub] = useState(false);
-  const [githubPushFeedback, setGithubPushFeedback] = useState<{
-    pushed: boolean;
-    error?: boolean;
-    message: string;
-    commitHash?: string;
-  } | null>(null);
-
-  const handleDirectGitHubPush = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsPushingGitHub(true);
-    setGithubPushFeedback(null);
-    try {
-      const cleanToken = githubTokenInput.trim();
-      const res = await api.syncGitHubRepository(
-        cleanToken || undefined,
-        githubCommitMessage.trim() || undefined
-      );
-      setGithubPushFeedback({
-        pushed: res.pushed,
-        message: res.message,
-        commitHash: res.commitHash
-      });
-    } catch (err: any) {
-      setGithubPushFeedback({
-        pushed: false,
-        error: true,
-        message: err?.message || 'Erreur lors du push sur le dépôt GitHub existant.'
-      });
-    } finally {
-      setGithubTokenInput('');
-      try { sessionStorage.removeItem('gloryday_gh_pat'); } catch {}
-      setIsPushingGitHub(false);
-    }
-  };
-
   // Volume discount settings state
   const [discountSettings, setDiscountSettings] = useState<VolumeDiscountSettings>(() => getActiveVolumeDiscountSettings());
   const [savingDiscounts, setSavingDiscounts] = useState(false);
@@ -190,6 +148,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [defaultSubTab]);
 
   useEffect(() => {
+    // Remove a legacy GitHub token left by older dashboard builds.
     try { sessionStorage.removeItem('gloryday_gh_pat'); } catch {}
   }, []);
 
@@ -331,20 +290,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2 self-start md:self-center flex-wrap">
-            {isSuperAdmin && (
-              <button
-                type="button"
-                onClick={() => {
-                  setGithubPushFeedback(null);
-                  setIsGitHubPushModalOpen(true);
-                }}
-                className="btn-shine py-2 px-3.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm border border-blue-400/30"
-                title="Pousser directement sur keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon- sans créer de nouveau dépôt"
-              >
-                <GitBranch className="w-4 h-4 text-emerald-300" />
-                <span>Push sur mon GitHub existant</span>
-              </button>
-            )}
+
             {isGestionnaire && (
               <button
                 type="button"
@@ -1609,105 +1555,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* DIRECT PUSH TO EXISTING GITHUB REPOSITORY MODAL */}
-      {isGitHubPushModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-200">
-            <div className="bg-slate-900 text-white px-5 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-[#0d44e8] flex items-center justify-center">
-                  <GitBranch className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-black">
-                    Pousser vers votre dépôt GitHub existant
-                  </h3>
-                  <p className="text-[11px] text-slate-300 font-mono">
-                    keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon-
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsGitHubPushModalOpen(false)}
-                className="text-slate-400 hover:text-white px-2 py-1 text-xs font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleDirectGitHubPush} className="p-5 space-y-4 text-xs">
-              <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 leading-relaxed">
-                <strong>Important :</strong> N&apos;utilisez pas l&apos;icône GitHub en haut d&apos;AI Studio (qui tente de créer un nouveau dépôt). Utilisez ce bouton pour pousser directement vos mises à jour sur votre dépôt existant{' '}
-                <span className="font-mono font-bold">keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon-</span> (branche <span className="font-mono font-bold">main</span>).
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 uppercase text-[11px] mb-1">
-                  Jeton d&apos;accès GitHub (Personal Access Token `ghp_...`)
-                </label>
-                <input
-                  type="password"
-                  value={githubTokenInput}
-                  onChange={(e) => setGithubTokenInput(e.target.value)}
-                  placeholder="Collez votre token GitHub (ex: ghp_xxxxxxxxxxxx) pour autoriser git push"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-[#0d44e8]"
-                />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Nécessaire pour authentifier l&apos;écriture sur votre compte <span className="font-mono">keurtisngueka-prog</span> (permission <span className="font-mono">repo</span>).
-                </p>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 uppercase text-[11px] mb-1">
-                  Message du Commit
-                </label>
-                <input
-                  type="text"
-                  value={githubCommitMessage}
-                  onChange={(e) => setGithubCommitMessage(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#0d44e8]"
-                />
-              </div>
-
-              {githubPushFeedback && (
-                <div className={`p-3.5 rounded-xl border font-semibold ${
-                  githubPushFeedback.error
-                    ? 'bg-rose-50 border-rose-200 text-rose-900'
-                    : githubPushFeedback.pushed
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                      : 'bg-amber-50 border-amber-200 text-amber-900'
-                }`}>
-                  <div>{githubPushFeedback.message}</div>
-                  {githubPushFeedback.commitHash && (
-                    <div className="mt-1 text-[11px] font-mono opacity-80">
-                      Commit : {githubPushFeedback.commitHash} · Branche : origin/main
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsGitHubPushModalOpen(false)}
-                  className="px-3.5 py-2 rounded-xl border border-slate-200 text-slate-700 font-bold hover:bg-slate-50 cursor-pointer"
-                >
-                  Fermer
-                </button>
-                <button
-                  type="submit"
-                  disabled={isPushingGitHub}
-                  className="px-4 py-2 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isPushingGitHub ? 'animate-spin' : ''}`} />
-                  <span>{isPushingGitHub ? 'Push en cours...' : 'Commit & Push sur origin/main'}</span>
-                </button>
-              </div>
-            </form>
           </div>
-        </div>
-      )}
-    </div>
   );
 };

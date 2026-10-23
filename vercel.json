@@ -5,7 +5,8 @@
   "outputDirectory": "dist",
   "functions": {
     "api/gateway.ts": {
-      "includeFiles": "supabase/migrations/**"
+      "includeFiles": "supabase/migrations/**",
+      "maxDuration": 60
     }
   },
   "rewrites": [
@@ -20,6 +21,25 @@
     }
   ],
   "headers": [
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+        { "key": "Service-Worker-Allowed", "value": "/" }
+      ]
+    },
+    {
+      "source": "/push-handler.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
     {
       "source": "/api/:path*",
       "headers": [

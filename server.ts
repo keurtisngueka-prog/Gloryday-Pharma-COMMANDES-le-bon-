@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
+import { createRequire } from 'module';
 import { INITIAL_PRODUCTS, INITIAL_PACKS, LEGACY_DEMO_PRODUCT_IDS, LEGACY_DEMO_PACK_IDS } from './src/data/initialProducts.js';
 import { getEstimatedDeliveryText, getNeighborhoodById, resolveOrderDestinationCoordinates } from './src/data/librevilleZones.js';
 import {
@@ -51,6 +52,7 @@ const DATA_DIR = process.env.DATA_DIR || (process.env.NODE_ENV === 'production' 
 const STORE_PATH = path.join(DATA_DIR, 'store.json');
 
 const scrypt = promisify(scryptCallback);
+const requireFromProject = createRequire(import.meta.url);
 const SESSION_COOKIE = 'gloryday_session';
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const STAFF_ROLES: StaffRole[] = ['Admin simple', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'];
@@ -642,6 +644,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       allowed = method === 'GET';
     } else if (route === '/events/announcement') {
       allowed = method === 'POST' && (isSuperAdmin || hasPerm('clients_manage'));
+    } else if (route === '/push/subscriptions' || route === '/push/unsubscribe') {
+      allowed = method === 'POST';
     } else if (route === '/events/read') {
       allowed = method === 'POST';
     } else if (route === '/admin/stats') {
@@ -650,7 +654,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       allowed = isSuperAdmin || hasPerm('settings_manage') || hasPerm('catalog_stock');
     } else if (route.startsWith('/admin/clients/')) {
       allowed = isSuperAdmin || isSimpleAdmin || isCommercial || hasPerm('clients_manage') || hasPerm('stats_view') || hasPerm('orders_view');
-    } else if (route.startsWith('/admin/staff') || route.startsWith('/admin/logs') || route.startsWith('/admin/activity-logs') || route.startsWith('/admin/github') || route === '/supabase/migration-sql' || route === '/auth/admin-password') {
+    } else if (route.startsWith('/admin/staff') || route.startsWith('/admin/logs') || route.startsWith('/admin/activity-logs') || route === '/supabase/migration-sql' || route === '/auth/admin-password') {
       allowed = isSuperAdmin;
     }
 
@@ -661,6 +665,91 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       next();
     }).catch(next);
   });
+
+  const sendPushNotifications = async (
+    userIds: string[],
+    title: string,
+    message: string,
+    url = '/#dashboard'
+  ): Promise<{ configured: boolean; sentCount: number }> => {
+    const publicKey = process.env.VAPID_PUBLIC_KEY?.trim() || '';
+    const privateKey = process.env.VAPID_PRIVATE_KEY?.trim() || '';
+    const subject = process.env.VAPID_SUBJECT?.trim() || '';
+    if (!persistence || !publicKey || !privateKey || !subject || userIds.length === 0) {
+      return { configured: false, sentCount: 0 };
+    }
+
+    type PushSubscription = {
+      endpoint: string;
+      expirationTime?: number | null;
+      keys: { p256dh: string; auth: string };
+    };
+    type WebPushClient = {
+      sendNotification: (
+        subscription: PushSubscription,
+        payload: string,
+        options: {
+          TTL: number;
+          urgency: 'normal';
+          timeout: number;
+          vapidDetails: { subject: string; publicKey: string; privateKey: string };
+        }
+      ) => Promise<unknown>;
+    };
+
+    let subscriptions: Awaited<ReturnType<SupabaseStorePersistence['listPushSubscriptions']>>;
+    let webPush: WebPushClient;
+    try {
+      subscriptions = await persistence.listPushSubscriptions(userIds);
+      webPush = requireFromProject('web-push') as WebPushClient;
+    } catch (error) {
+      console.warn('Push notifications unavailable:', error instanceof Error ? error.message : 'configuration missing');
+      return { configured: false, sentCount: 0 };
+    }
+
+    if (subscriptions.length === 0) return { configured: true, sentCount: 0 };
+    const payload = JSON.stringify({
+      title: title.slice(0, 120),
+      body: message.slice(0, 700),
+      url,
+      tag: `gloryday-${randomUUID().slice(0, 16)}`
+    });
+    let sentCount = 0;
+    for (let offset = 0; offset < subscriptions.length; offset += 100) {
+      const batch = subscriptions.slice(offset, offset + 100);
+      const results = await Promise.allSettled(batch.map(async row => {
+        try {
+          await webPush.sendNotification(row.subscription, payload, {
+            TTL: 60 * 60,
+            urgency: 'normal',
+            timeout: 5000,
+            vapidDetails: { subject, publicKey, privateKey }
+          });
+          return true;
+        } catch (error) {
+          const statusCode = error && typeof error === 'object' && 'statusCode' in error
+            ? Number((error as { statusCode?: unknown }).statusCode)
+            : 0;
+          if ((statusCode === 404 || statusCode === 410) && persistence) {
+            await persistence.deletePushSubscriptionByEndpoint(row.endpoint).catch(() => {});
+          }
+          return false;
+        }
+      }));
+      sentCount += results.filter(result => result.status === 'fulfilled' && result.value).length;
+    }
+    return { configured: true, sentCount };
+  };
+
+  const sendPushForNotification = async (notification: AppNotification, url = '/#dashboard') => {
+    if (!notification.userId) return { configured: false, sentCount: 0 };
+    return sendPushNotifications(
+      [notification.userId],
+      notification.title || 'Nouvelle information Gloryday Pharma',
+      notification.message,
+      url
+    );
+  };
 
   await migrateLegacyPasswords(store);
   if (persistence) await persistence.persist(store);
@@ -1728,8 +1817,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       return;
     }
     store.messages.unshift(msg);
+    let messagePushNotification: AppNotification | null = null;
     if (recipientId && recipientId !== 'staff' && (msg.channel === 'in_app' || msg.channel === 'both')) {
-      store.notifications.unshift({
+      messagePushNotification = {
         id: `notif-${randomUUID()}`,
         timestamp: msg.createdAt,
         type: 'admin_message',
@@ -1738,9 +1828,11 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         targetRole: 'client',
         userId: recipientId,
         read: false
-      });
+      };
+      store.notifications.unshift(messagePushNotification);
     }
     await saveStore(store, persistence);
+    if (messagePushNotification) await sendPushForNotification(messagePushNotification);
     res.status(201).json(msg);
   }));
 
@@ -2059,8 +2151,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       userId: account.user.id,
       read: false
     });
+    const orderCreatedNotification = store.notifications[0];
 
     await saveStore(store, persistence);
+    if (orderCreatedNotification) await sendPushForNotification(orderCreatedNotification);
     res.status(201).json(orderToSave);
   }));
 
@@ -2440,7 +2534,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         read: false
       });
     }
+    const customerStatusNotification = store.orders[idx].userId ? store.notifications[0] : null;
     await saveStore(store, persistence);
+    if (customerStatusNotification) await sendPushForNotification(customerStatusNotification);
     res.json(store.orders[idx]);
   }));
 
@@ -2573,6 +2669,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         read: false
       });
     }
+    const customerDeliveryNotification = order.userId && (stageChanged || courierChanged) ? store.notifications[0] : null;
 
     if (courierChanged && courierToSave) {
       const assignmentMessage = `${courierToSave.name} (${courierToSave.phone}) est affecté à la commande ${order.reference}. Le lien GPS de suivi en direct a été généré automatiquement.`;
@@ -2611,6 +2708,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     });
 
     await saveStore(store, persistence);
+    if (customerDeliveryNotification) await sendPushForNotification(customerDeliveryNotification);
     res.json(order);
   }));
 
@@ -2661,7 +2759,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         read: false
       });
     }
+    const customerPaymentNotification = wasPaid !== isPaid && store.orders[idx].userId ? store.notifications[0] : null;
     await saveStore(store, persistence);
+    if (customerPaymentNotification) await sendPushForNotification(customerPaymentNotification);
     res.json(store.orders[idx]);
   }));
 
@@ -2723,7 +2823,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         read: false
       });
     }
+    const customerMobilePaymentNotification = store.orders[idx].userId ? store.notifications[0] : null;
     await saveStore(store, persistence);
+    if (customerMobilePaymentNotification) await sendPushForNotification(customerMobilePaymentNotification);
     res.json(store.orders[idx]);
   }));
 
@@ -2843,6 +2945,57 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     res.json({ success: true, logs: store.staffLogs });
   }));
 
+  app.post('/api/push/subscriptions', asyncHandler(async (req, res) => {
+    const user = (req as AuthenticatedRequest).authenticatedUser!;
+    const raw = req.body?.subscription;
+    const endpoint = String(raw?.endpoint || '').trim();
+    const p256dh = String(raw?.keys?.p256dh || '').trim();
+    const auth = String(raw?.keys?.auth || '').trim();
+    let endpointUrl: URL | null = null;
+    try { endpointUrl = new URL(endpoint); } catch {}
+    const hostname = endpointUrl?.hostname.toLowerCase() || '';
+    const allowedPushHost = hostname === 'fcm.googleapis.com'
+      || hostname === 'fcmregistrations.googleapis.com'
+      || hostname === 'push.services.mozilla.com'
+      || hostname.endsWith('.push.services.mozilla.com')
+      || hostname.endsWith('.push.apple.com')
+      || hostname.endsWith('.notify.windows.com');
+
+    if (!endpointUrl || endpointUrl.protocol !== 'https:' || endpointUrl.username || endpointUrl.password || endpointUrl.port || !allowedPushHost
+      || endpoint.length > 2048 || p256dh.length < 20 || p256dh.length > 256 || auth.length < 8 || auth.length > 128) {
+      res.status(400).json({ error: 'Abonnement de notifications invalide.' });
+      return;
+    }
+    if (!persistence || !process.env.VAPID_PUBLIC_KEY?.trim() || !process.env.VAPID_PRIVATE_KEY?.trim() || !process.env.VAPID_SUBJECT?.trim()) {
+      res.status(503).json({ error: 'Les notifications push ne sont pas encore configurées sur le serveur.' });
+      return;
+    }
+
+    const currentSubscriptions = await persistence.listPushSubscriptions([user.id]);
+    if (currentSubscriptions.length >= 20 && !currentSubscriptions.some(item => item.endpoint === endpoint)) {
+      res.status(409).json({ error: 'Cet utilisateur a déjà atteint la limite d’appareils activés.' });
+      return;
+    }
+
+    await persistence.upsertPushSubscription(user.id, {
+      endpoint,
+      expirationTime: Number.isFinite(Number(raw?.expirationTime)) ? Number(raw.expirationTime) : null,
+      keys: { p256dh, auth }
+    });
+    res.status(201).json({ success: true });
+  }));
+
+  app.post('/api/push/unsubscribe', asyncHandler(async (req, res) => {
+    const user = (req as AuthenticatedRequest).authenticatedUser!;
+    const endpoint = String(req.body?.endpoint || '').trim();
+    if (!endpoint || endpoint.length > 2048) {
+      res.status(400).json({ error: 'Adresse d’abonnement invalide.' });
+      return;
+    }
+    if (persistence) await persistence.deletePushSubscription(user.id, endpoint);
+    res.json({ success: true });
+  }));
+
   app.get('/api/events', (_req, res) => {
     const user = (_req as AuthenticatedRequest).authenticatedUser!;
     const requestedSince = Number(_req.query.since);
@@ -2887,7 +3040,12 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }));
     store.notifications.unshift(...announcements);
     await saveStore(store, persistence);
-    res.status(201).json({ sentCount: announcements.length });
+    const push = await sendPushNotifications(clients.map(({ user }) => user.id), title, message, '/#packs');
+    res.status(201).json({
+      sentCount: announcements.length,
+      pushConfigured: push.configured,
+      pushSentCount: push.sentCount
+    });
   }));
 
   app.post('/api/events/read', asyncHandler(async (req, res) => {
@@ -2931,91 +3089,6 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
     res.json({ sql: '' });
   });
-
-  app.post('/api/admin/github/sync', asyncHandler(async (req, res) => {
-    const { execFile } = await import('child_process');
-    const execFileAsync = promisify(execFile);
-    const repoUrl = 'https://github.com/keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon-.git';
-    const personalToken = String(req.body?.token || process.env.GITHUB_TOKEN || '').trim();
-    const commitMsg = String(req.body?.commitMessage || 'Mise à jour Gloryday Pharma : activity_logs Supabase, historique achats clients & synchronisation temps réel').trim();
-    const actor = (req as AuthenticatedRequest).authenticatedUser;
-
-    try {
-      const gitRoot = await execFileAsync('git', ['rev-parse', '--show-toplevel'], { cwd: __dirname });
-      if (path.resolve(gitRoot.stdout.trim()) !== path.resolve(__dirname)) {
-        throw new Error('La synchronisation GitHub doit être lancée depuis la racine du dépôt.');
-      }
-      const branch = await execFileAsync('git', ['branch', '--show-current'], { cwd: __dirname });
-      if (branch.stdout.trim() !== 'main') {
-        throw new Error('La synchronisation est autorisée uniquement depuis la branche main.');
-      }
-      const origin = await execFileAsync('git', ['remote', 'get-url', 'origin'], { cwd: __dirname });
-      if (origin.stdout.trim().replace(/\.git$/i, '').toLowerCase() !== repoUrl.replace(/\.git$/i, '').toLowerCase()) {
-        throw new Error('Le dépôt distant ne correspond pas au dépôt Gloryday Pharma prévu.');
-      }
-      if (personalToken.length > 500 || /[\r\n]/.test(personalToken)) {
-        throw new Error('Le jeton GitHub fourni est invalide.');
-      }
-
-      await execFileAsync('git', ['add', '-A'], { cwd: __dirname });
-      await execFileAsync('git', ['-c', 'user.name=Gloryday Pharma Admin', '-c', 'user.email=admin@glorydaypharma.ga', 'commit', '-m', commitMsg], { cwd: __dirname }).catch(() => undefined);
-      const rev = await execFileAsync('git', ['rev-parse', '--short', 'HEAD'], { cwd: __dirname });
-      const commitHash = rev.stdout.trim();
-
-      if (!personalToken) {
-        appendStaffLog(actor, {
-          actionType: 'GITHUB_COMMIT_LOCAL',
-          category: 'system',
-          severity: 'info',
-          actionLabel: 'Commit Git préparé pour GitHub',
-          targetType: 'settings',
-          targetId: commitHash || 'main',
-          targetLabel: 'keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon-',
-          details: `Commit local ${commitHash} enregistré sur la branche main. Ajoutez un jeton GitHub (Personal Access Token) pour pousser directement vers le dépôt distant.`
-        });
-        await saveStore(store, persistence);
-        res.json({
-          success: true,
-          pushed: false,
-          commitHash,
-          repoUrl,
-          message: `Commit local (${commitHash}) créé avec succès. Pour pousser directement vers GitHub depuis ce serveur, renseignez votre jeton d'accès GitHub (Personal Access Token) ou téléchargez l'archive ZIP mise à jour.`
-        });
-        return;
-      }
-
-      const pushEnvironment: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-      if (personalToken) {
-        const authHeader = Buffer.from(`x-access-token:${personalToken}`).toString('base64');
-        pushEnvironment.GIT_CONFIG_COUNT = '1';
-        pushEnvironment.GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader';
-        pushEnvironment.GIT_CONFIG_VALUE_0 = `AUTHORIZATION: basic ${authHeader}`;
-      }
-      await execFileAsync('git', ['push', 'origin', 'HEAD:main'], { cwd: __dirname, env: pushEnvironment });
-
-      appendStaffLog(actor, {
-        actionType: 'GITHUB_PUSH_SUCCESS',
-        category: 'system',
-        severity: 'info',
-        actionLabel: 'Synchronisation & Push GitHub réussis',
-        targetType: 'settings',
-        targetId: commitHash || 'main',
-        targetLabel: 'keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon-',
-        details: `Le commit ${commitHash} a été poussé avec succès sur la branche main du dépôt GitHub.`
-      });
-      await saveStore(store, persistence);
-      res.json({
-        success: true,
-        pushed: true,
-        commitHash,
-        repoUrl,
-        message: `Synchronisation réussie : le commit ${commitHash} a été poussé sur keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon- (branche main).`
-      });
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Erreur lors de la synchronisation Git.';
-      res.status(500).json({ error: `Synchronisation Git : ${errMsg}` });
-    }
-  }));
 
   app.get('/api/download-project-zip', (_req, res) => {
     const updatedZipPath = path.join(__dirname, 'public', 'gloryday-pharma-corrige-20261022.zip');

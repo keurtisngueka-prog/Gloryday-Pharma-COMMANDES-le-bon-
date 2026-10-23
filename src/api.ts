@@ -20,6 +20,7 @@ import {
   StaffActivityStats,
   StaffActivityLog
 } from './types';
+import type { PushSubscriptionPayload } from './utils/pushNotifications';
 
 export type StaffRole = Extract<AppRole, 'Admin simple' | 'Commercial' | 'Gestionnaire Catalogue' | 'Logistique'>;
 
@@ -539,10 +540,28 @@ export const api = {
     return request<AppNotification[]>(`/api/events?since=${since}`);
   },
 
-  async sendClientAnnouncement(title: string, message: string): Promise<{ sentCount: number }> {
-    return request<{ sentCount: number }>('/api/events/announcement', {
+  async sendClientAnnouncement(title: string, message: string): Promise<{
+    sentCount: number;
+    pushConfigured: boolean;
+    pushSentCount: number;
+  }> {
+    return request<{ sentCount: number; pushConfigured: boolean; pushSentCount: number }>('/api/events/announcement', {
       method: 'POST',
       body: JSON.stringify({ title, message })
+    });
+  },
+
+  async registerPushSubscription(subscription: PushSubscriptionPayload): Promise<void> {
+    await request<{ success: boolean }>('/api/push/subscriptions', {
+      method: 'POST',
+      body: JSON.stringify({ subscription })
+    });
+  },
+
+  async removePushSubscription(endpoint: string): Promise<void> {
+    await request<{ success: boolean }>('/api/push/unsubscribe', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint })
     });
   },
 
@@ -568,18 +587,6 @@ export const api = {
     return request<any>(`/api/admin/clients/${encodeURIComponent(clientId)}/purchases`);
   },
 
-  async syncGitHubRepository(token?: string, commitMessage?: string): Promise<{
-    success: boolean;
-    pushed: boolean;
-    commitHash: string;
-    repoUrl: string;
-    message: string;
-  }> {
-    return request('/api/admin/github/sync', {
-      method: 'POST',
-      body: JSON.stringify({ token, commitMessage })
-    });
-  }
 };
 
 

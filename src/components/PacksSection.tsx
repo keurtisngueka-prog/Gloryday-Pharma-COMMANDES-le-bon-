@@ -40,7 +40,19 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedPack]);
 
-  if (packs.length === 0) return null;
+  if (packs.length === 0) {
+    return (
+      <section className="mb-8 rounded-2xl border border-dashed border-slate-300 bg-white p-6 sm:p-8 text-center">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-[#0d44e8]">
+          <Layers className="h-6 w-6" />
+        </div>
+        <h2 className="text-sm sm:text-base font-extrabold text-slate-900">Aucun pack médical publié pour le moment</h2>
+        <p className="mx-auto mt-1.5 max-w-md text-xs sm:text-sm leading-relaxed text-slate-600">
+          Les packs et campagnes s’afficheront ici dès que l’équipe Gloryday Pharma en aura publié. Vous pouvez déjà commander les articles séparément dans le catalogue.
+        </p>
+      </section>
+    );
+  }
 
   const handleAdd = (pack: Pack) => {
     onAddPackToCart(pack);

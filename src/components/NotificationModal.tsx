@@ -11,9 +11,14 @@ import {
   FileText, 
   Send,
   ExternalLink,
-  KeyRound
+  KeyRound,
+  Smartphone,
+  BellRing,
+  BellOff,
+  LoaderCircle
 } from 'lucide-react';
 import { AppNotification } from '../types';
+import type { PushNotificationStatus } from '../utils/pushNotifications';
 
 interface NotificationModalProps {
   isOpen: boolean;
@@ -22,6 +27,10 @@ interface NotificationModalProps {
   onMarkAllAsRead: () => void;
   onSelectNotificationAction?: (notification: AppNotification) => void;
   onSendCustomNotification?: (title: string, message: string, type: AppNotification['type']) => void;
+  pushStatus: PushNotificationStatus;
+  pushError?: string | null;
+  onEnablePush?: () => void;
+  onDisablePush?: () => void;
 }
 
 export const NotificationModal: React.FC<NotificationModalProps> = ({
@@ -30,7 +39,11 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
   notifications,
   onMarkAllAsRead,
   onSelectNotificationAction,
-  onSendCustomNotification
+  onSendCustomNotification,
+  pushStatus,
+  pushError,
+  onEnablePush,
+  onDisablePush
 }) => {
   const [filterType, setFilterType] = useState<'all' | 'orders' | 'promos'>('all');
 
@@ -83,6 +96,58 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
+        </div>
+
+        <div className="px-4 py-3 border-b border-slate-100 bg-blue-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <div className="mt-0.5 w-8 h-8 rounded-xl bg-white text-[#0d44e8] border border-blue-100 flex items-center justify-center shrink-0">
+              {pushStatus === 'enabled' ? <BellRing className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-slate-900">
+                {pushStatus === 'enabled' ? 'Notifications push activées'
+                  : pushStatus === 'loading' ? 'Vérification des notifications…'
+                    : pushStatus === 'available' ? 'Recevoir les nouvelles même si le site est fermé'
+                      : pushStatus === 'permission-denied' ? 'Notifications bloquées dans le navigateur'
+                        : pushStatus === 'unsupported' ? 'Notifications push indisponibles sur cet appareil'
+                          : pushStatus === 'unconfigured' ? 'Notifications push à configurer sur le site'
+                            : pushStatus === 'signed-out' ? 'Connectez-vous pour activer les notifications'
+                              : 'Paramètres des notifications push'}
+              </p>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                {pushStatus === 'enabled'
+                  ? 'Les annonces et les mises à jour de commande peuvent vous être envoyées sur cet appareil.'
+                  : pushStatus === 'unconfigured'
+                    ? 'L’activation sera disponible après configuration technique du site.'
+                    : pushStatus === 'permission-denied'
+                      ? 'Autorisez les notifications depuis les réglages du navigateur.'
+                      : pushStatus === 'unsupported'
+                        ? 'Utilisez un navigateur compatible sur une connexion HTTPS.'
+                        : pushStatus === 'signed-out'
+                          ? 'Un compte connecté est nécessaire pour associer cet appareil.'
+                          : 'Vous gardez le contrôle : aucune autorisation n’est demandée sans votre clic.'}
+              </p>
+              {pushError && <p className="text-[11px] text-rose-700 mt-1">{pushError}</p>}
+            </div>
+          </div>
+          {pushStatus === 'available' && (
+            <button type="button" onClick={onEnablePush} className="shrink-0 px-3.5 py-2 rounded-xl bg-[#0d44e8] text-white text-xs font-bold hover:bg-[#0b3ac7]">
+              Activer les notifications push
+            </button>
+          )}
+          {pushStatus === 'enabled' && (
+            <button type="button" onClick={onDisablePush} className="shrink-0 px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-100 flex items-center gap-1.5">
+              <BellOff className="w-3.5 h-3.5" /> Désactiver
+            </button>
+          )}
+          {pushStatus === 'loading' && (
+            <LoaderCircle className="w-4 h-4 text-[#0d44e8] animate-spin shrink-0" />
+          )}
+          {pushStatus === 'error' && (
+            <button type="button" onClick={onEnablePush} className="shrink-0 px-3.5 py-2 rounded-xl bg-white border border-blue-200 text-[#0d44e8] text-xs font-bold hover:bg-blue-50">
+              Réessayer
+            </button>
+          )}
         </div>
 
         {/* Filter Pills */}
@@ -192,9 +257,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
 
         {/* Modal Footer */}
         <div className="p-3 px-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between text-xs shrink-0">
-          <span className="text-[11px] text-slate-500">
-            Mises à jour consultées dans l'application; notifications push non configurées
-          </span>
+          <span className="text-[11px] text-slate-500">Activez le push pour les annonces et le suivi de commande.</span>
           <button
             type="button"
             onClick={onClose}

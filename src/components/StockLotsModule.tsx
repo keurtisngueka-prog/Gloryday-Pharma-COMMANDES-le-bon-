@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Product } from '../types';
 import { recordAuditLog } from '../utils/auditLogger';
+import { matchesProductSearch } from '../utils/search';
 
 interface StockLotsModuleProps {
   products: Product[];
@@ -27,7 +28,7 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
   actorName = 'Gestionnaire Catalogue',
   actorRole = 'Super-Admin'
 }) => {
-  const [statusFilter, setStatusFilter] = useState<'all' | 'rupture' | 'disponible'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'rupture' | 'disponible' | 'sur-commande'>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('Toutes');
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedRestockList, setCopiedRestockList] = useState(false);
@@ -35,24 +36,27 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
 
   const categories = ['Toutes', ...Array.from(new Set(products.map(p => p.category)))];
 
-  const availableProducts = products.filter(p => p.status === 'disponible');
-  const outOfStockProducts = products.filter(p => p.status === 'rupture');
-  const availabilityRate = products.length > 0
-    ? Math.round((availableProducts.length / products.length) * 100)
+  const isQuoteOnly = (product: Product) => Boolean(
+    product.isQuote || (product.variants.length > 0 && product.variants.every(variant => variant.price === 0))
+  );
+  const hasPhysicalStock = (product: Product) => {
+    const quantity = Number(product.quantityAvailable ?? product.stockQuantity ?? 0);
+    return !isQuoteOnly(product) && product.status !== 'rupture' && quantity > 0;
+  };
+  const stockTrackedProducts = products.filter(product => !isQuoteOnly(product));
+  const availableProducts = stockTrackedProducts.filter(hasPhysicalStock);
+  const onOrderProducts = stockTrackedProducts.filter(product => product.status !== 'rupture' && !hasPhysicalStock(product));
+  const outOfStockProducts = stockTrackedProducts.filter(product => product.status === 'rupture');
+  const availabilityRate = stockTrackedProducts.length > 0
+    ? Math.round((availableProducts.length / stockTrackedProducts.length) * 100)
     : 100;
 
   const filteredProducts = products.filter(p => {
-    if (statusFilter === 'rupture' && p.status !== 'rupture') return false;
-    if (statusFilter === 'disponible' && p.status !== 'disponible') return false;
+    if (statusFilter === 'rupture' && (isQuoteOnly(p) || p.status !== 'rupture')) return false;
+    if (statusFilter === 'disponible' && !hasPhysicalStock(p)) return false;
+    if (statusFilter === 'sur-commande' && (isQuoteOnly(p) || p.status === 'rupture' || hasPhysicalStock(p))) return false;
     if (categoryFilter !== 'Toutes' && p.category !== categoryFilter) return false;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      return (
-        p.name.toLowerCase().includes(q) ||
-        p.category.toLowerCase().includes(q) ||
-        (p.subcategory && p.subcategory.toLowerCase().includes(q))
-      );
-    }
+    if (searchQuery.trim() && !matchesProductSearch(p, searchQuery)) return false;
     return true;
   });
 
@@ -90,7 +94,7 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
   return (
     <div className="space-y-5">
       {/* 1. STOCK AVAILABILITY KPIS */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Références Catalogue</span>
           <div className="text-2xl font-black text-slate-900 mt-1 tabular-nums">{products.length}</div>
@@ -101,6 +105,12 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
           <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">En Stock Disponible</span>
           <div className="text-2xl font-black text-emerald-900 mt-1 tabular-nums">{availableProducts.length}</div>
           <span className="text-[11px] text-emerald-700">Disponibles selon le stock renseigné</span>
+        </div>
+
+        <div className="bg-white p-4 rounded-2xl border border-amber-200 bg-amber-50/30 shadow-2xs">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">Sur commande</span>
+          <div className="text-2xl font-black text-amber-900 mt-1 tabular-nums">{onOrderProducts.length}</div>
+          <span className="text-[11px] text-amber-700">Quantite physique: zero</span>
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-rose-200 bg-rose-50/20 shadow-2xs">
@@ -180,6 +190,19 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
               <span>Disponibles ({availableProducts.length})</span>
             </button>
 
+            <button
+              type="button"
+              onClick={() => setStatusFilter('sur-commande')}
+              className={`px-3 py-1 rounded-xl font-bold cursor-pointer transition-colors flex items-center gap-1 ${
+                statusFilter === 'sur-commande'
+                  ? 'bg-amber-600 text-white'
+                  : 'bg-white text-amber-800 hover:bg-amber-50 border border-amber-200'
+              }`}
+            >
+              <Package className="w-3 h-3" />
+              <span>Sur commande ({onOrderProducts.length})</span>
+            </button>
+
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
@@ -213,6 +236,14 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
             filteredProducts.map((product) => {
               const isAvailable = product.status === 'disponible';
               const minPrice = product.variants.length > 0 ? product.variants[0].price : 0;
+              const quantity = Number(product.quantityAvailable ?? product.stockQuantity ?? 0);
+              const stockLabel = isQuoteOnly(product)
+                ? 'Sur devis'
+                : product.status === 'rupture'
+                  ? 'Rupture'
+                  : hasPhysicalStock(product)
+                    ? `${quantity || 'Disponible'} en stock`
+                    : 'Sur commande';
 
               return (
                 <div
@@ -247,6 +278,15 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
                   </div>
 
                   <div className="flex items-center gap-2 self-end sm:self-center">
+                    <span className={`px-2 py-1 rounded-lg text-[10px] font-bold ${
+                      stockLabel === 'Rupture'
+                        ? 'bg-rose-100 text-rose-800'
+                        : stockLabel === 'Sur commande'
+                          ? 'bg-amber-100 text-amber-800'
+                          : stockLabel === 'Sur devis'
+                            ? 'bg-slate-100 text-slate-700'
+                            : 'bg-emerald-100 text-emerald-800'
+                    }`}>{stockLabel}</span>
                     <button
                       type="button"
                       disabled={updatingId === product.id}
@@ -260,7 +300,7 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
                       {isAvailable ? (
                         <>
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>Disponible (Mettre en rupture)</span>
+                          <span>Actif catalogue (mettre en rupture)</span>
                         </>
                       ) : (
                         <>

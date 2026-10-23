@@ -705,6 +705,59 @@ export class SupabaseStorePersistence {
     return operation;
   }
 
+  async upsertPushSubscription(userId: string, subscription: {
+    endpoint: string;
+    expirationTime?: number | null;
+    keys: { p256dh: string; auth: string };
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    const { error } = await this.client
+      .from('push_subscriptions')
+      .upsert({
+        endpoint: subscription.endpoint,
+        user_id: userId,
+        subscription,
+        updated_at: now
+      }, { onConflict: 'endpoint' });
+    assertNoError('push_subscriptions.upsert', error);
+  }
+
+  async listPushSubscriptions(userIds: string[]): Promise<Array<{
+    endpoint: string;
+    user_id: string;
+    subscription: { endpoint: string; expirationTime?: number | null; keys: { p256dh: string; auth: string } };
+  }>> {
+    const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
+    if (uniqueUserIds.length === 0) return [];
+    const { data, error } = await this.client
+      .from('push_subscriptions')
+      .select('endpoint, user_id, subscription')
+      .in('user_id', uniqueUserIds);
+    assertNoError('push_subscriptions.list', error);
+    return rows(data).map(row => ({
+      endpoint: String(row.endpoint),
+      user_id: String(row.user_id),
+      subscription: row.subscription
+    }));
+  }
+
+  async deletePushSubscription(userId: string, endpoint: string): Promise<void> {
+    const { error } = await this.client
+      .from('push_subscriptions')
+      .delete()
+      .eq('user_id', userId)
+      .eq('endpoint', endpoint);
+    assertNoError('push_subscriptions.delete', error);
+  }
+
+  async deletePushSubscriptionByEndpoint(endpoint: string): Promise<void> {
+    const { error } = await this.client
+      .from('push_subscriptions')
+      .delete()
+      .eq('endpoint', endpoint);
+    assertNoError('push_subscriptions.delete_expired', error);
+  }
+
   async persist(store: PersistentServerStore): Promise<void> {
     const snapshot = clone(store);
     const operation = this.queue.then(async () => {

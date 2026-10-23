@@ -19,6 +19,7 @@ export default defineConfig(async ({ command, mode }) => {
     process.env.VITE_SUPABASE_ANON_KEY ||
     process.env.SUPABASE_ANON_KEY ||
     '';
+  const resolvedVapidPublicKey = env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBLIC_KEY || '';
 
   const plugins = [react(), tailwindcss()];
   if (command === 'build') {
@@ -27,10 +28,11 @@ export default defineConfig(async ({ command, mode }) => {
       VitePWA({
         registerType: 'autoUpdate',
         injectRegister: null,
-        includeAssets: ['apple-touch-icon.png', 'icon.svg', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
+        includeAssets: ['apple-touch-icon.png', 'icon.svg', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png', 'push-handler.js'],
         manifest: false,
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,webmanifest}'],
+          importScripts: ['/push-handler.js'],
         },
       })
     );
@@ -46,6 +48,7 @@ export default defineConfig(async ({ command, mode }) => {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(resolvedSupabaseUrl),
       'import.meta.env.SUPABASE_ANON_KEY': JSON.stringify(resolvedSupabaseAnonKey),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(resolvedSupabaseAnonKey),
+      'import.meta.env.APP_PUBLIC_VAPID_KEY': JSON.stringify(resolvedVapidPublicKey),
     },
     plugins,
     resolve: {
