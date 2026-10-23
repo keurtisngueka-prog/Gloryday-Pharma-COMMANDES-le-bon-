@@ -27,6 +27,16 @@ function readBlobAsDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+export async function loadBrandLogoDataUrl(): Promise<string | null> {
+  try {
+    const response = await fetch('/gloryday-logo.png', { cache: 'force-cache' });
+    if (!response.ok) return null;
+    return await readBlobAsDataUrl(await response.blob());
+  } catch {
+    return null;
+  }
+}
+
 export function createPdfObjectUrl(dataUrl: string): string {
   if (dataUrl.startsWith('blob:')) {
     return dataUrl;
@@ -72,6 +82,7 @@ async function createJsPdfInstance() {
 
 export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; dataUrl: string }> {
   const doc = await createJsPdfInstance();
+  const logoDataUrl = await loadBrandLogoDataUrl();
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const blue = [13, 68, 232];
@@ -99,11 +110,18 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
     doc.rect(0, 0, pageWidth, 28, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(19);
-    doc.text('GLORYDAY PHARMA', margin, 14);
+    doc.setFontSize(17);
+    if (logoDataUrl) {
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(margin, 2, 28, 24, 1.5, 1.5, 'F');
+      doc.addImage(logoDataUrl, 'PNG', margin + 1, 2.5, 26, 23, 'GLORYDAY_LOGO', 'FAST');
+      doc.text('GLORYDAY PHARMA', margin + 33, 13.5);
+    } else {
+      doc.text('GLORYDAY PHARMA', margin, 14);
+    }
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
-    doc.text(text('Distribution médicale, consommables et équipements hospitaliers'), margin, 21);
+    doc.text(text(logoDataUrl ? 'Distribution médicale · Libreville, Gabon' : 'Distribution médicale, consommables et équipements hospitaliers'), logoDataUrl ? margin + 33 : margin, 21);
     doc.text('Libreville, Gabon | +241 77 003 004 / +241 66 240 399', pageWidth - margin, 21, { align: 'right' });
 
     doc.setTextColor(ink[0], ink[1], ink[2]);

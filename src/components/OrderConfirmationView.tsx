@@ -10,7 +10,7 @@ import {
   Smartphone 
 } from 'lucide-react';
 import { Order } from '../types';
-import { generateWhatsAppOrderUrl } from '../utils/whatsapp';
+import { formatOrderWhatsAppMessage, generateWhatsAppOrderUrl, generateWhatsAppWebOrderUrl } from '../utils/whatsapp';
 import { computeDeliveryTimeWindow } from '../data/librevilleZones';
 import { MobilePaymentModal } from './MobilePaymentModal';
 import { OrderPdfDocumentModal } from './OrderPdfDocumentModal';
@@ -41,6 +41,8 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
   onTrackOrder
 }) => {
   const [copied, setCopied] = useState(false);
+  const [whatsAppMessageCopied, setWhatsAppMessageCopied] = useState(false);
+  const [whatsAppCopyFailed, setWhatsAppCopyFailed] = useState(false);
   const [useSecondaryNumber, setUseSecondaryNumber] = useState(false);
   const [isMobilePaymentOpen, setIsMobilePaymentOpen] = useState(false);
   const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
@@ -49,6 +51,33 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
   const primaryUrl = generateWhatsAppOrderUrl(order, order.pdfUrl, false);
   const secondaryUrl = generateWhatsAppOrderUrl(order, order.pdfUrl, true);
   const currentWhatsAppUrl = useSecondaryNumber ? secondaryUrl : primaryUrl;
+  const currentWhatsAppWebUrl = generateWhatsAppWebOrderUrl(order, order.pdfUrl, useSecondaryNumber);
+  const currentWhatsAppMessage = formatOrderWhatsAppMessage(order, order.pdfUrl);
+
+  const handleCopyWhatsAppMessage = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(currentWhatsAppMessage);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = currentWhatsAppMessage;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copiedSuccessfully = document.execCommand('copy');
+        textarea.remove();
+        if (!copiedSuccessfully) throw new Error('Copie indisponible');
+      }
+      setWhatsAppCopyFailed(false);
+      setWhatsAppMessageCopied(true);
+      window.setTimeout(() => setWhatsAppMessageCopied(false), 2500);
+    } catch {
+      setWhatsAppCopyFailed(true);
+      setWhatsAppMessageCopied(false);
+    }
+  };
 
   const handleCopyRef = () => {
     navigator.clipboard.writeText(order.reference);
@@ -241,6 +270,29 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
           <MessageCircle className="w-4 h-4" />
           <span>Transmettre le récapitulatif sur WhatsApp</span>
         </a>
+
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+          <a
+            href={currentWhatsAppWebUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-emerald-800 underline underline-offset-2 hover:text-emerald-950"
+          >
+            Si l’application ne s’ouvre pas : WhatsApp Web
+          </a>
+          <button
+            type="button"
+            onClick={() => void handleCopyWhatsAppMessage()}
+            className="font-semibold text-slate-600 underline underline-offset-2 hover:text-slate-900"
+          >
+            {whatsAppMessageCopied ? 'Message copié' : 'Copier le message'}
+          </button>
+        </div>
+        {whatsAppCopyFailed && (
+          <p role="status" className="mt-1 text-[11px] text-amber-800">
+            La copie automatique est bloquée par ce navigateur. Le lien WhatsApp reste disponible ci-dessus.
+          </p>
+        )}
 
         <div className="mt-2.5 flex items-center gap-1 text-[11px] text-emerald-800 font-medium">
           <Clock className="w-3 h-3 shrink-0" />

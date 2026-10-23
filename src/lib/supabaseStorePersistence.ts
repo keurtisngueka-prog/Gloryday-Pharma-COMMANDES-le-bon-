@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { randomUUID } from 'node:crypto';
 import { LEGACY_DEMO_PRODUCT_IDS, LEGACY_DEMO_PACK_IDS } from '../data/initialProducts.js';
 import type {
   AppNotification,
@@ -119,6 +120,38 @@ export class SupabaseStorePersistence {
     this.client = client;
     this.supabaseUrl = supabaseUrl;
     this.serviceKey = serviceKey;
+  }
+
+  async createProductMediaUploadUrl(kind: 'image' | 'pdf', contentType: string): Promise<{
+    bucket: string;
+    path: string;
+    token: string;
+    signedUrl: string;
+    publicUrl: string;
+  }> {
+    const extension = kind === 'pdf'
+      ? 'pdf'
+      : contentType === 'image/webp'
+        ? 'webp'
+        : contentType === 'image/png'
+          ? 'png'
+          : 'jpg';
+    const directory = kind === 'pdf' ? 'notices' : 'products';
+    const bucket = 'product-media';
+    const path = `${directory}/${randomUUID()}.${extension}`;
+    const storage = this.client.storage.from(bucket);
+    const { data, error } = await storage.createSignedUploadUrl(path);
+    assertNoError('création du lien d’import média', error);
+    if (!data) throw new Error('Supabase n’a pas fourni de lien d’import média.');
+    const { data: publicData } = storage.getPublicUrl(path);
+
+    return {
+      bucket,
+      path,
+      token: data.token,
+      signedUrl: data.signedUrl,
+      publicUrl: publicData.publicUrl,
+    };
   }
 
   private async getStaffClient(): Promise<SupabaseClient> {
@@ -524,6 +557,154 @@ export class SupabaseStorePersistence {
     return cleanedMerged;
   }
 
+  async loadProducts(): Promise<Product[]> {
+    const operation = this.queue.then(async () => {
+      const [productsResult, variantsResult] = await Promise.all([
+        this.client.from('products').select('*').order('created_at', { ascending: true }),
+        this.client.from('product_variants').select('*').order('id', { ascending: true }),
+      ]);
+      assertNoError('actualisation du catalogue', productsResult.error);
+      assertNoError('actualisation des variantes', variantsResult.error);
+
+      const variantsByProduct = new Map<string, Row[]>();
+      for (const variant of rows(variantsResult.data)) {
+        const productId = String(variant.product_id);
+        const list = variantsByProduct.get(productId) || [];
+        list.push(variant);
+        variantsByProduct.set(productId, list);
+      }
+
+      const products = rows(productsResult.data).map((row): Product => {
+        const extra = dataObject(row.app_data);
+        return {
+          ...extra,
+          id: String(row.id),
+          name: String(row.name),
+          category: String(row.category),
+          subcategory: row.subcategory || undefined,
+          specialty: extra.specialty,
+          specifications: extra.specifications,
+          variants: (variantsByProduct.get(String(row.id)) || []).map((variant) => ({
+            label: String(variant.label),
+            price: numberOr(variant.price),
+            originalPrice: variant.original_price == null ? undefined : numberOr(variant.original_price),
+            discountPercentage: variant.discount_percentage == null ? undefined : numberOr(variant.discount_percentage),
+          })),
+          status: row.status === 'rupture' ? 'rupture' : 'disponible',
+          image: row.image_url || undefined,
+          thumbnailUrl: extra.thumbnailUrl || row.image_url || undefined,
+          description: row.description || undefined,
+          isPromotion: Boolean(row.is_promotion),
+          originalPrice: numberOr(row.original_price),
+          discountPercentage: numberOr(row.discount_percentage),
+          stockQuantity: extra.stockQuantity,
+          quantityAvailable: extra.quantityAvailable,
+          alertThreshold: numberOr(row.alert_threshold, 15),
+          lowStockAlertThreshold: extra.lowStockAlertThreshold,
+          purchasePrice: numberOr(row.purchase_price),
+        };
+      }).filter((product) => !LEGACY_DEMO_PRODUCT_IDS.has(product.id));
+
+      if (this.baseline) this.baseline.products = clone(products);
+      return products;
+    });
+    this.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  async loadOrders(clientUserId?: string): Promise<Order[]> {
+    const operation = this.queue.then(async () => {
+      const profileId = clientUserId ? this.profileIds.get(clientUserId) : undefined;
+      if (clientUserId && !profileId) {
+        throw new Error('Le profil client n’est pas synchronisé dans Supabase. Reconnectez-vous avant de consulter les commandes.');
+      }
+      let ordersQuery = this.client.from('orders').select('*').order('created_at', { ascending: false });
+      if (profileId) ordersQuery = ordersQuery.eq('client_id', profileId);
+      const ordersResult = await ordersQuery;
+      assertNoError('actualisation des commandes', ordersResult.error);
+
+      const appUserByProfile = new Map<string, string>();
+      for (const [appUserId, mappedProfileId] of this.profileIds.entries()) {
+        appUserByProfile.set(mappedProfileId, appUserId);
+      }
+
+      const itemsByOrder = new Map<string, Row[]>();
+      const orderRows = rows(ordersResult.data);
+      const ordersNeedingItemRows = orderRows
+        .filter((row) => !Array.isArray(dataObject(row.app_data).items))
+        .map((row) => String(row.id));
+      if (ordersNeedingItemRows.length > 0) {
+        const { data, error } = await this.client
+          .from('order_items')
+          .select('*')
+          .in('order_id', ordersNeedingItemRows)
+          .order('id', { ascending: true });
+        assertNoError('actualisation des lignes de commande', error);
+        for (const item of rows(data)) {
+          const orderId = String(item.order_id);
+          const list = itemsByOrder.get(orderId) || [];
+          list.push(item);
+          itemsByOrder.set(orderId, list);
+        }
+      }
+
+      const orders = orderRows.map((row): Order => {
+        const saved = dataObject(row.app_data);
+        const savedCustomer = dataObject(saved.customer);
+        const savedItems = Array.isArray(saved.items) ? saved.items : (itemsByOrder.get(String(row.id)) || []).map((item) => ({
+          productId: item.product_id || '',
+          productName: String(item.product_name),
+          variant: String(item.variant || ''),
+          price: numberOr(item.price),
+          quantity: numberOr(item.quantity),
+          total: numberOr(item.total),
+          isQuote: Boolean(item.is_quote),
+        }));
+        const customer = {
+          ...savedCustomer,
+          facilityName: String(row.facility_name),
+          facilityType: row.facility_type || savedCustomer.facilityType,
+          contactName: String(row.contact_name || savedCustomer.contactName || ''),
+          phone: String(row.phone),
+          deliveryAddress: String(row.delivery_address),
+          neighborhoodId: row.neighborhood_id || savedCustomer.neighborhoodId,
+          neighborhoodName: row.neighborhood_name || savedCustomer.neighborhoodName,
+          deliveryMode: row.delivery_mode || savedCustomer.deliveryMode || 'livraison',
+          paymentMethod: row.payment_method || savedCustomer.paymentMethod || 'especes',
+          deliveryFee: numberOr(row.delivery_fee),
+        };
+        const savedUserId = saved.userId || (clientUserId && profileId === String(row.client_id)
+          ? clientUserId
+          : appUserByProfile.get(String(row.client_id)));
+        return {
+          ...saved,
+          id: String(row.id),
+          reference: String(row.reference),
+          idempotencyKey: saved.idempotencyKey || row.idempotency_key || undefined,
+          createdAt: String(row.created_at),
+          userId: savedUserId,
+          customer,
+          items: savedItems,
+          estimatedTotal: numberOr(row.estimated_total),
+          hasQuoteItems: Boolean(row.has_quote_items),
+          status: row.status,
+          cancellationReason: row.cancellation_reason || undefined,
+          isPaid: Boolean(row.is_paid),
+          pdfUrl: row.pdf_url || saved.pdfUrl,
+          deliveryStage: row.delivery_stage || 'preparation',
+          deliveryZone: row.delivery_zone || undefined,
+          deliveryEstimated: row.delivery_estimated || undefined,
+          deliveryFee: numberOr(row.delivery_fee),
+        } as Order;
+      });
+
+      if (this.baseline && !clientUserId) this.baseline.orders = clone(orders);
+      return orders;
+    });
+    this.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
   async persist(store: PersistentServerStore): Promise<void> {
     const snapshot = clone(store);
     const operation = this.queue.then(async () => {
@@ -542,6 +723,142 @@ export class SupabaseStorePersistence {
     });
     this.queue = operation.catch(() => undefined);
     await operation;
+  }
+
+  async createOrderAtomically(
+    order: Order,
+    store: PersistentServerStore
+  ): Promise<{ order: Order; created: boolean; stocks: Array<{ productId: string; quantity: number }> }> {
+    const snapshot = clone(order);
+    const operation = this.queue.then(() => this.createOrderAtomicallyInQueue(snapshot, store));
+    this.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  private async createOrderAtomicallyInQueue(
+    order: Order,
+    store: PersistentServerStore
+  ): Promise<{ order: Order; created: boolean; stocks: Array<{ productId: string; quantity: number }> }> {
+    if (!this.baseline) throw new Error('Supabase doit être initialisé avant la création d’une commande.');
+
+    const customer = order.customer;
+    const fallbackUserId = order.userId || `usr-phone-${String(customer.phone || order.id).replace(/\D/g, '') || order.id}`;
+    let profileId = await this.profileIdFor(fallbackUserId, store);
+    if (!profileId) {
+      const account = store.accounts.find((item) => item.user.id === fallbackUserId)
+        || store.accounts.find((item) => item.user.phone && item.user.phone === customer.phone);
+      if (account) {
+        profileId = await this.saveAccount(account);
+      } else {
+        profileId = await this.ensureProfile({
+          id: fallbackUserId,
+          phone: customer.phone,
+          facilityName: customer.facilityName,
+          contactName: customer.contactName,
+          facilityType: customer.facilityType,
+          role: 'client',
+          createdAt: order.createdAt,
+          deliveryAddress: customer.deliveryAddress,
+        });
+      }
+    }
+    if (!profileId) throw new Error(`La commande ${order.reference} n’a pas de compte client associé dans Supabase.`);
+
+    const orderRow = {
+      id: order.id,
+      reference: order.reference,
+      client_id: profileId,
+      idempotency_key: order.idempotencyKey || null,
+      facility_name: customer.facilityName,
+      contact_name: customer.contactName || null,
+      phone: customer.phone,
+      facility_type: customer.facilityType || null,
+      delivery_mode: customer.deliveryMode === 'retrait' ? 'retrait' : 'livraison',
+      payment_method: customer.paymentMethod || 'especes',
+      delivery_address: customer.deliveryAddress || 'Libreville, Gabon',
+      neighborhood_id: customer.neighborhoodId || null,
+      neighborhood_name: customer.neighborhoodName || null,
+      delivery_zone: order.deliveryZone || null,
+      delivery_fee: Math.max(0, Math.trunc(numberOr(order.deliveryFee ?? customer.deliveryFee))),
+      delivery_estimated: order.deliveryEstimated || null,
+      order_type: order.hasQuoteItems ? 'devis' : 'standard',
+      has_quote_items: Boolean(order.hasQuoteItems),
+      estimated_total: Math.max(0, Math.trunc(numberOr(order.estimatedTotal))),
+      status: order.status,
+      is_paid: Boolean(order.isPaid),
+      delivery_stage: order.deliveryStage || 'preparation',
+      cancellation_reason: order.cancellationReason || null,
+      notes: customer.notes || null,
+      pdf_url: order.pdfUrl || null,
+      courier_name: order.courier?.name || null,
+      courier_phone: order.courier?.phone || null,
+      courier_vehicle: order.courier?.vehicle || null,
+      courier_matricule: order.courier?.matricule || null,
+      courier_current_zone: order.courier?.currentZone || null,
+      app_data: order,
+      created_at: order.createdAt,
+      updated_at: new Date().toISOString(),
+    };
+
+    const itemRows = (order.items || []).map((item) => {
+      const matchedProduct = item.productId
+        ? store.products.find((product) => product.id === item.productId)
+        : undefined;
+      const hasMatchingVariant = Boolean(
+        matchedProduct && item.variant && matchedProduct.variants?.some((variant) => variant.label === item.variant)
+      );
+      return {
+        product_id: matchedProduct && hasMatchingVariant ? matchedProduct.id : null,
+        product_name: item.productName,
+        variant: item.variant || null,
+        price: Math.max(0, Math.trunc(numberOr(item.price))),
+        quantity: Math.max(1, Math.trunc(numberOr(item.quantity, 1))),
+        total: Math.max(0, Math.trunc(numberOr(item.total))),
+        is_quote: Boolean(item.isQuote),
+      };
+    });
+
+    const requestedByProduct = new Map<string, number>();
+    for (const item of order.items || []) {
+      if (item.isQuote || numberOr(item.price) <= 0 || !item.productId) continue;
+      requestedByProduct.set(item.productId, (requestedByProduct.get(item.productId) || 0) + Math.max(1, Math.trunc(numberOr(item.quantity, 1))));
+    }
+
+    const { data, error } = await this.client.rpc('app_create_order_atomic', {
+      p_order: orderRow,
+      p_items: itemRows,
+      p_stock_requests: Array.from(requestedByProduct, ([productId, quantity]) => ({ productId, quantity })),
+    });
+    assertNoError(`création atomique de la commande ${order.reference}`, error);
+
+    const result = dataObject(data);
+    const canonicalOrder = clone(dataObject(result.order)) as unknown as Order;
+    if (!canonicalOrder.id || !canonicalOrder.reference) {
+      throw new Error('Supabase a accepté la commande sans retourner sa confirmation complète. Consultez « Mes commandes » avant de réessayer.');
+    }
+    const stocks = rows(result.stocks).map((row) => ({
+      productId: String(row.productId || ''),
+      quantity: Math.max(0, Math.trunc(numberOr(row.quantity))),
+    })).filter((stock) => stock.productId);
+    const created = result.created !== false;
+
+    if (created) {
+      const orderIndex = this.baseline.orders.findIndex((item) => item.id === canonicalOrder.id);
+      if (orderIndex >= 0) this.baseline.orders[orderIndex] = clone(canonicalOrder);
+      else this.baseline.orders.unshift(clone(canonicalOrder));
+
+      for (const stock of stocks) {
+        const product = this.baseline.products.find((item) => item.id === stock.productId);
+        if (product) {
+          product.quantityAvailable = stock.quantity;
+          product.stockQuantity = stock.quantity;
+          product.status = stock.quantity > 0 ? 'disponible' : 'rupture';
+          product.hasPhysicalStock = stock.quantity > 0;
+        }
+      }
+    }
+
+    return { order: canonicalOrder, created, stocks };
   }
 
   private async persistProducts(store: PersistentServerStore): Promise<void> {

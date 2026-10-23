@@ -53,9 +53,12 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
         <div className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1">
           {/* Header Info */}
           <div className="flex justify-between items-start border-b border-slate-100 pb-4">
-            <div>
+            <div className="flex items-center gap-3">
+              <img src="/gloryday-emblem.png" alt="Emblème Gloryday Pharma" className="w-14 h-10 object-contain shrink-0" />
+              <div>
               <span className="font-black text-base text-slate-900 block">GLORYDAY PHARMA</span>
               <p className="text-xs text-slate-500">Distribution Médicale · Libreville, Gabon</p>
+              </div>
             </div>
             <div className="text-right">
               <span className="text-[10px] font-bold uppercase text-slate-400 block">Document</span>

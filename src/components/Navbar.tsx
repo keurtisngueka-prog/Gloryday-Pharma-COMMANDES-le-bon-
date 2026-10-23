@@ -139,9 +139,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="flex items-center gap-2 cursor-pointer select-none group"
               title="GLORYDAY Pharma · Clic pour réinitialiser le panier à 0 et revenir à l'accueil"
             >
-              <div className="w-8 h-8 rounded-lg bg-[#0d44e8] text-white flex items-center justify-center font-black text-sm shadow-xs group-hover:scale-105 transition-transform">
-                +
-              </div>
+              <img
+                src="/gloryday-emblem.png"
+                alt="Emblème Gloryday"
+                className="w-10 h-8 rounded-md object-contain shrink-0 group-hover:scale-105 transition-transform"
+              />
               <div className="flex items-baseline gap-1">
                 <span className="font-extrabold text-base sm:text-lg text-[#000000] tracking-tight">
                   GLORYDAY

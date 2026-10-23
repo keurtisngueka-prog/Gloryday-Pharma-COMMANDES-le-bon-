@@ -379,11 +379,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                   </div>
                   <a
                     href={product.pdfNoticeUrl}
-                    target="_blank"
+                    download={product.pdfNoticeName || 'Notice_medicale.pdf'}
+                    target={product.pdfNoticeUrl.startsWith('data:') || product.pdfNoticeUrl.startsWith('blob:') ? undefined : '_blank'}
                     rel="noopener noreferrer"
                     className="py-1.5 px-3 rounded-lg bg-[#0d44e8] text-white text-xs font-bold shrink-0 hover:bg-[#0b3ac7] transition-colors"
                   >
-                    Ouvrir
+                    Télécharger / Ouvrir
                   </a>
                 </div>
               )}

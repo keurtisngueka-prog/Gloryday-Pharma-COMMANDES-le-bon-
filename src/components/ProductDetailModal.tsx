@@ -177,6 +177,26 @@ export function ProductDetailModal({
                 </div>
               </div>
 
+              {product.pdfNoticeUrl && (
+                <div className="p-3 rounded-2xl bg-blue-50/70 border border-blue-100 flex items-center justify-between gap-2.5 text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileText className="w-4 h-4 text-[#0d44e8] shrink-0" />
+                    <span className="font-bold text-slate-800 truncate">
+                      {product.pdfNoticeName || 'Notice_technique.pdf'}
+                    </span>
+                  </div>
+                  <a
+                    href={product.pdfNoticeUrl}
+                    download={product.pdfNoticeName || 'Notice_technique.pdf'}
+                    target={product.pdfNoticeUrl.startsWith('data:') || product.pdfNoticeUrl.startsWith('blob:') ? undefined : '_blank'}
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold shrink-0 transition-colors"
+                  >
+                    Notice PDF
+                  </a>
+                </div>
+              )}
+
               {/* Pricing Display */}
               <div className="pt-2">
                 {isQuote ? (

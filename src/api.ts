@@ -39,6 +39,14 @@ export interface StaffAccountSummary {
   stats?: StaffActivityStats;
 }
 
+interface ProductMediaUploadUrl {
+  bucket: string;
+  path: string;
+  token: string;
+  signedUrl: string;
+  publicUrl: string;
+}
+
 export function clearLocalDraftsAndCaches(): void {
   if (typeof window === 'undefined') return;
   try {
@@ -128,6 +136,42 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 export const api = {
   async getProducts(): Promise<Product[]> {
     return request<Product[]>('/api/products');
+  },
+
+  async uploadProductMedia(file: Blob, kind: 'image' | 'pdf'): Promise<string> {
+    const contentType = kind === 'pdf' ? 'application/pdf' : file.type;
+    const upload = await request<ProductMediaUploadUrl>('/api/products/media-upload-url', {
+      method: 'POST',
+      body: JSON.stringify({ kind, contentType, fileSize: file.size })
+    });
+
+    let response: Response;
+    try {
+      response = await fetch(upload.signedUrl, {
+        method: 'POST',
+        headers: {
+          'cache-control': 'max-age=3600',
+          'content-type': contentType,
+          'x-upsert': 'false'
+        },
+        body: file
+      });
+    } catch (error) {
+      const networkError = new Error('Le stockage des photos et notices est injoignable. Vérifiez votre connexion puis réessayez.');
+      (networkError as Error & { cause?: unknown }).cause = error;
+      throw networkError;
+    }
+
+    if (!response.ok) {
+      let detail = '';
+      try {
+        const data = await response.json();
+        detail = typeof data?.message === 'string' ? data.message : typeof data?.error === 'string' ? data.error : '';
+      } catch {}
+      throw new Error(detail || `L’envoi du fichier a échoué (erreur ${response.status}).`);
+    }
+
+    return upload.publicUrl;
   },
 
   async createProduct(productData: Partial<Product>): Promise<Product> {

@@ -40,6 +40,7 @@ import { BestClientsModule } from './BestClientsModule';
 import { DirectMessagingModal } from './DirectMessagingModal';
 import { ClientAnnouncementModal } from './ClientAnnouncementModal';
 import { ClientPurchasesStatsModule } from './ClientPurchasesStatsModule';
+import { ClientPurchaseHistoryView } from './ClientPurchaseHistoryView';
 import { DataExportModule } from './DataExportModule';
 import { AuditLogModule } from './AuditLogModule';
 import { StockLotsModule } from './StockLotsModule';
@@ -127,6 +128,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [targetMessageClient, setTargetMessageClient] = useState<any | null>(null);
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
   const [selectedHistoryClientId, setSelectedHistoryClientId] = useState<string | null>(null);
+  const [clientsModuleView, setClientsModuleView] = useState<'directory' | 'purchase-history'>('directory');
+  const [clientDirectorySearch, setClientDirectorySearch] = useState('');
   const [isRefreshingData, setIsRefreshingData] = useState(false);
   const [isGitHubPushModalOpen, setIsGitHubPushModalOpen] = useState(false);
   const [githubTokenInput, setGithubTokenInput] = useState('');
@@ -1308,17 +1311,76 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 Consultez les coordonnées, le volume d'affaires et l'historique complet des achats de chaque client.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setIsAnnouncementModalOpen(true)}
-              className="py-2 px-3 rounded-xl bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs flex items-center gap-2 cursor-pointer"
-            >
-              <Megaphone className="w-4 h-4" />
-              <span>Informer tous les clients</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex bg-slate-100 p-1 rounded-xl text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => setClientsModuleView('directory')}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                    clientsModuleView === 'directory' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5 text-[#0d44e8]" />
+                  <span>Répertoire ({clients.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClientsModuleView('purchase-history')}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                    clientsModuleView === 'purchase-history' ? 'bg-[#0d44e8] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Historique des achats</span>
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAnnouncementModalOpen(true)}
+                className="py-2 px-3 rounded-xl bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs flex items-center gap-2 cursor-pointer"
+              >
+                <Megaphone className="w-4 h-4" />
+                <span>Informer tous les clients</span>
+              </button>
+            </div>
+          </div>
+          {clientsModuleView === 'purchase-history' ? (
+            <ClientPurchaseHistoryView
+              clients={clients}
+              orders={orders}
+              selectedClientId={selectedHistoryClientId}
+              onSelectClientId={setSelectedHistoryClientId}
+              onBackToDirectory={() => setClientsModuleView('directory')}
+              onViewOrderPdf={onViewOrderPdf}
+              onOpenDeliveryModal={onOpenDeliveryModal}
+              onUpdatePayment={onUpdatePayment}
+              onOpenMessageModal={(client) => {
+                setTargetMessageClient(client);
+                setIsMessageModalOpen(true);
+              }}
+            />
+          ) : (
+          <>
+          <div className="p-3.5 px-4 bg-slate-50/70 border-b border-slate-100 flex items-center justify-between gap-3">
+            <div className="relative flex-1 max-w-md">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={clientDirectorySearch}
+                onChange={(e) => setClientDirectorySearch(e.target.value)}
+                placeholder="Rechercher un établissement, un contact ou un téléphone..."
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-[#0d44e8]"
+              />
+            </div>
+            <span className="text-[11px] text-slate-500 hidden sm:inline">Filtrez le répertoire client</span>
           </div>
           <div className="divide-y divide-slate-100">
-            {clients.map((c) => {
+            {clients.filter((client) => {
+              const query = clientDirectorySearch.trim().toLowerCase();
+              if (!query) return true;
+              return [client.facilityName, client.contactName, client.phone, client.deliveryAddress]
+                .some((value) => String(value || '').toLowerCase().includes(query));
+            }).map((c) => {
               const clientOrdersCount = typeof c.totalOrdersCount === 'number'
                 ? c.totalOrdersCount
                 : orders.filter(o => o.customer.phone === c.phone && o.status !== 'Annulée').length;
@@ -1355,7 +1417,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       type="button"
                       onClick={() => {
                         setSelectedHistoryClientId(c.id || c.phone);
-                        setActiveTab('stats-achats');
+                        setClientsModuleView('purchase-history');
                       }}
                       className="py-1.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
                     >
@@ -1375,6 +1437,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               );
             })}
           </div>
+          </>
+          )}
         </div>
       )}
 

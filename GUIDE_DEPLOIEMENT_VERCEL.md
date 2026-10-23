@@ -21,10 +21,14 @@ Dans le SQL Editor du projet Supabase de production, appliquer les migrations da
 9. `supabase/migrations/20261022000001_staff_permissions_and_runtime_settings.sql`
 10. `supabase/migrations/20261022000002_seed_full_catalog.sql`
 11. `supabase/migrations/20261023000001_activity_logs_and_client_purchase_history.sql`
+12. `supabase/migrations/20261023000002_atomic_order_checkout.sql`
+13. `supabase/migrations/20261023000003_product_media_storage.sql`
 
 La migration `20261022000002_seed_full_catalog.sql` ajoute les références du catalogue initial absentes de la base, sans modifier les produits déjà présents. Elle est à exécuter une fois sur une base existante qui ne contient pas encore tout le catalogue.
 
 Sur une base déjà utilisée, n’exécutez que les migrations qui lui manquent : ne rejouez pas les migrations de création ou de données. Vérifiez que l’URL et la clé privée du projet de production sont celles que vous voulez raccorder.
+
+La migration `20261023000003_product_media_storage.sql` crée le stockage public des photos et notices du catalogue. Les fichiers sont envoyés directement depuis le navigateur à Supabase avec un lien temporaire émis par l’API; la clé privée reste côté serveur. Cette migration doit être appliquée pour activer l’import de photos et de PDF.
 
 ## 2. Importer le dépôt dans Vercel
 

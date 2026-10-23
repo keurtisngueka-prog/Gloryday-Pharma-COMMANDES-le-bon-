@@ -636,7 +636,7 @@ export default function App() {
       } catch {
         // The server accepted the order; local storage must not block the success screen.
       }
-      clearOrderSubmissionKey(false);
+      clearOrderSubmissionKey();
       setCartItems([]);
       setIsPreviewModalOpen(false);
       setConfirmedOrder(newOrder);
@@ -703,7 +703,7 @@ export default function App() {
       const idempotencyKey = await getOrderSubmissionKey(draft.items);
       const newOrder = await api.createOrder(completeCustomerInfo, draft.items, idempotencyKey);
       deleteDraft(draft.id, currentUser?.phone);
-      clearOrderSubmissionKey(false);
+      clearOrderSubmissionKey();
       setDraftsCount(getStoredDrafts(currentUser?.phone).length);
       setIsDraftsModalOpen(false);
       setConfirmedOrder(newOrder);
@@ -1010,10 +1010,12 @@ export default function App() {
                 </div>
                 <BestClientsModule
                   clients={clients}
+                  orders={orders}
                   commercials={[]}
                   isSuperAdmin={currentUser?.role === 'Super-Admin'}
                   onRefreshClients={() => api.getClients().then(setClients)}
                   onOpenMessageModal={() => {}}
+                  onViewOrderPdf={handleViewOrderPdf}
                 />
               </div>
             )}

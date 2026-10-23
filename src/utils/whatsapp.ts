@@ -16,7 +16,8 @@ export function formatOrderWhatsAppMessage(order: Order, pdfLink?: string): stri
   lines.push('📞 *Téléphone :* ' + order.customer.phone);
   lines.push('📍 *Adresse :* ' + order.customer.deliveryAddress);
   lines.push('🚚 *Mode réception :* ' + (order.customer.deliveryMode === 'livraison' ? 'Livraison sur site' : 'Retrait au dépôt'));
-  lines.push('💳 *Mode de règlement :* ' + order.customer.paymentMethod.replace('_', ' ').toUpperCase());
+  const paymentMethod = String(order.customer?.paymentMethod || 'especes');
+  lines.push('💳 *Mode de règlement :* ' + paymentMethod.replace(/_/g, ' ').toUpperCase());
 
   const mp = order.mobilePayment || order.customer.mobilePayment;
   if (mp && (order.customer.paymentMethod === 'airtel_money' || order.customer.paymentMethod === 'moov_money')) {
@@ -39,7 +40,7 @@ export function formatOrderWhatsAppMessage(order: Order, pdfLink?: string): stri
   lines.push('');
   lines.push('📦 *DÉTAIL DES ARTICLES :*');
   let totalSavings = 0;
-  order.items.forEach((item, index) => {
+  (Array.isArray(order.items) ? order.items : []).forEach((item, index) => {
     const variantStr = item.variant && item.variant !== 'Standard' ? ` (${item.variant})` : '';
     if (item.savings && item.savings > 0) {
       totalSavings += item.savings;
@@ -55,17 +56,24 @@ export function formatOrderWhatsAppMessage(order: Order, pdfLink?: string): stri
   if (totalSavings > 0) {
     lines.push(`✨ *Économie Volume Clinique :* -${totalSavings.toLocaleString('fr-FR')} FCFA`);
   }
-  lines.push(`💰 *TOTAL ESTIMÉ :* ${order.estimatedTotal.toLocaleString('fr-FR')} FCFA (Sans TVA)`);
+  lines.push(`💰 *TOTAL ESTIMÉ :* ${Number(order.estimatedTotal || 0).toLocaleString('fr-FR')} FCFA (Sans TVA)`);
   if (order.hasQuoteItems) {
     lines.push('⚠️ _Note : Cette commande comprend des articles sur devis à chiffrer._');
   }
 
   if (pdfLink) {
-    const fullPdfUrl = pdfLink.startsWith('http')
-      ? pdfLink
-      : `${window.location.origin}${pdfLink}`;
-    lines.push('');
-    lines.push(`📑 *Bon de commande PDF :* ${fullPdfUrl}`);
+    try {
+      const fullPdfUrl = /^https?:\/\//i.test(pdfLink)
+        ? new URL(pdfLink).toString()
+        : typeof window !== 'undefined' && pdfLink.startsWith('/')
+          ? new URL(pdfLink, window.location.origin).toString()
+          : null;
+      if (!fullPdfUrl) throw new Error('Le PDF n’est pas accessible publiquement.');
+      lines.push('');
+      lines.push(`📑 *Bon de commande PDF :* ${fullPdfUrl}`);
+    } catch {
+      // A bad or unavailable PDF URL must never block the WhatsApp order message.
+    }
   }
 
   lines.push('');
@@ -76,7 +84,17 @@ export function formatOrderWhatsAppMessage(order: Order, pdfLink?: string): stri
 export function generateWhatsAppOrderUrl(order: Order, pdfLink?: string, useSecondary = false): string {
   const number = useSecondary ? WHATSAPP_SECONDARY : WHATSAPP_PRIMARY;
   const message = formatOrderWhatsAppMessage(order, pdfLink);
-  return `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
+  const url = new URL(`https://wa.me/${number.replace(/\D/g, '')}`);
+  url.searchParams.set('text', message);
+  return url.toString();
+}
+
+export function generateWhatsAppWebOrderUrl(order: Order, pdfLink?: string, useSecondary = false): string {
+  const number = useSecondary ? WHATSAPP_SECONDARY : WHATSAPP_PRIMARY;
+  const url = new URL('https://web.whatsapp.com/send');
+  url.searchParams.set('phone', number.replace(/\D/g, ''));
+  url.searchParams.set('text', formatOrderWhatsAppMessage(order, pdfLink));
+  return url.toString();
 }
 
 export function generateWhatsAppPackUrl(pack: Pack, useSecondary = false): string {

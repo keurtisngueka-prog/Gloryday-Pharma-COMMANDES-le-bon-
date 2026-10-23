@@ -90,9 +90,11 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               className="flex items-center gap-2.5 cursor-pointer select-none group"
               title="GLORYDAY Pharma · Clic pour réinitialiser le panier à 0 et revenir à l'accueil"
             >
-              <div className="w-8 h-8 rounded-lg bg-[#0d44e8] text-white flex items-center justify-center font-black text-sm group-hover:scale-105 transition-transform">
-                +
-              </div>
+              <img
+                src="/gloryday-emblem.png"
+                alt="Emblème Gloryday"
+                className="w-10 h-8 rounded-md object-contain shrink-0 group-hover:scale-105 transition-transform"
+              />
               <div>
                 <span className="font-extrabold text-base tracking-tight text-[#000000] block leading-none">
                   GLORYDAY

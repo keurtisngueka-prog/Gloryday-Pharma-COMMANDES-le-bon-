@@ -86,8 +86,11 @@ CREATE POLICY "activity_logs_admin_select_policy"
   FOR SELECT
   TO authenticated
   USING (
-    COALESCE(auth.jwt() -> 'app_metadata' ->> 'role', '')
-      IN ('Super-Admin', 'Admin simple', 'admin', 'super_admin')
+    COALESCE(
+      auth.jwt() -> 'user_metadata' ->> 'role',
+      auth.jwt() -> 'app_metadata' ->> 'role',
+      ''
+    ) IN ('Super-Admin', 'Admin simple', 'admin', 'super_admin')
     OR EXISTS (
       SELECT 1 FROM public.profiles p
       WHERE p.id = auth.uid()
@@ -108,8 +111,11 @@ CREATE POLICY "activity_logs_admin_insert_policy"
   FOR INSERT
   TO authenticated
   WITH CHECK (
-    COALESCE(auth.jwt() -> 'app_metadata' ->> 'role', '')
-      IN ('Super-Admin', 'Admin simple', 'Commercial', 'Gestionnaire Catalogue', 'Logistique', 'admin', 'super_admin')
+    COALESCE(
+      auth.jwt() -> 'user_metadata' ->> 'role',
+      auth.jwt() -> 'app_metadata' ->> 'role',
+      ''
+    ) IN ('Super-Admin', 'Admin simple', 'Commercial', 'Gestionnaire Catalogue', 'Logistique', 'admin', 'super_admin')
     OR EXISTS (
       SELECT 1 FROM public.profiles p
       WHERE p.id = auth.uid()

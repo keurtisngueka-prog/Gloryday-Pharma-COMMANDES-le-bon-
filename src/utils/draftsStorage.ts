@@ -1,4 +1,5 @@
 import { CartItem, CustomerInfo, OrderDraft } from '../types';
+import { loadBrandLogoDataUrl } from './pdfGenerator';
 
 /**
  * Storage key partitioning for draft orders (offline resilience)
@@ -299,6 +300,7 @@ export const generateDraftPdf = async (draft: OrderDraft): Promise<{ blob: Blob;
     unit: 'mm',
     format: 'a4'
   });
+  const logoDataUrl = await loadBrandLogoDataUrl();
 
   const pageWidth = doc.internal.pageSize.getWidth();
 
@@ -314,10 +316,17 @@ export const generateDraftPdf = async (draft: OrderDraft): Promise<{ blob: Blob;
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(20);
   doc.setFont('helvetica', 'bold');
-  doc.text('GLORYDAY PHARMA', 14, 15);
+  if (logoDataUrl) {
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(14, 2, 28, 24, 1.5, 1.5, 'F');
+    doc.addImage(logoDataUrl, 'PNG', 15, 2.5, 26, 23, 'GLORYDAY_LOGO', 'FAST');
+    doc.text('GLORYDAY PHARMA', 47, 13.5);
+  } else {
+    doc.text('GLORYDAY PHARMA', 14, 15);
+  }
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text('Distribution Médicale, Consommables & Équipements Hospitaliers - GABON', 14, 21);
+  doc.text(logoDataUrl ? 'Distribution médicale · Libreville, Gabon' : 'Distribution Médicale, Consommables & Équipements Hospitaliers - GABON', logoDataUrl ? 47 : 14, 21);
   doc.setFontSize(8);
   doc.text('Urgences Libreville: +241 77 003 004 / 66 240 399', pageWidth - 14, 21, { align: 'right' });
 

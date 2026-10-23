@@ -481,7 +481,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     res.setHeader('X-Content-Type-Options', 'nosniff');
     // Allow iFrame embedding in AI Studio / preview environment
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=(self)');
     next();
   });
   app.use(express.json({ limit: '2mb' }));
@@ -827,6 +827,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   }));
 
   app.get('/api/products', asyncHandler(async (_req, res) => {
+    if (persistence) store.products = await persistence.loadProducts();
     const user = await readSession(_req);
     if (user && (['Super-Admin', 'Gestionnaire Catalogue'].includes(user.role) || user.permissions?.includes('catalog_stock'))) {
       res.json(store.products.map(product => enrichProductWithStockState(product)));
@@ -837,6 +838,34 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       const { purchasePrice, alertThreshold, lowStockAlertThreshold, ...publicProduct } = enriched;
       return publicProduct;
     }));
+  }));
+
+  app.post('/api/products/media-upload-url', asyncHandler(async (req, res) => {
+    if (!persistence) {
+      res.status(503).json({ error: 'L’import de photos et de notices nécessite la connexion à Supabase Storage.' });
+      return;
+    }
+
+    const kind = req.body?.kind;
+    const contentType = String(req.body?.contentType || '').trim().toLowerCase();
+    const fileSize = Number(req.body?.fileSize);
+    const maxFileSize = 6 * 1024 * 1024;
+    const allowedImageTypes = ['image/webp', 'image/jpeg', 'image/png'];
+    const validType = kind === 'pdf'
+      ? contentType === 'application/pdf'
+      : kind === 'image' && allowedImageTypes.includes(contentType);
+
+    if (!validType) {
+      res.status(400).json({ error: 'Format de fichier non accepté. Utilisez une image WebP, JPEG, PNG ou un document PDF.' });
+      return;
+    }
+    if (!Number.isFinite(fileSize) || fileSize <= 0 || fileSize > maxFileSize) {
+      res.status(400).json({ error: 'Le fichier doit peser au maximum 6 Mo.' });
+      return;
+    }
+
+    const upload = await persistence.createProductMediaUploadUrl(kind, contentType);
+    res.status(201).json(upload);
   }));
 
   app.post('/api/products', asyncHandler(async (req, res) => {
@@ -859,6 +888,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       status: productData.status || 'disponible',
       image: productData.image,
       thumbnailUrl: productData.thumbnailUrl || productData.image,
+      pdfNoticeUrl: productData.pdfNoticeUrl,
+      pdfNoticeName: productData.pdfNoticeName,
       description: productData.description,
       isPromotion: productData.isPromotion,
       originalPrice: productData.originalPrice,
@@ -1716,15 +1747,19 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   // ==========================================
   // 5. ORDERS & LOGISTICS ROUTES
   // ==========================================
-  app.get('/api/orders', (req, res) => {
+  app.get('/api/orders', asyncHandler(async (req, res) => {
     const user = (req as AuthenticatedRequest).authenticatedUser!;
-    let visibleOrders = store.orders;
+    const currentOrders = persistence
+      ? await persistence.loadOrders(user.role === 'client' ? user.id : undefined)
+      : store.orders;
+    if (persistence && user.role !== 'client') store.orders = currentOrders;
+    let visibleOrders = currentOrders;
     if (user.role === 'client') {
       visibleOrders = visibleOrders.filter(o => o.userId === user.id);
     } else if (user.role === 'Commercial') {
       visibleOrders = visibleOrders.filter(o => o.assignedCommercialId === user.id || store.accounts.some(a => a.user.id === o.userId && a.user.assignedToCommercialId === user.id));
     } else if (user.role === 'Logistique') {
-      res.json(store.orders.map(order => ({
+      res.json(currentOrders.map(order => ({
         ...order,
         estimatedTotal: undefined,
         isPaid: undefined,
@@ -1749,7 +1784,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       return;
     }
     res.json(visibleOrders);
-  });
+  }));
 
   app.post('/api/orders', asyncHandler(async (req, res) => {
     const user = (req as AuthenticatedRequest).authenticatedUser!;
@@ -1779,6 +1814,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(403).json({ error: 'Ce compte ne peut pas encore passer commande. Contactez Gloryday Pharma.' });
       return;
     }
+
+    // Validate every checkout against the latest catalog instead of an old
+    // serverless-instance snapshot. The RPC still locks and reserves stock.
+    if (persistence) store.products = await persistence.loadProducts();
 
     const items = [] as CartItem[];
     for (const requested of requestedItems) {
@@ -1950,29 +1989,49 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       whatsappLogs: []
     };
 
-    for (const update of stockUpdates) setTrackedProductStock(update.product, update.remaining);
-    store.orders.unshift(newOrder);
+    let orderToSave = newOrder;
+    if (persistence) {
+      const atomicResult = await persistence.createOrderAtomically(newOrder, store);
+      if (!atomicResult.created) {
+        res.status(200).json(atomicResult.order);
+        return;
+      }
+      orderToSave = atomicResult.order;
+      for (const update of atomicResult.stocks) {
+        const product = store.products.find((candidate) => candidate.id === update.productId);
+        if (product) {
+          setTrackedProductStock(product, update.quantity);
+          product.status = update.quantity > 0 ? 'disponible' : 'rupture';
+          product.hasPhysicalStock = update.quantity > 0;
+        }
+      }
+    } else {
+      for (const update of stockUpdates) setTrackedProductStock(update.product, update.remaining);
+    }
+    store.orders.unshift(orderToSave);
 
-    if (hasQuoteOrDeferred) {
-      const quoteNum = String(store.quotes.length + 1).padStart(4, '0');
+    const hasDeferredStockItems = orderToSave.items.some((item) => Boolean(item.isDeferredStock));
+    const orderNeedsQuote = orderToSave.hasQuoteItems || orderToSave.items.some((item) => item.isQuote || item.isDeferredStock);
+
+    if (orderNeedsQuote) {
       const validUntil = new Date(createdNow.getTime() + 15 * 24 * 60 * 60 * 1000).toISOString();
       const autoQuote: CommercialQuote = {
         id: `qte-${randomUUID()}`,
-        reference: `DEV-${year}-${quoteNum}`,
+        reference: `DEV-${year}-${orderToSave.reference.split('-').at(-1) || randomUUID().slice(0, 8).toUpperCase()}`,
         createdAt: createdNow.toISOString(),
         validUntil,
         commercialId: account.user.assignedToCommercialId || 'staff-super-admin',
         commercialName: account.user.assignedToCommercialName || 'Service Commercial Gloryday',
         customerId: account.user.id,
         customer,
-        items: newOrder.items,
+        items: orderToSave.items,
         subtotal: volumeSummary.grossTotal,
         discountType: 'amount',
         discountValue: volumeSummary.totalSavings,
         discountAmount: volumeSummary.totalSavings,
         finalTotal,
         status: 'Transmis',
-        notes: `Demande de devis / proforma liée au bon de commande ${newOrder.reference}${hasDeferredZeroStockItems ? ' (conversion automatique stock à 0)' : ''}.`
+        notes: `Demande de devis / proforma liée au bon de commande ${orderToSave.reference}${hasDeferredStockItems ? ' (conversion automatique stock à 0)' : ''}.`
       };
       store.quotes.unshift(autoQuote);
     }
@@ -1982,9 +2041,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       id: `notif-${randomUUID()}`,
       timestamp: new Date().toISOString(),
       type: 'order_created',
-      orderId: newOrder.id,
-      orderReference: newOrder.reference,
-      message: `Nouvelle commande ${newOrder.reference} reçue de ${customer.facilityName} (${finalTotal.toLocaleString('fr-FR')} FCFA).`,
+      orderId: orderToSave.id,
+      orderReference: orderToSave.reference,
+      message: `Nouvelle commande ${orderToSave.reference} reçue de ${customer.facilityName} (${finalTotal.toLocaleString('fr-FR')} FCFA).`,
       targetRole,
       read: false
     }));
@@ -1993,16 +2052,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       id: `notif-${randomUUID()}`,
       timestamp: new Date().toISOString(),
       type: 'order_created',
-      orderId: newOrder.id,
-      orderReference: newOrder.reference,
-      message: `Votre commande ${newOrder.reference} a été reçue. Elle est en attente de confirmation par Gloryday Pharma.`,
+      orderId: orderToSave.id,
+      orderReference: orderToSave.reference,
+      message: `Votre commande ${orderToSave.reference} a été reçue. Elle est en attente de confirmation par Gloryday Pharma.`,
       targetRole: 'client',
       userId: account.user.id,
       read: false
     });
 
     await saveStore(store, persistence);
-    res.status(201).json(newOrder);
+    res.status(201).json(orderToSave);
   }));
 
   app.post('/api/orders/upload-pdf', asyncHandler(async (req, res) => {
