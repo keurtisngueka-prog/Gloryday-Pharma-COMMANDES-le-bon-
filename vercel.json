@@ -10,6 +10,11 @@
   },
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "missing": [{ "type": "query", "key": "__gloryday_gateway" }],
+      "destination": "/api/gateway?__gloryday_gateway=1&__gloryday_path=:path*"
+    },
+    {
       "source": "/:path((?!api/).*)",
       "destination": "/index.html"
     }
