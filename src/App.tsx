@@ -732,12 +732,26 @@ export default function App() {
 
   // Admin Actions
   const handleAdminUpdateStatus = async (orderId: string, status: OrderStatus, reason?: string) => {
-    await api.updateOrderStatus(orderId, status, reason);
-    const updated = await api.getOrders();
-    setOrders(updated);
-    const stats = await api.getAdminStats();
-    setAdminStats(stats);
+    const updatedOrder = await api.updateOrderStatus(orderId, status, reason);
+    setOrders(prev => prev.map(order =>
+      order.id === updatedOrder.id || order.reference === updatedOrder.reference
+        ? updatedOrder
+        : order
+    ));
 
+    const canViewAdminStats = currentUser?.role === 'Super-Admin' ||
+      currentUser?.role === 'Admin simple' ||
+      Boolean(currentUser?.permissions?.includes('stats_view'));
+    if (canViewAdminStats) {
+      void api.getAdminStats().then(setAdminStats).catch((error) => {
+        console.warn('Actualisation des statistiques après changement de commande impossible :', error);
+      });
+    }
+    if (status === 'Annulée') {
+      void api.getProducts().then(setProducts).catch((error) => {
+        console.warn('Actualisation du stock après annulation impossible :', error);
+      });
+    }
   };
 
   const handleAdminUpdatePayment = async (orderId: string, isPaid: boolean) => {

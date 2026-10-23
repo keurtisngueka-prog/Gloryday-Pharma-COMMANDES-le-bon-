@@ -122,6 +122,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [stockSearchQuery, setStockSearchQuery] = useState('');
   const [cancelModalOrder, setCancelModalOrder] = useState<Order | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
+  const [isCancellingOrder, setIsCancellingOrder] = useState(false);
+  const [cancelOrderError, setCancelOrderError] = useState<string | null>(null);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
@@ -261,9 +263,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   });
 
   const handleConfirmCancel = async () => {
-    if (!cancelModalOrder || !cancellationReason.trim()) return;
-    await onUpdateStatus(cancelModalOrder.id, 'Annulée', cancellationReason.trim());
-    setCancelModalOrder(null);
+    if (!cancelModalOrder || !cancellationReason.trim() || isCancellingOrder) return;
+    setIsCancellingOrder(true);
+    setCancelOrderError(null);
+    try {
+      await onUpdateStatus(cancelModalOrder.id, 'Annulée', cancellationReason.trim());
+      setCancelModalOrder(null);
+      setCancellationReason('');
+    } catch (error) {
+      setCancelOrderError(error instanceof Error && error.message.trim()
+        ? error.message
+        : 'L’annulation n’a pas abouti. Vérifiez votre connexion puis réessayez.');
+    } finally {
+      setIsCancellingOrder(false);
+    }
   };
 
   // Helper counts
@@ -1009,6 +1022,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         onClick={() => {
                           setCancelModalOrder(order);
                           setCancellationReason('');
+                          setCancelOrderError(null);
                         }}
                         className="py-1.5 px-2.5 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 font-bold cursor-pointer"
                       >
@@ -1503,24 +1517,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <textarea
               placeholder="Motif de l'annulation (ex: Rupture imprévue, demande client...)"
               value={cancellationReason}
-              onChange={(e) => setCancellationReason(e.target.value)}
-              className="w-full p-2.5 rounded-xl border border-slate-300 text-xs h-24 focus:ring-2 focus:ring-rose-500"
+              onChange={(e) => {
+                setCancellationReason(e.target.value);
+                setCancelOrderError(null);
+              }}
+              disabled={isCancellingOrder}
+              className="w-full p-2.5 rounded-xl border border-slate-300 text-xs h-24 focus:ring-2 focus:ring-rose-500 disabled:bg-slate-50"
             />
+            {cancelOrderError && (
+              <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                {cancelOrderError}
+              </p>
+            )}
             <div className="flex justify-end gap-2 text-xs">
               <button
                 type="button"
                 onClick={() => setCancelModalOrder(null)}
-                className="px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 font-semibold cursor-pointer"
+                disabled={isCancellingOrder}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 font-semibold cursor-pointer disabled:opacity-50"
               >
                 Retour
               </button>
               <button
                 type="button"
                 onClick={handleConfirmCancel}
-                disabled={!cancellationReason.trim()}
+                disabled={!cancellationReason.trim() || isCancellingOrder}
                 className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold disabled:opacity-50 cursor-pointer"
               >
-                Confirmer l'annulation
+                {isCancellingOrder ? 'Annulation…' : 'Confirmer l’annulation'}
               </button>
             </div>
           </div>
