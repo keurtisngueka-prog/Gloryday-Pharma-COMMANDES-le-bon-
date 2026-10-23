@@ -5,7 +5,7 @@ import './index.css';
 
 // Safely handle service worker registration without triggering Vite HMR send in dev mode
 if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-  if (import.meta.env.PROD) {
+  if ((import.meta as ImportMeta & { env: { PROD: boolean } }).env.PROD) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
     });
