@@ -148,7 +148,7 @@ export const api = {
     let response: Response;
     try {
       response = await fetch(upload.signedUrl, {
-        method: 'POST',
+        method: 'PUT',
         headers: {
           'cache-control': 'max-age=3600',
           'content-type': contentType,
