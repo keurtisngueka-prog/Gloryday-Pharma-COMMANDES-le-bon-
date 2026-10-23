@@ -39,6 +39,7 @@ import { ProductFormModal } from './ProductFormModal';
 import { BestClientsModule } from './BestClientsModule';
 import { DirectMessagingModal } from './DirectMessagingModal';
 import { ClientAnnouncementModal } from './ClientAnnouncementModal';
+import { AdminPacksModule } from './AdminPacksModule';
 import { ClientPurchasesStatsModule } from './ClientPurchasesStatsModule';
 import { ClientPurchaseHistoryView } from './ClientPurchaseHistoryView';
 import { DataExportModule } from './DataExportModule';
@@ -354,6 +355,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span>Nouveau Produit</span>
               </button>
             )}
+            {canManageClients && (
+              <button
+                type="button"
+                onClick={() => setIsAnnouncementModalOpen(true)}
+                className="py-2 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                title="Créer une annonce dans l’application pour les clients"
+              >
+                <Megaphone className="w-4 h-4" />
+                <span>Campagne clients</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -402,6 +414,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {toConfirmCount > 0 && (
               <span className="w-2 h-2 rounded-full bg-amber-400"></span>
             )}
+          </button>
+        )}
+        {isGestionnaire && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('packs')}
+            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'packs' ? 'bg-indigo-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Packs médicaux</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+              activeTab === 'packs' ? 'bg-white text-indigo-800' : 'bg-slate-200 text-slate-700'
+            }`}>
+              {packs.length}
+            </span>
           </button>
         )}
         {isGestionnaire && (
@@ -1034,6 +1063,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               ))
             )}
           </div>
+        </div>
+      )}
+
+      {activeTab === 'packs' && isGestionnaire && (
+        <div key="tab-packs" className="dashboard-tab-enter space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/70 p-4">
+            <div>
+              <h2 className="font-black text-slate-900 text-sm">Packs médicaux & campagnes clients</h2>
+              <p className="mt-1 text-xs text-slate-600">Gérez les packs du catalogue ou créez une annonce visible dans l’application client.</p>
+            </div>
+            {canManageClients && (
+              <button
+                type="button"
+                onClick={() => setIsAnnouncementModalOpen(true)}
+                className="shrink-0 rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-bold text-slate-950 hover:bg-amber-400 flex items-center justify-center gap-2"
+              >
+                <Megaphone className="w-4 h-4" />
+                Créer une campagne
+              </button>
+            )}
+          </div>
+          <AdminPacksModule
+            packs={packs}
+            products={products}
+            currentUser={currentUser}
+            onCreatePack={onCreatePack}
+            onUpdatePack={onUpdatePack}
+            onDeletePack={onDeletePack}
+          />
         </div>
       )}
 
