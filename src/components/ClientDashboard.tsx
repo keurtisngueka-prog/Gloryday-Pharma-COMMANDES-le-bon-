@@ -378,14 +378,14 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   }, [calendarMonth, filteredSchedules]);
 
   return (
-    <div className="max-w-5xl mx-auto pb-24 space-y-6 px-2 sm:px-0">
+    <div className="client-dashboard-enter max-w-5xl mx-auto pb-24 space-y-6 px-2 sm:px-0">
       {/* 1. MODERN HEADER & PROFILE BANNER */}
       <div className="bg-gradient-to-r from-slate-900 via-[#0f172a] to-slate-900 text-white p-5 sm:p-6 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
+        <div className="dashboard-orb-float absolute top-0 right-0 w-80 h-80 bg-blue-600/15 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
           <div className="flex items-start sm:items-center gap-4">
-            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-white/10 border border-white/20 backdrop-blur-md text-white font-black text-2xl flex items-center justify-center shrink-0 shadow-inner">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-white/10 border border-white/20 backdrop-blur-md text-white font-black text-2xl flex items-center justify-center shrink-0 shadow-inner pulse-ring-blue">
               {currentUser?.avatarUrl ? (
                 <img 
                   src={currentUser.avatarUrl} 
@@ -446,7 +446,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
               <button
                 type="button"
                 onClick={onOpenAuth}
-                className="px-4 py-2 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                className="btn-shine px-4 py-2 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white text-xs font-bold shadow-md cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0"
               >
                 <Building2 className="w-4 h-4" />
                 <span>Se connecter</span>
@@ -456,7 +456,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 href="https://wa.me/24177003004"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-3.5 py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs whitespace-nowrap shrink-0"
+                className="btn-shine px-3.5 py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs whitespace-nowrap shrink-0"
               >
                 <MessageCircle className="w-4 h-4 text-white" />
                 <span>Support Pharmacie 24/7</span>
@@ -465,7 +465,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             <button
               type="button"
               onClick={onRefreshOrders}
-              className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-xs cursor-pointer whitespace-nowrap shrink-0"
             >
               Actualiser
             </button>
@@ -474,11 +474,11 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       </div>
 
       {/* 2. MODERN HEALTHCARE KPI METRICS */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-all">
+      <div className="client-dashboard-kpis grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-xs font-bold text-slate-600">Total Commandes</span>
-            <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#0d44e8] flex items-center justify-center">
+            <div className="kpi-icon-badge w-8 h-8 rounded-xl bg-blue-50 text-[#0d44e8] flex items-center justify-center">
               <Package className="w-4 h-4" />
             </div>
           </div>
@@ -489,10 +489,10 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/20 shadow-2xs hover:shadow-xs transition-all">
+        <div className="bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/20 shadow-2xs">
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-xs font-bold text-[#0d44e8]">Livraisons prévues</span>
-            <div className="w-8 h-8 rounded-xl bg-blue-100 text-[#0d44e8] flex items-center justify-center">
+            <div className="kpi-icon-badge w-8 h-8 rounded-xl bg-blue-100 text-[#0d44e8] flex items-center justify-center">
               <CalendarClock className="w-4 h-4" />
             </div>
           </div>
@@ -507,10 +507,10 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           </button>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-all">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-xs font-bold text-slate-600">Montant commandé</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+            <div className="kpi-icon-badge w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
@@ -523,10 +523,10 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-all">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-xs font-bold text-slate-600">Paiements en attente</span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center">
+            <div className="kpi-icon-badge w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center">
               <Smartphone className="w-4 h-4" />
             </div>
           </div>
@@ -539,7 +539,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
 
       {/* 3. SPOTLIGHT : DIRECT LIVE DELIVERY TRACKING (MODERN TRACKER) */}
       {activeDeliveryOrder && activeDeliveryOrder.status !== 'Annulée' && (
-        <div className="bg-white rounded-3xl border border-blue-200 shadow-md p-5 sm:p-6 relative overflow-hidden">
+        <div className="dashboard-card-interactive bg-white rounded-3xl border border-blue-200 shadow-md p-5 sm:p-6 relative overflow-hidden">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 pb-4 border-b border-slate-100">
             <div>
               <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -566,7 +566,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 <button
                   type="button"
                   onClick={() => onTrackDelivery(activeDeliveryOrder)}
-                  className="py-2 px-3.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+                  className="btn-shine py-2 px-3.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <Truck className="w-4 h-4" />
                   <span>Détails du suivi</span>
@@ -781,7 +781,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
 
         {/* VIEW MODE 1: INTERACTIVE CALENDAR VIEW */}
         {viewMode === 'calendar' ? (
-          <div className="grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
+          <div key="view-calendar" className="dashboard-tab-enter grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
             {/* Left 7 columns: Monthly Calendar Grid */}
             <div className="lg:col-span-7 p-4 sm:p-5 space-y-4">
               {/* Month Navigation Header */}
@@ -943,7 +943,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             </div>
 
             {/* Right 5 columns: Selected Date Deliveries & Planning Panel */}
-            <div className="lg:col-span-5 p-4 sm:p-5 bg-slate-50/40 flex flex-col justify-between space-y-5">
+            <div key={selectedDateKey} className="dashboard-tab-enter lg:col-span-5 p-4 sm:p-5 bg-slate-50/40 flex flex-col justify-between space-y-5">
               <div className="space-y-4">
                 <div className="border-b border-slate-200/80 pb-3">
                   <div className="text-[11px] font-bold text-[#0d44e8] flex items-center gap-1.5">
@@ -980,7 +980,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                       return (
                         <div
                           key={order.id}
-                          className="p-4 rounded-2xl bg-white border border-slate-200/90 shadow-2xs space-y-3"
+                          className="dashboard-card-interactive p-4 rounded-2xl bg-white border border-slate-200/90 shadow-2xs space-y-3"
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div>
@@ -1183,7 +1183,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
               <p className="text-xs text-slate-400">Consultez notre catalogue pour initier un approvisionnement médical.</p>
             </div>
           ) : (
-            <div className="divide-y divide-slate-100">
+            <div key="view-list" className="dashboard-tab-enter divide-y divide-slate-100">
               {filteredSchedules.map((scheduleItem) => {
                 const { order } = scheduleItem;
                 const mp = order.mobilePayment || order.customer.mobilePayment;
@@ -1193,7 +1193,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 const paymentVerified = Boolean(order.isPaid || mp?.status === 'verified');
 
                 return (
-                  <div key={order.id} className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-slate-50/80 transition-colors">
+                  <div key={order.id} className="dashboard-row-interactive p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                     <div className="space-y-1.5">
                       <div className="flex items-center gap-2 flex-wrap text-xs">
                         <span className="font-mono font-black text-[#0d44e8]">
@@ -1338,7 +1338,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => onReorder(order)}
-                        className="py-1.5 px-3.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap shrink-0"
+                        className="btn-shine py-1.5 px-3.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap shrink-0"
                         title="Recharger ces articles dans le panier"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />

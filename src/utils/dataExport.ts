@@ -373,6 +373,68 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     new_state TEXT
 );
 
+-- 14. TABLE ACTIVITY_LOGS (Actions critiques en temps réel dans Supabase)
+CREATE TABLE IF NOT EXISTS public.activity_logs (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    user_id TEXT NOT NULL,
+    action_type TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "userId" TEXT,
+    "actionType" TEXT,
+    "entityType" TEXT,
+    "entityId" TEXT,
+    "timestamp" TIMESTAMPTZ DEFAULT NOW(),
+    actor_name TEXT,
+    actor_role TEXT,
+    category TEXT DEFAULT 'system',
+    severity TEXT DEFAULT 'info',
+    action_label TEXT,
+    target_label TEXT,
+    previous_value TEXT,
+    new_value TEXT,
+    app_data JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON public.activity_logs (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id_snake ON public.activity_logs (user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_entity_snake ON public.activity_logs (entity_type, entity_id);
+
+ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "activity_logs_admin_select_policy" ON public.activity_logs;
+CREATE POLICY "activity_logs_admin_select_policy"
+  ON public.activity_logs
+  FOR SELECT
+  TO authenticated
+  USING (
+  COALESCE(auth.jwt() -> 'app_metadata' ->> 'role', '')
+    IN ('Super-Admin', 'Admin simple', 'admin', 'super_admin')
+    OR EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid()
+        AND p.role IN ('Super-Admin', 'Admin simple')
+    )
+  );
+
+-- 15. VUE SQL : HISTORIQUE COMPLET DES ACHATS D'UN CLIENT (ADMINISTRATEUR)
+CREATE OR REPLACE VIEW public.client_purchase_history_view AS
+SELECT
+    COALESCE(o.client_id::text, LOWER(TRIM(o.phone))) AS client_key,
+    MAX(o.facility_name) AS facility_name,
+    o.phone AS phone,
+    MAX(o.delivery_address) AS delivery_address,
+    COUNT(o.id) FILTER (WHERE o.status <> 'Annulée') AS total_orders_count,
+    COALESCE(SUM(o.estimated_total) FILTER (WHERE o.status <> 'Annulée'), 0) AS total_spent,
+    COALESCE(SUM(o.estimated_total) FILTER (WHERE o.status <> 'Annulée' AND o.is_paid = TRUE), 0) AS paid_amount,
+    COALESCE(SUM(o.estimated_total) FILTER (WHERE o.status <> 'Annulée' AND o.is_paid = FALSE), 0) AS unpaid_amount,
+    MIN(o.created_at) FILTER (WHERE o.status <> 'Annulée') AS first_order_date,
+    MAX(o.created_at) FILTER (WHERE o.status <> 'Annulée') AS last_order_date
+FROM orders o
+GROUP BY COALESCE(o.client_id::text, LOWER(TRIM(o.phone))), o.phone;
+
 -- =====================================================================
 -- INSERTION DES PRODUITS MÉDICAUX ACTUELS (${products.length} articles)
 -- =====================================================================

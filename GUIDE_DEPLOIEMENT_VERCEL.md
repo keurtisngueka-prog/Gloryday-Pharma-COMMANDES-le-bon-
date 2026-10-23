@@ -20,6 +20,7 @@ Dans le SQL Editor du projet Supabase de production, appliquer les migrations da
 8. `supabase/migrations/20261021000004_app_sessions.sql`
 9. `supabase/migrations/20261022000001_staff_permissions_and_runtime_settings.sql`
 10. `supabase/migrations/20261022000002_seed_full_catalog.sql`
+11. `supabase/migrations/20261023000001_activity_logs_and_client_purchase_history.sql`
 
 La migration `20261022000002_seed_full_catalog.sql` ajoute les références du catalogue initial absentes de la base, sans modifier les produits déjà présents. Elle est à exécuter une fois sur une base existante qui ne contient pas encore tout le catalogue.
 

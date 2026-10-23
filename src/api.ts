@@ -17,7 +17,8 @@ import {
   CourierTrackingInfo,
   StaffPermission,
   VolumeDiscountSettings,
-  StaffActivityStats
+  StaffActivityStats,
+  StaffActivityLog
 } from './types';
 
 export type StaffRole = Extract<AppRole, 'Admin simple' | 'Commercial' | 'Gestionnaire Catalogue' | 'Logistique'>;
@@ -506,5 +507,35 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ids })
     });
+  },
+
+  async getStaffActivityLogs(): Promise<StaffActivityLog[]> {
+    return request<StaffActivityLog[]>('/api/admin/logs');
+  },
+
+  async clearStaffActivityLogs(): Promise<StaffActivityLog[]> {
+    const res = await request<{ success: boolean; logs: StaffActivityLog[] }>('/api/admin/logs', {
+      method: 'DELETE'
+    });
+    return res.logs;
+  },
+
+  async getClientPurchaseHistory(clientId: string): Promise<any> {
+    return request<any>(`/api/admin/clients/${encodeURIComponent(clientId)}/purchases`);
+  },
+
+  async syncGitHubRepository(token?: string, commitMessage?: string): Promise<{
+    success: boolean;
+    pushed: boolean;
+    commitHash: string;
+    repoUrl: string;
+    message: string;
+  }> {
+    return request('/api/admin/github/sync', {
+      method: 'POST',
+      body: JSON.stringify({ token, commitMessage })
+    });
   }
 };
+
+

@@ -485,6 +485,61 @@ export interface StaffActivityStats {
   lastLoginAt?: string;
 }
 
+export type StaffLogCategory = 'stock_price' | 'orders' | 'access' | 'system';
+
+export type StaffLogSeverity = 'info' | 'warning' | 'critical';
+
+export interface StaffActivityLog {
+  id: string;
+  userId: string;
+  actionType: string;
+  entityType: 'product' | 'order' | 'staff' | 'settings' | 'quote' | 'client' | string;
+  entityId: string;
+  details: string;
+  timestamp: string;
+  actorId: string;
+  actorName: string;
+  actorRole: AppRole;
+  category: StaffLogCategory;
+  severity: StaffLogSeverity;
+  actionLabel: string;
+  targetType: 'product' | 'order' | 'staff' | 'settings' | 'quote';
+  targetId?: string;
+  targetLabel: string;
+  previousValue?: string;
+  newValue?: string;
+}
+
+export interface ClientPurchasedProductSummary {
+  productId: string;
+  productName: string;
+  variant: string;
+  totalQuantity: number;
+  totalRevenue: number;
+  ordersCount: number;
+  lastPurchasedAt: string;
+}
+
+export interface ClientPurchaseHistoryRecord {
+  clientId: string;
+  facilityName: string;
+  facilityType: FacilityType | string;
+  contactName: string;
+  phone: string;
+  deliveryAddress: string;
+  totalOrdersCount: number;
+  totalSpent: number;
+  paidAmount: number;
+  unpaidAmount: number;
+  averageOrderValue: number;
+  firstOrderDate: string | null;
+  lastOrderDate: string | null;
+  daysSinceLastOrder: number;
+  isInactive10Days: boolean;
+  orders: Order[];
+  purchasedProducts: ClientPurchasedProductSummary[];
+}
+
 export interface AdminStats {
   totalRevenue: number;
   ordersToConfirm: number;
@@ -500,4 +555,6 @@ export interface AdminStats {
   clientPurchases?: ClientPurchaseStats[];
   volumeDiscounts?: VolumeDiscountSettings;
 }
+
+
 

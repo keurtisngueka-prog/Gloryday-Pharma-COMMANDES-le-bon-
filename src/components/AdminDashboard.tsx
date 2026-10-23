@@ -25,7 +25,12 @@ import {
   Calendar,
   Check,
   Settings,
-  Megaphone
+  Megaphone,
+  Activity,
+  FileText,
+  GitBranch,
+  RefreshCw,
+  ArrowUpRight
 } from 'lucide-react';
 import { Order, OrderStatus, AdminStats, Pack, Product, User, AppRole, DeliveryStage, AppNotification, VolumeDiscountSettings, StaffPermission } from '../types';
 import { api } from '../api';
@@ -40,6 +45,7 @@ import { AuditLogModule } from './AuditLogModule';
 import { StockLotsModule } from './StockLotsModule';
 import { SystemSettingsModule } from './SystemSettingsModule';
 import { StaffAccountsModule } from './StaffAccountsModule';
+import { StaffLogsRealtimeModule } from './StaffLogsRealtimeModule';
 const SalesMonthlyChart = React.lazy(() => import('./SalesMonthlyChart').then(module => ({ default: module.SalesMonthlyChart })));
 import { generateWhatsAppMessageForStage } from '../utils/whatsappNotifications';
 
@@ -52,7 +58,7 @@ const hasValidOrderCoordinates = (order: Order): boolean => {
 const hasConfirmedOrderGps = (order: Order): boolean =>
   hasValidOrderCoordinates(order) && order.customer.coordinates?.source === 'checkout';
 
-export type AdminSubTab = 'kpi' | 'orders' | 'packs' | 'stock' | 'lots' | 'clients' | 'stats-achats' | 'audit' | 'settings' | 'staff' | 'export-deploy';
+export type AdminSubTab = 'kpi' | 'orders' | 'packs' | 'stock' | 'lots' | 'clients' | 'stats-achats' | 'logs' | 'audit' | 'settings' | 'staff' | 'export-deploy';
 
 interface AdminDashboardProps {
   stats: AdminStats | null;
@@ -74,6 +80,7 @@ interface AdminDashboardProps {
   onRefresh: () => void;
   defaultSubTab?: AdminSubTab;
   onOpenDeliveryModal?: (order: Order) => void;
+  onViewOrderPdf?: (order: Order) => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -95,7 +102,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onUpdateProductStock,
   onRefresh,
   defaultSubTab = 'kpi',
-  onOpenDeliveryModal
+  onOpenDeliveryModal,
+  onViewOrderPdf
 }) => {
   const role: AppRole = currentUser.role;
   const isSuperAdmin = role === 'Super-Admin';
@@ -118,6 +126,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
   const [targetMessageClient, setTargetMessageClient] = useState<any | null>(null);
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
+  const [selectedHistoryClientId, setSelectedHistoryClientId] = useState<string | null>(null);
+  const [isRefreshingData, setIsRefreshingData] = useState(false);
+  const [isGitHubPushModalOpen, setIsGitHubPushModalOpen] = useState(false);
+  const [githubTokenInput, setGithubTokenInput] = useState('');
+  const [githubCommitMessage, setGithubCommitMessage] = useState(
+    'Mise à jour Gloryday Pharma : activity_logs Supabase, RLS Admin, PDF & Historique Client'
+  );
+  const [isPushingGitHub, setIsPushingGitHub] = useState(false);
+  const [githubPushFeedback, setGithubPushFeedback] = useState<{
+    pushed: boolean;
+    error?: boolean;
+    message: string;
+    commitHash?: string;
+  } | null>(null);
+
+  const handleDirectGitHubPush = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsPushingGitHub(true);
+    setGithubPushFeedback(null);
+    try {
+      const cleanToken = githubTokenInput.trim();
+      const res = await api.syncGitHubRepository(
+        cleanToken || undefined,
+        githubCommitMessage.trim() || undefined
+      );
+      setGithubPushFeedback({
+        pushed: res.pushed,
+        message: res.message,
+        commitHash: res.commitHash
+      });
+    } catch (err: any) {
+      setGithubPushFeedback({
+        pushed: false,
+        error: true,
+        message: err?.message || 'Erreur lors du push sur le dépôt GitHub existant.'
+      });
+    } finally {
+      setGithubTokenInput('');
+      try { sessionStorage.removeItem('gloryday_gh_pat'); } catch {}
+      setIsPushingGitHub(false);
+    }
+  };
 
   // Volume discount settings state
   const [discountSettings, setDiscountSettings] = useState<VolumeDiscountSettings>(() => getActiveVolumeDiscountSettings());
@@ -132,6 +182,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   useEffect(() => {
     setActiveTab(defaultSubTab);
   }, [defaultSubTab]);
+
+  useEffect(() => {
+    try { sessionStorage.removeItem('gloryday_gh_pat'); } catch {}
+  }, []);
 
   useEffect(() => {
     api.getVolumeDiscountSettings()
@@ -235,11 +289,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* 1. TOP COMMAND CENTER BANNER */}
       <div className="bg-gradient-to-r from-slate-950 via-[#0f172a] to-slate-950 text-white rounded-3xl p-5 sm:p-6 shadow-xl border border-slate-800 relative overflow-hidden">
         {/* Subtle decorative glow */}
-        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none -mr-24 -mt-24"></div>
+        <div className="dashboard-orb-float absolute top-0 right-0 w-96 h-96 bg-blue-600/15 rounded-full blur-3xl pointer-events-none -mr-24 -mt-24"></div>
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#0d44e8] to-indigo-700 flex items-center justify-center text-white shrink-0 shadow-md">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#0d44e8] to-indigo-700 flex items-center justify-center text-white shrink-0 shadow-md pulse-ring-blue">
               <ShieldCheck className="w-6 h-6" />
             </div>
             <div>
@@ -249,7 +303,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   {role}
                 </span>
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-200 border border-amber-400/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
                   WhatsApp manuel · envoi automatique non connecté
                 </span>
               </div>
@@ -260,11 +314,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2 self-start md:self-center flex-wrap">
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => {
+                  setGithubPushFeedback(null);
+                  setIsGitHubPushModalOpen(true);
+                }}
+                className="btn-shine py-2 px-3.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm border border-blue-400/30"
+                title="Pousser directement sur keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon- sans créer de nouveau dépôt"
+              >
+                <GitBranch className="w-4 h-4 text-emerald-300" />
+                <span>Push sur mon GitHub existant</span>
+              </button>
+            )}
             {isGestionnaire && (
               <button
                 type="button"
                 onClick={() => { setEditingProduct(null); setIsProductModalOpen(true); }}
-                className="py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm transition-colors"
+                className="btn-shine py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
               >
                 <Plus className="w-4 h-4" />
                 <span>Nouveau Produit</span>
@@ -272,10 +340,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             )}
             <button
               type="button"
-              onClick={onRefresh}
-              className="py-2 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-xs transition-colors cursor-pointer"
+              onClick={() => {
+                setIsRefreshingData(true);
+                onRefresh();
+                setTimeout(() => setIsRefreshingData(false), 650);
+              }}
+              className="py-2 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-xs flex items-center gap-1.5 cursor-pointer"
             >
-              Actualiser Données
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingData ? 'animate-spin text-blue-300' : ''}`} />
+              <span>Actualiser Données</span>
             </button>
           </div>
         </div>
@@ -351,7 +424,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             )}
           </button>
         )}
-        {isSimpleAdmin && (
+        {(isSuperAdmin || isSimpleAdmin || canManageClients) && (
           <button
             type="button"
             onClick={() => setActiveTab('stats-achats')}
@@ -360,7 +433,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }`}
           >
             <TrendingUp className="w-3.5 h-3.5" />
-            <span>Statistiques Établissements</span>
+            <span>Historique & Stats Achats Clients</span>
           </button>
         )}
         {canManageClients && (
@@ -373,6 +446,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           >
             <Users className="w-3.5 h-3.5" />
             <span>Cliniques & Contacts ({clients.length})</span>
+          </button>
+        )}
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('logs')}
+            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'logs' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Activity className={`w-3.5 h-3.5 ${activeTab === 'logs' ? 'text-emerald-400' : 'text-emerald-600'}`} />
+            <span>Logs</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Flux temps réel actif" />
           </button>
         )}
         {isSuperAdmin && (
@@ -427,58 +513,103 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* 3. TAB 1: EXECUTIVE KPIS */}
       {activeTab === 'kpi' && (isSuperAdmin || isSimpleAdmin) && stats && (
-        <div className="space-y-5">
+        <div key="tab-kpi" className="dashboard-tab-enter space-y-5">
           <div className="admin-dashboard-kpis grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
-              <span className="text-[10px] font-bold text-slate-500 uppercase block tracking-wider">Montant des commandes</span>
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs relative overflow-hidden">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase block tracking-wider">Montant des commandes</span>
+                <span className="kpi-icon-badge w-7 h-7 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                  <TrendingUp className="w-3.5 h-3.5" />
+                </span>
+              </div>
               <div className="text-base sm:text-lg font-black text-slate-900 mt-1 tabular-nums">
                 {stats.totalRevenue.toLocaleString('fr-FR')} <span className="text-[10px] font-bold text-slate-500">FCFA</span>
               </div>
               <div className="text-[10px] text-slate-600 font-bold mt-1">Commandes payées et en attente</div>
             </div>
 
-            <div className="bg-white p-4 rounded-2xl border border-amber-200 bg-amber-50/30 shadow-2xs">
-              <span className="text-[10px] font-bold text-amber-800 uppercase block tracking-wider">À confirmer</span>
-              <div className="text-xl font-black text-amber-900 mt-1">
+            <div
+              onClick={() => {
+                setOrderStatusFilter('to_confirm');
+                setActiveTab('orders');
+              }}
+              className="bg-white p-4 rounded-2xl border border-amber-200 bg-amber-50/30 shadow-2xs cursor-pointer relative overflow-hidden"
+            >
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] font-bold text-amber-800 uppercase block tracking-wider">À confirmer</span>
+                <span className="kpi-icon-badge w-7 h-7 rounded-xl bg-amber-100/80 text-amber-700 flex items-center justify-center shrink-0">
+                  <Clock className="w-3.5 h-3.5" />
+                </span>
+              </div>
+              <div className="text-xl font-black text-amber-900 mt-1 tabular-nums">
                 {stats.ordersToConfirm}
               </div>
               <div className="text-[10px] text-amber-700 mt-1 font-medium">Confirmation manuelle à effectuer</div>
             </div>
 
-            <div className="bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/20 shadow-2xs">
-              <span className="text-[10px] font-bold text-[#0d44e8] uppercase block tracking-wider">En cours logistique</span>
-              <div className="text-xl font-black text-[#0d44e8] mt-1">
+            <div
+              onClick={() => {
+                setOrderStatusFilter('preparation');
+                setActiveTab('orders');
+              }}
+              className="bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/20 shadow-2xs cursor-pointer relative overflow-hidden"
+            >
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] font-bold text-[#0d44e8] uppercase block tracking-wider">En cours logistique</span>
+                <span className="kpi-icon-badge w-7 h-7 rounded-xl bg-blue-100/80 text-[#0d44e8] flex items-center justify-center shrink-0">
+                  <Truck className="w-3.5 h-3.5" />
+                </span>
+              </div>
+              <div className="text-xl font-black text-[#0d44e8] mt-1 tabular-nums">
                 {inPreparationCount + inTransitCount}
               </div>
               <div className="text-[10px] text-blue-700 mt-1 font-medium">Colisage / En transit</div>
             </div>
 
-            <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
-              <span className="text-[10px] font-bold text-slate-500 uppercase block tracking-wider">Commandes du mois</span>
-              <div className="text-xl font-black text-slate-900 mt-1">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs relative overflow-hidden">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase block tracking-wider">Commandes du mois</span>
+                <span className="kpi-icon-badge w-7 h-7 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                  <Calendar className="w-3.5 h-3.5" />
+                </span>
+              </div>
+              <div className="text-xl font-black text-slate-900 mt-1 tabular-nums">
                 {stats.monthOrdersCount}
               </div>
               <div className="text-[10px] text-slate-500 mt-1">Flux régulier</div>
             </div>
 
-            <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
-              <span className="text-[10px] font-bold text-slate-500 uppercase block tracking-wider">Panier Moyen</span>
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs relative overflow-hidden">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase block tracking-wider">Panier Moyen</span>
+                <span className="kpi-icon-badge w-7 h-7 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                  <CreditCard className="w-3.5 h-3.5" />
+                </span>
+              </div>
               <div className="text-base sm:text-lg font-black text-slate-900 mt-1 tabular-nums">
                 {stats.averageBasket.toLocaleString('fr-FR')} <span className="text-[10px] font-bold text-slate-500">F</span>
               </div>
               <div className="text-[10px] text-slate-500 mt-1">Par commande clinique</div>
             </div>
 
-            <div className="bg-white p-4 rounded-2xl border border-rose-200 bg-rose-50/30 shadow-2xs">
-              <span className="text-[10px] font-bold text-rose-800 uppercase block tracking-wider">Alertes Stock</span>
-              <div className="text-xl font-black text-rose-900 mt-1">
+            <div
+              onClick={() => setActiveTab('lots')}
+              className="bg-white p-4 rounded-2xl border border-rose-200 bg-rose-50/30 shadow-2xs cursor-pointer relative overflow-hidden"
+            >
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] font-bold text-rose-800 uppercase block tracking-wider">Alertes Stock</span>
+                <span className="kpi-icon-badge w-7 h-7 rounded-xl bg-rose-100/80 text-rose-700 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                </span>
+              </div>
+              <div className="text-xl font-black text-rose-900 mt-1 tabular-nums">
                 {outOfStockCount}
               </div>
               <div className="text-[10px] text-rose-700 mt-1 font-medium">Articles en rupture</div>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-200/90 bg-white p-3 shadow-sm sm:p-5">
+          <div className="dashboard-card-interactive rounded-3xl border border-slate-200/90 bg-white p-3 shadow-sm sm:p-5">
             <React.Suspense fallback={<div className="flex h-72 items-center justify-center text-sm font-semibold text-slate-500">Chargement du graphique…</div>}>
               <SalesMonthlyChart orders={orders} stats={stats} />
             </React.Suspense>
@@ -487,14 +618,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('orders')}
-            className="flex w-full cursor-pointer items-start gap-3 rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 to-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-400 hover:shadow-md"
+            className="dashboard-card-interactive group flex w-full cursor-pointer items-start gap-3 rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 to-white p-4 text-left shadow-sm hover:border-blue-400"
           >
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-[#0d44e8]"><MapPin className="h-5 w-5" /></span>
+            <span className="kpi-icon-badge flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-[#0d44e8]"><MapPin className="h-5 w-5" /></span>
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-black text-slate-900">Localisation GPS par commande</span>
               <span className="mt-1 block text-[11px] leading-relaxed text-slate-600">{activeDeliveriesWithConfirmedGps} sur {activeDeliveryOrders.length} livraison(s) active(s) ont un point GPS relevé pour cette commande. Ouvrez la liste pour consulter chaque adresse et sa carte.</span>
             </span>
-            <span className="shrink-0 rounded-xl bg-[#0d44e8] px-3 py-2 text-[10px] font-extrabold text-white">Voir les commandes</span>
+            <span className="btn-shine shrink-0 rounded-xl bg-[#0d44e8] px-3 py-2 text-[10px] font-extrabold text-white flex items-center gap-1">
+              <span>Voir les commandes</span>
+              <ArrowUpRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+            </span>
           </button>
 
           {/* Quick Thematic Navigation Cards */}
@@ -502,13 +636,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('lots')}
-              className="p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-amber-400 text-left transition-all shadow-2xs flex items-start gap-3 cursor-pointer"
+              className="dashboard-card-interactive group p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-amber-400 text-left shadow-2xs flex items-start gap-3 cursor-pointer"
             >
-              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
+              <div className="kpi-icon-badge w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
                 <Layers className="w-5 h-5" />
               </div>
-              <div>
-                <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Réassort & Disponibilité Stocks</h4>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Réassort & Disponibilité Stocks</h4>
+                  <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-amber-600 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 shrink-0" />
+                </div>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   Gérez les états Disponible / Rupture et copiez la liste de réapprovisionnement fournisseur.
                 </p>
@@ -518,13 +655,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('audit')}
-              className="p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-indigo-400 text-left transition-all shadow-2xs flex items-start gap-3 cursor-pointer"
+              className="dashboard-card-interactive group p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-indigo-400 text-left shadow-2xs flex items-start gap-3 cursor-pointer"
             >
-              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0">
+              <div className="kpi-icon-badge w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0">
                 <ShieldCheck className="w-5 h-5" />
               </div>
-              <div>
-                <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Journal d'Audit & Traçabilité</h4>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Journal d'Audit & Traçabilité</h4>
+                  <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 shrink-0" />
+                </div>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   Journal local au navigateur. Aucun envoi WhatsApp automatique n'est configuré.
                 </p>
@@ -534,13 +674,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('settings')}
-              className="p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-blue-400 text-left transition-all shadow-2xs flex items-start gap-3 cursor-pointer"
+              className="dashboard-card-interactive group p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-blue-400 text-left shadow-2xs flex items-start gap-3 cursor-pointer"
             >
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#0d44e8] flex items-center justify-center shrink-0">
+              <div className="kpi-icon-badge w-10 h-10 rounded-xl bg-blue-50 text-[#0d44e8] flex items-center justify-center shrink-0">
                 <Settings className="w-5 h-5" />
               </div>
-              <div>
-                <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Paramètres Système & Mobile Money</h4>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Paramètres Système & Mobile Money</h4>
+                  <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-[#0d44e8] transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 shrink-0" />
+                </div>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   Configurez les comptes Airtel/Moov Money, les seuils de livraison et les modèles WhatsApp.
                 </p>
@@ -552,7 +695,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* 4. TAB 2: ORDERS & LOGISTIC STAGES */}
       {activeTab === 'orders' && isLogistique && (
-        <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
+        <div key="tab-orders" className="dashboard-tab-enter bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
           {/* Top Filters & Search */}
           <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
@@ -694,7 +837,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             ) : (
               filteredOrders.map((order) => (
-                <div key={order.id} className="p-4 sm:p-5 flex flex-col xl:flex-row xl:items-center justify-between gap-4 text-xs hover:bg-slate-50/80 transition-colors">
+                <div key={order.id} className="dashboard-row-interactive p-4 sm:p-5 flex flex-col xl:flex-row xl:items-center justify-between gap-4 text-xs">
                   <div className="space-y-1.5 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-mono font-black text-[#0d44e8] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
@@ -794,6 +937,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                   {/* Operational & Logistic Action Controls */}
                   <div className="flex items-center gap-1.5 self-end xl:self-center flex-wrap">
+                    {onViewOrderPdf && (
+                      <button
+                        type="button"
+                        onClick={() => onViewOrderPdf(order)}
+                        className="py-1.5 px-3 rounded-xl bg-slate-100 text-slate-800 hover:bg-slate-200 font-bold border border-slate-300 flex items-center gap-1 cursor-pointer transition-colors"
+                        title="Visualiser et télécharger le Bon de Commande PDF A4"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-[#0d44e8]" />
+                        <span>Bon PDF</span>
+                      </button>
+                    )}
+
                     {/* Delivery Modal Opener */}
                     {onOpenDeliveryModal && (
                       <button
@@ -812,7 +967,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => onUpdateStatus(order.id, 'Confirmée')}
-                        className="py-1.5 px-3 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold cursor-pointer transition-colors"
+                        className="btn-shine py-1.5 px-3 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold cursor-pointer"
                       >
                         Valider Commande
                       </button>
@@ -822,7 +977,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => onUpdateStatus(order.id, 'En préparation')}
-                        className="py-1.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold cursor-pointer transition-colors"
+                        className="btn-shine py-1.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold cursor-pointer"
                       >
                         Lancer Colisage
                       </button>
@@ -867,7 +1022,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* 5. TAB 3: CATALOG, STOCKS & VOLUME DISCOUNTS */}
       {activeTab === 'stock' && isGestionnaire && (
-        <div className="space-y-5">
+        <div key="tab-stock" className="dashboard-tab-enter space-y-5">
           {/* Volume Discount Configuration Panel */}
           <form onSubmit={handleSaveVolumeDiscounts} className="bg-white rounded-3xl border border-blue-200 p-5 shadow-2xs space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1031,7 +1186,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 const draftQty = stockDrafts[p.id] !== undefined ? stockDrafts[p.id] : currentQty;
                 const isQuoteOnly = p.isQuote || p.variants.every(v => v.price === 0);
                 return (
-                  <div key={p.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs hover:bg-slate-50">
+                  <div key={p.id} className="dashboard-row-interactive p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center overflow-hidden shrink-0 border border-slate-200">
                         {p.thumbnailUrl || p.image ? (
@@ -1131,47 +1286,101 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* 6. TAB 4: CLIENT PURCHASES STATS */}
-      {activeTab === 'stats-achats' && isSimpleAdmin && (
-        <ClientPurchasesStatsModule orders={orders} clients={clients} products={products} />
+      {activeTab === 'stats-achats' && (isSuperAdmin || isSimpleAdmin || canManageClients) && (
+        <ClientPurchasesStatsModule
+          orders={orders}
+          clients={clients}
+          products={products}
+          initialSelectedClientId={selectedHistoryClientId}
+          onClearSelectedClient={() => setSelectedHistoryClientId(null)}
+        />
       )}
 
       {/* 7. TAB 5: CLIENTS & CONTACTS */}
       {activeTab === 'clients' && canManageClients && (
-        <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
+        <div key="tab-clients" className="dashboard-tab-enter bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
           <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-bold text-base text-slate-900">
-              Répertoire des Établissements Hospitaliers & Cliniques
-            </h3>
+            <div>
+              <h3 className="font-bold text-base text-slate-900">
+                Répertoire des Établissements Hospitaliers & Cliniques
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Consultez les coordonnées, le volume d'affaires et l'historique complet des achats de chaque client.
+              </p>
+            </div>
             <button
               type="button"
               onClick={() => setIsAnnouncementModalOpen(true)}
-              className="py-2 px-3 rounded-xl bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs flex items-center gap-2"
+              className="py-2 px-3 rounded-xl bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs flex items-center gap-2 cursor-pointer"
             >
               <Megaphone className="w-4 h-4" />
               <span>Informer tous les clients</span>
             </button>
           </div>
           <div className="divide-y divide-slate-100">
-            {clients.map((c) => (
-              <div key={c.id} className="p-4 flex items-center justify-between gap-3 text-xs hover:bg-slate-50">
-                <div>
-                  <h4 className="font-bold text-slate-900 text-sm">{c.facilityName}</h4>
-                  <div className="text-slate-500 mt-0.5">
-                    {c.contactName || 'Réception'} · {c.phone} · {c.deliveryAddress || 'Libreville'}
+            {clients.map((c) => {
+              const clientOrdersCount = typeof c.totalOrdersCount === 'number'
+                ? c.totalOrdersCount
+                : orders.filter(o => o.customer.phone === c.phone && o.status !== 'Annulée').length;
+              const clientTotalSpent = typeof c.totalSpent === 'number'
+                ? c.totalSpent
+                : orders.filter(o => o.customer.phone === c.phone && o.status !== 'Annulée').reduce((sum, o) => sum + o.estimatedTotal, 0);
+              const clientUnpaid = typeof c.unpaidAmount === 'number'
+                ? c.unpaidAmount
+                : orders.filter(o => o.customer.phone === c.phone && o.status !== 'Annulée' && !o.isPaid).reduce((sum, o) => sum + o.estimatedTotal, 0);
+
+              return (
+                <div key={c.id} className="dashboard-row-interactive p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="font-bold text-slate-900 text-sm">{c.facilityName}</h4>
+                      <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold text-[11px] tabular-nums">
+                        {clientOrdersCount} commande{clientOrdersCount > 1 ? 's' : ''}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/80 font-extrabold text-[11px] tabular-nums">
+                        {clientTotalSpent.toLocaleString('fr-FR')} FCFA
+                      </span>
+                      {clientUnpaid > 0 && (
+                        <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200/80 font-bold text-[11px] tabular-nums">
+                          Reste à régler : {clientUnpaid.toLocaleString('fr-FR')} FCFA
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-slate-500 mt-1">
+                      {c.contactName || 'Réception'} · <span className="font-mono">{c.phone}</span> · {c.deliveryAddress || 'Libreville'}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedHistoryClientId(c.id || c.phone);
+                        setActiveTab('stats-achats');
+                      }}
+                      className="py-1.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Historique des achats</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setTargetMessageClient(c); setIsMessageModalOpen(true); }}
+                      className="py-1.5 px-3 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold flex items-center gap-1 cursor-pointer shadow-xs transition-colors"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      <span>Message Direct</span>
+                    </button>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => { setTargetMessageClient(c); setIsMessageModalOpen(true); }}
-                  className="py-1.5 px-3 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold flex items-center gap-1 cursor-pointer shadow-xs"
-                >
-                  <MessageCircle className="w-3.5 h-3.5" />
-                  <span>Message Direct</span>
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
+      )}
+
+      {/* 7A. TAB: REAL-TIME COLLABORATOR LOGS (SUPER-ADMIN) */}
+      {activeTab === 'logs' && isSuperAdmin && (
+        <StaffLogsRealtimeModule />
       )}
 
       {/* 7B. TAB: AUDIT LOGS */}
@@ -1250,6 +1459,106 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 Confirmer l'annulation
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* DIRECT PUSH TO EXISTING GITHUB REPOSITORY MODAL */}
+      {isGitHubPushModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-200">
+            <div className="bg-slate-900 text-white px-5 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-[#0d44e8] flex items-center justify-center">
+                  <GitBranch className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black">
+                    Pousser vers votre dépôt GitHub existant
+                  </h3>
+                  <p className="text-[11px] text-slate-300 font-mono">
+                    keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon-
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsGitHubPushModalOpen(false)}
+                className="text-slate-400 hover:text-white px-2 py-1 text-xs font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleDirectGitHubPush} className="p-5 space-y-4 text-xs">
+              <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 leading-relaxed">
+                <strong>Important :</strong> N&apos;utilisez pas l&apos;icône GitHub en haut d&apos;AI Studio (qui tente de créer un nouveau dépôt). Utilisez ce bouton pour pousser directement vos mises à jour sur votre dépôt existant{' '}
+                <span className="font-mono font-bold">keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon-</span> (branche <span className="font-mono font-bold">main</span>).
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 uppercase text-[11px] mb-1">
+                  Jeton d&apos;accès GitHub (Personal Access Token `ghp_...`)
+                </label>
+                <input
+                  type="password"
+                  value={githubTokenInput}
+                  onChange={(e) => setGithubTokenInput(e.target.value)}
+                  placeholder="Collez votre token GitHub (ex: ghp_xxxxxxxxxxxx) pour autoriser git push"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-[#0d44e8]"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Nécessaire pour authentifier l&apos;écriture sur votre compte <span className="font-mono">keurtisngueka-prog</span> (permission <span className="font-mono">repo</span>).
+                </p>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 uppercase text-[11px] mb-1">
+                  Message du Commit
+                </label>
+                <input
+                  type="text"
+                  value={githubCommitMessage}
+                  onChange={(e) => setGithubCommitMessage(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#0d44e8]"
+                />
+              </div>
+
+              {githubPushFeedback && (
+                <div className={`p-3.5 rounded-xl border font-semibold ${
+                  githubPushFeedback.error
+                    ? 'bg-rose-50 border-rose-200 text-rose-900'
+                    : githubPushFeedback.pushed
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                      : 'bg-amber-50 border-amber-200 text-amber-900'
+                }`}>
+                  <div>{githubPushFeedback.message}</div>
+                  {githubPushFeedback.commitHash && (
+                    <div className="mt-1 text-[11px] font-mono opacity-80">
+                      Commit : {githubPushFeedback.commitHash} · Branche : origin/main
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsGitHubPushModalOpen(false)}
+                  className="px-3.5 py-2 rounded-xl border border-slate-200 text-slate-700 font-bold hover:bg-slate-50 cursor-pointer"
+                >
+                  Fermer
+                </button>
+                <button
+                  type="submit"
+                  disabled={isPushingGitHub}
+                  className="px-4 py-2 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isPushingGitHub ? 'animate-spin' : ''}`} />
+                  <span>{isPushingGitHub ? 'Push en cours...' : 'Commit & Push sur origin/main'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

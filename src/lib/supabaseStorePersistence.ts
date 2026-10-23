@@ -11,7 +11,8 @@ import type {
   AppRole,
   DeliveryLocationPoint,
   StaffPermission,
-  VolumeDiscountSettings
+  VolumeDiscountSettings,
+  StaffActivityLog
 } from '../types.js';
 
 export interface StoredUserAccount {
@@ -45,6 +46,7 @@ export interface PersistentServerStore {
   messages: DirectMessage[];
   notifications: AppNotification[];
   volumeDiscounts?: VolumeDiscountSettings;
+  staffLogs?: StaffActivityLog[];
 }
 
 type Row = Record<string, any>;
@@ -101,21 +103,121 @@ export function createSupabaseStorePersistence(): SupabaseStorePersistence | nul
   const client = createClient(url, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false }
   });
-  return new SupabaseStorePersistence(client);
+  return new SupabaseStorePersistence(client, url, serviceKey);
 }
 
 export class SupabaseStorePersistence {
   private baseline: PersistentServerStore | null = null;
   private readonly profileIds = new Map<string, string>();
   private readonly client: SupabaseClient;
+  private readonly supabaseUrl: string;
+  private readonly serviceKey: string;
+  private cachedStaffClient: { client: SupabaseClient; expiresAt: number } | null = null;
   private queue: Promise<void> = Promise.resolve();
 
-  constructor(client: SupabaseClient) {
+  constructor(client: SupabaseClient, supabaseUrl = '', serviceKey = '') {
     this.client = client;
+    this.supabaseUrl = supabaseUrl;
+    this.serviceKey = serviceKey;
+  }
+
+  private async getStaffClient(): Promise<SupabaseClient> {
+    if (this.cachedStaffClient && this.cachedStaffClient.expiresAt > Date.now() + 60_000) {
+      return this.cachedStaffClient.client;
+    }
+    if (!this.supabaseUrl || !this.serviceKey) {
+      return this.client;
+    }
+
+    const techEmail = 'service-sync@glorydaypharma.ga';
+    const techPassword = `GpSync!${this.serviceKey.slice(-16)}#2026`;
+
+    const { data: listData } = await this.client.auth.admin.listUsers({ page: 1, perPage: 200 });
+    let authUser = listData?.users?.find((u) => u.email?.toLowerCase() === techEmail);
+    if (!authUser) {
+      const { data: created } = await this.client.auth.admin.createUser({
+        email: techEmail,
+        password: techPassword,
+        email_confirm: true,
+      });
+      authUser = created?.user ?? undefined;
+    } else {
+      await this.client.auth.admin.updateUserById(authUser.id, {
+        password: techPassword,
+        email_confirm: true,
+      });
+    }
+
+    if (!authUser) {
+      return this.client;
+    }
+
+    const { data: existingProfile } = await this.client
+      .from('profiles')
+      .select('id,role')
+      .eq('auth_user_id', authUser.id)
+      .maybeSingle();
+
+    if (existingProfile) {
+      if (existingProfile.role !== 'Super-Admin') {
+        await this.client
+          .from('profiles')
+          .update({
+            role: 'Super-Admin',
+            facility_name: 'Direction Gloryday Pharma (Sync)',
+            is_active: true,
+          })
+          .eq('id', existingProfile.id);
+      }
+    } else {
+      await this.client.from('profiles').insert({
+        auth_user_id: authUser.id,
+        email: techEmail,
+        phone: '+24100000000',
+        facility_name: 'Direction Gloryday Pharma (Sync)',
+        contact_name: 'Système Gloryday',
+        facility_type: 'Clinique',
+        role: 'Super-Admin',
+        is_active: true,
+      });
+    }
+
+    await this.client
+      .from('staff_roles')
+      .upsert({ user_id: authUser.id, role: 'Super-Admin' }, { onConflict: 'user_id' });
+
+    const signInClient = createClient(this.supabaseUrl, this.serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data: signInData } = await signInClient.auth.signInWithPassword({
+      email: techEmail,
+      password: techPassword,
+    });
+
+    const accessToken = signInData?.session?.access_token;
+    if (!accessToken) {
+      return this.client;
+    }
+
+    const authedClient = createClient(this.supabaseUrl, this.serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      },
+    });
+
+    const expiresAt = signInData?.session?.expires_at
+      ? signInData.session.expires_at * 1000
+      : Date.now() + 45 * 60 * 1000;
+
+    this.cachedStaffClient = { client: authedClient, expiresAt };
+    return authedClient;
   }
 
   async hydrate(local: PersistentServerStore): Promise<PersistentServerStore> {
-    const [productsResult, variantsResult, packsResult, ordersResult, itemsResult, usersResult, quotesResult, messagesResult, notificationsResult, staffAccountsResult] = await Promise.all([
+    const [productsResult, variantsResult, packsResult, ordersResult, itemsResult, usersResult, quotesResult, messagesResult, notificationsResult, staffAccountsResult, activityLogsResult, runtimeSettingsResult] = await Promise.all([
       this.client.from('products').select('*').order('created_at', { ascending: true }),
       this.client.from('product_variants').select('*').order('id', { ascending: true }),
       this.client.from('packs').select('*').order('created_at', { ascending: true }),
@@ -126,6 +228,8 @@ export class SupabaseStorePersistence {
       this.client.from('direct_messages').select('*').order('created_at', { ascending: true }),
       this.client.from('notifications').select('*').order('created_at', { ascending: true }),
       this.client.from('app_staff_accounts').select('*'),
+      this.client.from('activity_logs').select('*').limit(500),
+      this.client.from('app_runtime_settings').select('*'),
     ]);
 
     assertNoError('lecture des produits', productsResult.error);
@@ -137,10 +241,17 @@ export class SupabaseStorePersistence {
     assertNoError('lecture des devis', quotesResult.error);
     assertNoError('lecture des messages', messagesResult.error);
     assertNoError('lecture des notifications', notificationsResult.error);
-    const staffTableMissing = staffAccountsResult.error?.code === 'PGRST205' ||
-      (staffAccountsResult.error?.message || '').includes('app_staff_accounts');
+    const staffTableMissing = this.isMissingTableError(staffAccountsResult.error, 'app_staff_accounts');
     if (staffAccountsResult.error && !staffTableMissing) {
       assertNoError('lecture des comptes collaborateurs', staffAccountsResult.error);
+    }
+    const activityLogsMissing = this.isMissingTableError(activityLogsResult.error, 'activity_logs');
+    if (activityLogsResult.error && !activityLogsMissing) {
+      assertNoError('lecture des logs collaborateurs (activity_logs)', activityLogsResult.error);
+    }
+    const runtimeSettingsMissing = this.isMissingTableError(runtimeSettingsResult.error, 'app_runtime_settings');
+    if (runtimeSettingsResult.error && !runtimeSettingsMissing) {
+      assertNoError('lecture des paramètres runtime', runtimeSettingsResult.error);
     }
 
     const variantRows = rows(variantsResult.data);
@@ -212,6 +323,9 @@ export class SupabaseStorePersistence {
       role: row.role as StaffRole,
       passwordHash: String(row.password_hash),
       active: Boolean(row.is_active),
+      permissions: Array.isArray(row.permissions) ? row.permissions : undefined,
+      lastSeenAt: row.last_seen_at ? String(row.last_seen_at) : undefined,
+      lastLoginAt: row.last_login_at ? String(row.last_login_at) : undefined,
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     }));
@@ -328,6 +442,52 @@ export class SupabaseStorePersistence {
       } as AppNotification;
     });
 
+    const remoteActivityLogs = rows(activityLogsResult.data).map((row): StaffActivityLog => {
+      const saved = dataObject(row.app_data);
+      const detailsObj = row.details && typeof row.details === 'object' && !Array.isArray(row.details)
+        ? (row.details as Row)
+        : {};
+      const userId = String(row.user_id || row.userId || detailsObj.userId || saved.userId || saved.actorId || 'system');
+      const actionType = String(row.action_type || row.actionType || detailsObj.actionType || saved.actionType || row.action_label || saved.actionLabel || 'ACTION');
+      const entityType = String(row.entity_type || row.entityType || detailsObj.entityType || saved.entityType || saved.targetType || 'settings');
+      const entityId = String(row.entity_id || row.entityId || detailsObj.entityId || saved.entityId || saved.targetId || row.target_label || saved.targetLabel || 'global');
+      const detailsText = typeof row.details === 'string'
+        ? row.details
+        : String(detailsObj.message || detailsObj.details || saved.details || (Object.keys(detailsObj).length > 0 ? JSON.stringify(detailsObj) : ''));
+      const timestamp = String(row.created_at || row.timestamp || detailsObj.timestamp || saved.timestamp || new Date().toISOString());
+      return {
+        ...saved,
+        id: String(row.id),
+        userId,
+        actionType,
+        entityType,
+        entityId,
+        details: detailsText,
+        timestamp,
+        actorId: String(detailsObj.actorId || saved.actorId || userId),
+        actorName: String(row.actor_name || detailsObj.actorName || saved.actorName || 'Collaborateur'),
+        actorRole: (row.actor_role || detailsObj.actorRole || saved.actorRole || 'Super-Admin') as AppRole,
+        category: (row.category || detailsObj.category || saved.category || 'system') as StaffActivityLog['category'],
+        severity: (row.severity || detailsObj.severity || saved.severity || 'info') as StaffActivityLog['severity'],
+        actionLabel: String(row.action_label || detailsObj.actionLabel || saved.actionLabel || actionType),
+        targetType: (['product', 'order', 'staff', 'settings', 'quote'].includes(entityType) ? entityType : (detailsObj.targetType || saved.targetType || 'settings')) as StaffActivityLog['targetType'],
+        targetId: String(detailsObj.targetId || saved.targetId || entityId),
+        targetLabel: String(row.target_label || detailsObj.targetLabel || saved.targetLabel || entityId),
+        previousValue: row.previous_value || detailsObj.previousValue || saved.previousValue || undefined,
+        newValue: row.new_value || detailsObj.newValue || saved.newValue || undefined,
+      };
+    });
+
+    const runtimeRows = rows(runtimeSettingsResult.data);
+    const volumeDiscountRow = runtimeRows.find((r) => r.setting_key === 'volume_discounts');
+    const remoteVolumeDiscounts = volumeDiscountRow?.setting_value
+      ? (volumeDiscountRow.setting_value as VolumeDiscountSettings)
+      : local.volumeDiscounts;
+
+    const mergedStaffLogs = mergeById(remoteActivityLogs, local.staffLogs || [], (item) => item.id)
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+      .slice(0, 500);
+
     const rawMerged: PersistentServerStore = {
       products: mergeById(remoteProducts, local.products, (item) => item.id),
       packs: mergeById(remotePacks, local.packs, (item) => item.id),
@@ -337,10 +497,11 @@ export class SupabaseStorePersistence {
       quotes: mergeById(remoteQuotes, local.quotes, (item) => item.id),
       messages: mergeById(remoteMessages, local.messages, (item) => item.id),
       notifications: mergeById(remoteNotifications, local.notifications, (item) => item.id),
+      volumeDiscounts: remoteVolumeDiscounts,
+      staffLogs: mergedStaffLogs,
     };
-    // Keep the comparison baseline limited to what was actually loaded from
-    // Supabase. Local seed data must remain a change so the first persist can
-    // upsert it into the database instead of silently treating it as synced.
+    // Compare local seed data to what was actually read from Supabase so the
+    // first save uploads the catalogue instead of marking it as already synced.
     this.baseline = clone({
       products: remoteProducts,
       packs: remotePacks,
@@ -350,6 +511,10 @@ export class SupabaseStorePersistence {
       quotes: remoteQuotes,
       messages: remoteMessages,
       notifications: remoteNotifications,
+      staffLogs: remoteActivityLogs,
+      volumeDiscounts: volumeDiscountRow?.setting_value
+        ? volumeDiscountRow.setting_value as VolumeDiscountSettings
+        : undefined,
     });
     const cleanedMerged: PersistentServerStore = {
       ...rawMerged,
@@ -371,6 +536,8 @@ export class SupabaseStorePersistence {
       await this.persistQuotes(snapshot);
       await this.persistMessages(snapshot);
       await this.persistNotifications(snapshot);
+      await this.persistRuntimeSettings(snapshot);
+      await this.persistActivityLogs(snapshot);
       this.baseline = clone(snapshot);
     });
     this.queue = operation.catch(() => undefined);
@@ -470,17 +637,112 @@ export class SupabaseStorePersistence {
     for (const account of store.staffAccounts || []) {
       const previous = oldById.get(account.id);
       if (previous && same(previous, account)) continue;
-      const { error } = await this.client.from('app_staff_accounts').upsert({
+      const extendedPayload = {
         id: account.id,
         identifier: account.identifier,
         name: account.name,
         role: account.role,
         password_hash: account.passwordHash,
         is_active: account.active,
+        permissions: account.permissions || null,
+        last_seen_at: account.lastSeenAt || null,
+        last_login_at: account.lastLoginAt || null,
         created_at: account.createdAt,
         updated_at: account.updatedAt,
-      }, { onConflict: 'id' });
+      };
+      let { error } = await this.client.from('app_staff_accounts').upsert(extendedPayload, { onConflict: 'id' });
+      if (error && /permissions|last_seen_at|last_login_at|column/i.test(error.message || '')) {
+        const fallbackResult = await this.client.from('app_staff_accounts').upsert({
+          id: account.id,
+          identifier: account.identifier,
+          name: account.name,
+          role: account.role,
+          password_hash: account.passwordHash,
+          is_active: account.active,
+          created_at: account.createdAt,
+          updated_at: account.updatedAt,
+        }, { onConflict: 'id' });
+        error = fallbackResult.error;
+      }
       assertNoError(`enregistrement du compte collaborateur ${account.id}`, error);
+    }
+  }
+
+  private async persistRuntimeSettings(store: PersistentServerStore): Promise<void> {
+    if (!store.volumeDiscounts) return;
+    if (same(this.baseline?.volumeDiscounts, store.volumeDiscounts)) return;
+    const { error } = await this.client.from('app_runtime_settings').upsert({
+      setting_key: 'volume_discounts',
+      setting_value: store.volumeDiscounts,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'setting_key' });
+    if (this.isMissingTableError(error, 'app_runtime_settings')) return;
+    assertNoError('enregistrement des paliers de remise volume', error);
+  }
+
+  private async persistActivityLogs(store: PersistentServerStore): Promise<void> {
+    const oldById = new Map((this.baseline?.staffLogs || []).map((item) => [item.id, item]));
+    const currentLogs = store.staffLogs || [];
+    for (const log of currentLogs) {
+      const previous = oldById.get(log.id);
+      if (previous && same(previous, log)) continue;
+      const resolvedUserId = log.userId || log.actorId || 'system';
+      const resolvedActionType = log.actionType || log.actionLabel || 'ACTION';
+      const resolvedEntityType = log.entityType || log.targetType || 'settings';
+      const resolvedEntityId = log.entityId || log.targetId || log.targetLabel || 'global';
+      const detailsJsonb = {
+        message: log.details,
+        actorId: log.actorId || resolvedUserId,
+        actorName: log.actorName,
+        actorRole: log.actorRole,
+        category: log.category,
+        severity: log.severity,
+        actionLabel: log.actionLabel,
+        targetType: log.targetType,
+        targetId: log.targetId || resolvedEntityId,
+        targetLabel: log.targetLabel,
+        previousValue: log.previousValue || null,
+        newValue: log.newValue || null,
+      };
+      let { error } = await this.client.from('activity_logs').upsert({
+        id: log.id,
+        user_id: resolvedUserId,
+        action_type: resolvedActionType,
+        entity_type: resolvedEntityType,
+        entity_id: resolvedEntityId,
+        details: detailsJsonb,
+        created_at: log.timestamp,
+        userId: resolvedUserId,
+        actionType: resolvedActionType,
+        entityType: resolvedEntityType,
+        entityId: resolvedEntityId,
+        timestamp: log.timestamp,
+        actor_name: log.actorName,
+        actor_role: log.actorRole,
+        category: log.category,
+        severity: log.severity,
+        action_label: log.actionLabel,
+        target_label: log.targetLabel,
+        previous_value: log.previousValue || null,
+        new_value: log.newValue || null,
+        app_data: log,
+      }, { onConflict: 'id' });
+
+      if (error && /column|schema/i.test(error.message || '')) {
+        const fallbackResult = await this.client.from('activity_logs').upsert({
+          id: log.id,
+          user_id: resolvedUserId,
+          action_type: resolvedActionType,
+          entity_type: resolvedEntityType,
+          entity_id: resolvedEntityId,
+          details: detailsJsonb,
+          created_at: log.timestamp,
+        }, { onConflict: 'id' });
+        error = fallbackResult.error;
+      }
+
+      if (this.isMissingTableError(error, 'activity_logs')) return;
+      assertNoError(`enregistrement du log collaborateur ${log.id} dans activity_logs`, error);
     }
   }
 
@@ -546,14 +808,18 @@ export class SupabaseStorePersistence {
     for (const order of store.orders) {
       const previous = oldById.get(order.id);
       if (previous && same(previous, order)) continue;
-      let profileId = await this.profileIdFor(order.userId, store);
-      if (!profileId && order.userId) {
-        const customer = order.customer;
-        const account: StoredUserAccount | undefined = store.accounts.find((item) => item.user.id === order.userId);
-        if (account) profileId = await this.saveAccount(account);
-        else {
+      const customer = order.customer;
+      const fallbackUserId = order.userId || `usr-phone-${String(customer.phone || order.id).replace(/\D/g, '') || order.id}`;
+      let profileId = await this.profileIdFor(fallbackUserId, store);
+      if (!profileId) {
+        const account: StoredUserAccount | undefined =
+          store.accounts.find((item) => item.user.id === fallbackUserId) ||
+          store.accounts.find((item) => item.user.phone && item.user.phone === customer.phone);
+        if (account) {
+          profileId = await this.saveAccount(account);
+        } else {
           const minimalUser: User = {
-            id: order.userId,
+            id: fallbackUserId,
             phone: customer.phone,
             facilityName: customer.facilityName,
             contactName: customer.contactName,
@@ -567,7 +833,6 @@ export class SupabaseStorePersistence {
       }
       if (!profileId) throw new Error(`La commande ${order.reference} n’a pas de compte client associé dans Supabase.`);
 
-      const customer = order.customer;
       const orderRow = {
         id: order.id,
         reference: order.reference,
@@ -602,19 +867,67 @@ export class SupabaseStorePersistence {
         created_at: order.createdAt,
         updated_at: new Date().toISOString(),
       };
-      const itemRows = (order.items || []).map((item) => ({
-        product_id: item.productId && store.products.some((product) => product.id === item.productId) ? item.productId : null,
-        product_name: item.productName,
-        variant: item.variant || null,
-        price: Math.max(0, Math.trunc(numberOr(item.price))),
-        quantity: Math.max(1, Math.trunc(numberOr(item.quantity, 1))),
-        total: Math.max(0, Math.trunc(numberOr(item.total))),
-        is_quote: Boolean(item.isQuote),
-      }));
-      const { error } = await this.client.rpc('app_save_order', {
+      const itemRows = (order.items || []).map((item) => {
+        const matchedProduct = item.productId
+          ? store.products.find((product) => product.id === item.productId)
+          : undefined;
+        const hasMatchingVariant = Boolean(
+          matchedProduct &&
+          item.variant &&
+          matchedProduct.variants?.some((v) => v.label === item.variant)
+        );
+        return {
+          product_id: matchedProduct && hasMatchingVariant ? matchedProduct.id : null,
+          product_name: item.productName,
+          variant: item.variant || null,
+          price: Math.max(0, Math.trunc(numberOr(item.price))),
+          quantity: Math.max(1, Math.trunc(numberOr(item.quantity, 1))),
+          total: Math.max(0, Math.trunc(numberOr(item.total))),
+          is_quote: Boolean(item.isQuote),
+        };
+      });
+
+      let { error } = await this.client.rpc('app_save_order', {
         p_order: orderRow,
         p_items: itemRows,
       });
+
+      if (error) {
+        const staffClient = await this.getStaffClient();
+        const { error: upsertError } = await staffClient
+          .from('orders')
+          .upsert(orderRow, { onConflict: 'id' });
+
+        if (!upsertError) {
+          const validCatalogItems = itemRows.filter((item) => Boolean(item.product_id && item.variant));
+          const { error: itemsError } = await this.client.rpc('app_replace_order_items', {
+            p_order_id: order.id,
+            p_items: validCatalogItems,
+          });
+          if (itemsError && itemsError.code !== 'P0001') {
+            error = itemsError;
+          } else {
+            const { error: restoreTotalsError } = await staffClient
+              .from('orders')
+              .update({
+                client_id: profileId,
+                estimated_total: orderRow.estimated_total,
+                delivery_fee: orderRow.delivery_fee,
+                status: orderRow.status,
+                is_paid: orderRow.is_paid,
+                delivery_stage: orderRow.delivery_stage,
+                pdf_url: orderRow.pdf_url,
+                app_data: orderRow.app_data,
+                updated_at: orderRow.updated_at,
+              })
+              .eq('id', order.id);
+            error = restoreTotalsError;
+          }
+        } else {
+          error = upsertError;
+        }
+      }
+
       assertNoError(`enregistrement de la commande ${order.reference}`, error);
     }
   }

@@ -38,7 +38,10 @@ import type {
   DeliveryLocationPoint,
   StaffPermission,
   VolumeDiscountSettings,
-  StaffActivityStats
+  StaffActivityStats,
+  StaffActivityLog,
+  StaffLogCategory,
+  StaffLogSeverity
 } from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -236,6 +239,7 @@ function loadStore(): ServerStore {
         messages: Array.isArray(parsed.messages) ? parsed.messages : [],
         notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
         volumeDiscounts: sanitizeVolumeDiscountSettings(parsed.volumeDiscounts),
+        staffLogs: Array.isArray(parsed.staffLogs) ? parsed.staffLogs.slice(0, 500) : [],
         deliveryLocations: parsed.deliveryLocations && typeof parsed.deliveryLocations === 'object' && !Array.isArray(parsed.deliveryLocations)
           ? parsed.deliveryLocations
           : {},
@@ -266,6 +270,7 @@ function loadStore(): ServerStore {
     messages: [],
     notifications: [],
     volumeDiscounts: { ...DEFAULT_VOLUME_DISCOUNT_SETTINGS },
+    staffLogs: [],
     deliveryLocations: {},
     deliveryTrackingSessions: {}
   };
@@ -643,7 +648,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       allowed = isSuperAdmin || isSimpleAdmin || hasPerm('stats_view');
     } else if (route === '/admin/settings/volume-discounts') {
       allowed = isSuperAdmin || hasPerm('settings_manage') || hasPerm('catalog_stock');
-    } else if (route.startsWith('/admin/staff') || route === '/supabase/migration-sql' || route === '/auth/admin-password') {
+    } else if (route.startsWith('/admin/clients/')) {
+      allowed = isSuperAdmin || isSimpleAdmin || isCommercial || hasPerm('clients_manage') || hasPerm('stats_view') || hasPerm('orders_view');
+    } else if (route.startsWith('/admin/staff') || route.startsWith('/admin/logs') || route.startsWith('/admin/activity-logs') || route.startsWith('/admin/github') || route === '/supabase/migration-sql' || route === '/auth/admin-password') {
       allowed = isSuperAdmin;
     }
 
@@ -659,6 +666,134 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   if (persistence) await persistence.persist(store);
   saveStoreLocal(store);
 
+  const normalizeActivityLogEntry = (raw: Partial<StaffActivityLog>): StaffActivityLog => {
+    const id = raw.id || `log-${randomUUID()}`;
+    const timestamp = raw.timestamp || new Date().toISOString();
+    const userId = raw.userId || raw.actorId || 'system';
+    const actionType = raw.actionType || raw.actionLabel || 'ACTION';
+    const entityType = raw.entityType || raw.targetType || 'settings';
+    const entityId = raw.entityId || raw.targetId || raw.targetLabel || 'global';
+    const details = raw.details || '';
+    const targetType = (['product', 'order', 'staff', 'settings', 'quote'].includes(String(raw.targetType || entityType))
+      ? (raw.targetType || entityType)
+      : 'settings') as StaffActivityLog['targetType'];
+    return {
+      id,
+      userId,
+      actionType,
+      entityType,
+      entityId,
+      details,
+      timestamp,
+      actorId: raw.actorId || userId,
+      actorName: raw.actorName || 'Collaborateur',
+      actorRole: raw.actorRole || 'Super-Admin',
+      category: raw.category || 'system',
+      severity: raw.severity || 'info',
+      actionLabel: raw.actionLabel || actionType,
+      targetType,
+      targetId: raw.targetId || entityId,
+      targetLabel: raw.targetLabel || entityId,
+      previousValue: raw.previousValue,
+      newValue: raw.newValue,
+    };
+  };
+
+  store.staffLogs = (store.staffLogs || []).map(normalizeActivityLogEntry);
+  if (store.staffLogs.length === 0) {
+    const nowIso = new Date().toISOString();
+    const vd = sanitizeVolumeDiscountSettings(store.volumeDiscounts);
+    store.staffLogs = [
+      normalizeActivityLogEntry({
+        id: `log-${randomUUID()}`,
+        userId: 'staff-super-admin',
+        actionType: 'VOLUME_DISCOUNT_INIT',
+        entityType: 'settings',
+        entityId: 'volume_discounts',
+        timestamp: nowIso,
+        actorId: 'staff-super-admin',
+        actorName: 'Super-Admin',
+        actorRole: 'Super-Admin',
+        category: 'stock_price',
+        severity: 'info',
+        actionLabel: 'Initialisation paliers remise volume',
+        targetType: 'settings',
+        targetId: 'volume_discounts',
+        targetLabel: 'Remises B2B sur volume',
+        details: `Configuration active : Palier 1 (-${vd.tier1Percent}% dès ${vd.tier1Qty} u.), Palier 2 (-${vd.tier2Percent}% dès ${vd.tier2Qty} u.), Palier 3 (-${vd.tier3Percent}% dès ${vd.tier3Qty} u.).`,
+        newValue: `${vd.tier1Qty}u (-${vd.tier1Percent}%) / ${vd.tier2Qty}u (-${vd.tier2Percent}%)`
+      }),
+      normalizeActivityLogEntry({
+        id: `log-${randomUUID()}`,
+        userId: 'staff-super-admin',
+        actionType: 'CATALOG_STOCK_SYNC',
+        entityType: 'product',
+        entityId: 'catalog-all',
+        timestamp: new Date(Date.now() - 120000).toISOString(),
+        actorId: 'staff-super-admin',
+        actorName: 'Super-Admin',
+        actorRole: 'Super-Admin',
+        category: 'stock_price',
+        severity: 'info',
+        actionLabel: 'Synchronisation catalogue médical',
+        targetType: 'product',
+        targetId: 'catalog-all',
+        targetLabel: `Catalogue complet (${store.products.length} réf.)`,
+        details: `Vérification des stocks initiaux et activation de la conversion automatique en demande de devis pour les articles à stock 0.`,
+        newValue: `${store.products.length} produits actifs`
+      })
+    ];
+    saveStoreLocal(store);
+  }
+
+  const appendStaffLog = (
+    actor: User | { id: string; contactName?: string; facilityName?: string; role: AppRole } | undefined,
+    entry: {
+      actionType?: string;
+      category: StaffLogCategory;
+      severity?: StaffLogSeverity;
+      actionLabel: string;
+      targetType: StaffActivityLog['targetType'];
+      targetId?: string;
+      targetLabel: string;
+      details: string;
+      previousValue?: string;
+      newValue?: string;
+    }
+  ): StaffActivityLog => {
+    store.staffLogs ||= [];
+    const nowIso = new Date().toISOString();
+    const userId = actor?.id || 'system';
+    const actionType = entry.actionType || entry.actionLabel;
+    const entityType = entry.targetType;
+    const entityId = entry.targetId || entry.targetLabel;
+    const logEntry: StaffActivityLog = normalizeActivityLogEntry({
+      id: `log-${randomUUID()}`,
+      userId,
+      actionType,
+      entityType,
+      entityId,
+      details: entry.details,
+      timestamp: nowIso,
+      actorId: userId,
+      actorName: actor?.contactName || actor?.facilityName || 'Collaborateur',
+      actorRole: actor?.role || 'Super-Admin',
+      category: entry.category,
+      severity: entry.severity || 'info',
+      actionLabel: entry.actionLabel,
+      targetType: entry.targetType,
+      targetId: entry.targetId || entityId,
+      targetLabel: entry.targetLabel,
+      previousValue: entry.previousValue,
+      newValue: entry.newValue,
+    });
+    store.staffLogs.unshift(logEntry);
+    if (store.staffLogs.length > 500) {
+      store.staffLogs.length = 500;
+    }
+    return logEntry;
+  };
+
   // ==========================================
   // 1. PRODUCTS & STOCKS ROUTES
   // ==========================================
@@ -670,9 +805,23 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   });
 
   app.put('/api/admin/settings/volume-discounts', asyncHandler(async (req, res) => {
+    const user = (req as AuthenticatedRequest).authenticatedUser;
+    const prev = sanitizeVolumeDiscountSettings(store.volumeDiscounts);
     const updated = sanitizeVolumeDiscountSettings(req.body);
     store.volumeDiscounts = updated;
     setActiveVolumeDiscountSettings(updated);
+    appendStaffLog(user, {
+      category: 'stock_price',
+      severity: 'warning',
+      actionLabel: 'Modification paliers remise volume',
+      targetType: 'settings',
+      targetLabel: 'Remises B2B sur volume',
+      details: updated.enabled
+        ? `Paliers mis à jour : -${updated.tier1Percent}% dès ${updated.tier1Qty} u., -${updated.tier2Percent}% dès ${updated.tier2Qty} u., -${updated.tier3Percent}% dès ${updated.tier3Qty} u.`
+        : 'Remises automatiques sur volume désactivées.',
+      previousValue: prev.enabled ? `${prev.tier1Qty}u (-${prev.tier1Percent}%) / ${prev.tier2Qty}u (-${prev.tier2Percent}%)` : 'Désactivé',
+      newValue: updated.enabled ? `${updated.tier1Qty}u (-${updated.tier1Percent}%) / ${updated.tier2Qty}u (-${updated.tier2Percent}%)` : 'Désactivé'
+    });
     await saveStore(store, persistence);
     res.json(updated);
   }));
@@ -722,6 +871,18 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       purchasePrice: productData.purchasePrice
     };
     store.products.unshift(newProduct);
+    const actor = (req as AuthenticatedRequest).authenticatedUser;
+    const mainPrice = newProduct.variants[0]?.price ?? 0;
+    appendStaffLog(actor, {
+      category: 'stock_price',
+      severity: 'info',
+      actionLabel: 'Création nouveau produit',
+      targetType: 'product',
+      targetId: newProduct.id,
+      targetLabel: newProduct.name,
+      details: `Ajout au catalogue (${newProduct.category}) · Prix : ${mainPrice > 0 ? `${mainPrice.toLocaleString('fr-FR')} FCFA` : 'Sur devis'} · Stock initial : ${initialStock} u.`,
+      newValue: `${mainPrice.toLocaleString('fr-FR')} FCFA · Stock ${initialStock} u.`
+    });
     await saveStore(store, persistence);
     res.status(201).json(enrichProductWithStockState(newProduct));
   }));
@@ -733,13 +894,33 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(404).json({ error: 'Produit introuvable' });
       return;
     }
-    const merged: Product = { ...store.products[idx], ...req.body, id };
+    const previousProduct = store.products[idx];
+    const prevPrice = previousProduct.variants?.[0]?.price ?? 0;
+    const prevStock = getTrackedProductStock(previousProduct) ?? 0;
+    const merged: Product = { ...previousProduct, ...req.body, id };
     if (typeof req.body?.quantityAvailable === 'number') {
       setTrackedProductStock(merged, Math.max(0, Math.round(req.body.quantityAvailable)));
     } else if (typeof req.body?.stockQuantity === 'number') {
       setTrackedProductStock(merged, Math.max(0, Math.round(req.body.stockQuantity)));
     }
     store.products[idx] = enrichProductWithStockState(merged);
+    const updatedProduct = store.products[idx];
+    const newPrice = updatedProduct.variants?.[0]?.price ?? 0;
+    const newStock = getTrackedProductStock(updatedProduct) ?? 0;
+    const priceChanged = prevPrice !== newPrice;
+    const stockChanged = prevStock !== newStock;
+    const actor = (req as AuthenticatedRequest).authenticatedUser;
+    appendStaffLog(actor, {
+      category: 'stock_price',
+      severity: priceChanged ? 'warning' : 'info',
+      actionLabel: priceChanged ? 'Modification prix produit' : stockChanged ? 'Modification stock produit' : 'Modification fiche produit',
+      targetType: 'product',
+      targetId: updatedProduct.id,
+      targetLabel: updatedProduct.name,
+      details: `Mise à jour de la fiche produit (${updatedProduct.category}) : Prix ${prevPrice.toLocaleString('fr-FR')} -> ${newPrice.toLocaleString('fr-FR')} FCFA · Stock ${prevStock} -> ${newStock} u.`,
+      previousValue: `${prevPrice.toLocaleString('fr-FR')} FCFA · ${prevStock} u.`,
+      newValue: `${newPrice.toLocaleString('fr-FR')} FCFA · ${newStock} u.`
+    });
     await saveStore(store, persistence);
     res.json(store.products[idx]);
   }));
@@ -752,6 +933,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(404).json({ error: 'Produit introuvable' });
       return;
     }
+    const prevStock = getTrackedProductStock(store.products[idx]) ?? 0;
+    const prevStatus = store.products[idx].status;
     if (typeof quantityAvailable === 'number' && Number.isFinite(quantityAvailable)) {
       setTrackedProductStock(store.products[idx], Math.max(0, Math.round(quantityAvailable)));
     }
@@ -759,13 +942,43 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       store.products[idx].status = status === 'rupture' ? 'rupture' : 'disponible';
     }
     store.products[idx] = enrichProductWithStockState(store.products[idx]);
+    const updatedProduct = store.products[idx];
+    const newStock = getTrackedProductStock(updatedProduct) ?? 0;
+    const newStatus = updatedProduct.status;
+    const actor = (req as AuthenticatedRequest).authenticatedUser;
+    appendStaffLog(actor, {
+      category: 'stock_price',
+      severity: newStatus === 'rupture' || newStock === 0 ? 'warning' : 'info',
+      actionLabel: prevStock !== newStock ? 'Ajustement quantité en stock' : 'Changement statut disponibilité',
+      targetType: 'product',
+      targetId: updatedProduct.id,
+      targetLabel: updatedProduct.name,
+      details: newStock > 0 && newStatus === 'disponible'
+        ? `Stock mis à jour à ${newStock} u. (${newStatus}) — validation directe de commande activée côté client.`
+        : `Stock à ${newStock} u. (${newStatus}) — bascule automatique en demande de devis côté client.`,
+      previousValue: `${prevStock} u. (${prevStatus})`,
+      newValue: `${newStock} u. (${newStatus})`
+    });
     await saveStore(store, persistence);
     res.json({ success: true, product: store.products[idx] });
   }));
 
   app.delete('/api/products/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
+    const target = store.products.find(p => p.id === id);
     store.products = store.products.filter(p => p.id !== id);
+    if (target) {
+      const actor = (req as AuthenticatedRequest).authenticatedUser;
+      appendStaffLog(actor, {
+        category: 'stock_price',
+        severity: 'critical',
+        actionLabel: 'Suppression produit du catalogue',
+        targetType: 'product',
+        targetId: target.id,
+        targetLabel: target.name,
+        details: `Le produit « ${target.name} » (${target.category}) a été retiré du catalogue.`
+      });
+    }
     await saveStore(store, persistence);
     res.json({ success: true });
   }));
@@ -967,6 +1180,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       const user: User = { id: 'staff-super-admin', phone: '', facilityName: 'Direction Générale Gloryday', contactName: 'Super-Admin', role: 'Super-Admin', createdAt: new Date().toISOString() };
       const token = await issueSession(res, user);
       loginAttempts.delete(key);
+      appendStaffLog(user, {
+        category: 'access',
+        severity: 'info',
+        actionLabel: 'Connexion Super-Admin',
+        targetType: 'staff',
+        targetId: user.id,
+        targetLabel: 'Super-Admin (Direction Générale)',
+        details: 'Session ouverte sur le Portail Direction & Logistique.'
+      });
+      saveStoreLocal(store);
       res.json({ user, token });
       return;
     }
@@ -976,6 +1199,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       const user: User = { id: `staff-${Buffer.from(normalizedIdentifier).toString('hex').slice(0, 24)}`, phone: '', facilityName: 'Direction Générale Gloryday', contactName: staff.name || staff.role, role: staff.role, createdAt: new Date().toISOString() };
       const token = await issueSession(res, user);
       loginAttempts.delete(key);
+      appendStaffLog(user, {
+        category: 'access',
+        severity: 'info',
+        actionLabel: 'Connexion collaborateur',
+        targetType: 'staff',
+        targetId: user.id,
+        targetLabel: `${user.contactName} (${user.role})`,
+        details: `Connexion réussie avec l'identifiant « ${normalizedIdentifier} ».`
+      });
+      saveStoreLocal(store);
       res.json({ user, token });
       return;
     }
@@ -985,7 +1218,6 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       const now = new Date().toISOString();
       managedStaff.lastLoginAt = now;
       managedStaff.lastSeenAt = now;
-      saveStoreLocal(store);
       const permissions = managedStaff.permissions && managedStaff.permissions.length > 0
         ? managedStaff.permissions
         : getDefaultPermissionsForRole(managedStaff.role);
@@ -998,6 +1230,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         permissions,
         createdAt: managedStaff.createdAt
       };
+      appendStaffLog(user, {
+        category: 'access',
+        severity: 'info',
+        actionLabel: 'Connexion collaborateur',
+        targetType: 'staff',
+        targetId: managedStaff.id,
+        targetLabel: `${managedStaff.name} (${managedStaff.role})`,
+        details: `Session ouverte par « ${managedStaff.identifier} » (${permissions.length} droit(s) actif(s)).`
+      });
+      saveStoreLocal(store);
       const token = await issueSession(res, user);
       loginAttempts.delete(key);
       res.json({ user, token });
@@ -1071,6 +1313,17 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       updatedAt: now,
     };
     store.staffAccounts.push(account);
+    const actor = (req as AuthenticatedRequest).authenticatedUser;
+    appendStaffLog(actor, {
+      category: 'access',
+      severity: 'warning',
+      actionLabel: 'Création compte collaborateur',
+      targetType: 'staff',
+      targetId: account.id,
+      targetLabel: `${account.name} (${account.identifier})`,
+      details: `Nouveau profil collaborateur créé avec le rôle « ${account.role} » et ${permissions.length} droit(s) d'accès.`,
+      newValue: `${account.role} · [${permissions.join(', ')}]`
+    });
     try {
       await saveStore(store, persistence);
     } catch (error) {
@@ -1110,6 +1363,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(409).json({ error: 'Cet identifiant est déjà utilisé. Choisissez-en un autre.' });
       return;
     }
+    const prevPermissions = current.permissions && current.permissions.length > 0
+      ? current.permissions
+      : getDefaultPermissionsForRole(current.role);
     const permissions = req.body?.permissions !== undefined
       ? sanitizePermissions(req.body.permissions, role)
       : (current.permissions && current.permissions.length > 0 ? current.permissions : getDefaultPermissionsForRole(role));
@@ -1124,6 +1380,20 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       updatedAt: new Date().toISOString(),
     };
     store.staffAccounts[index] = updated;
+    const actor = (req as AuthenticatedRequest).authenticatedUser;
+    appendStaffLog(actor, {
+      category: 'access',
+      severity: !updated.active ? 'critical' : 'warning',
+      actionLabel: current.active !== updated.active
+        ? (updated.active ? 'Réactivation compte collaborateur' : 'Suspension compte collaborateur')
+        : 'Modification droits / profil collaborateur',
+      targetType: 'staff',
+      targetId: updated.id,
+      targetLabel: `${updated.name} (${updated.identifier})`,
+      details: `Mise à jour du profil collaborateur : Rôle ${current.role} -> ${updated.role} · État ${updated.active ? 'Actif' : 'Désactivé'} · ${permissions.length} droit(s) accordé(s).`,
+      previousValue: `${current.role} (${current.active ? 'Actif' : 'Inactif'}) · [${prevPermissions.join(', ')}]`,
+      newValue: `${updated.role} (${updated.active ? 'Actif' : 'Inactif'}) · [${permissions.join(', ')}]`
+    });
     try {
       await saveStore(store, persistence);
     } catch (error) {
@@ -1159,31 +1429,147 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   // ==========================================
   // 4. CLIENTS & QUOTES ROUTES
   // ==========================================
+  const buildClientPurchaseSummary = (clientUser: Partial<User> & { id: string; phone: string; facilityName: string }, allOrders: Order[]) => {
+    const cleanTargetPhone = normalizePhone(clientUser.phone || '');
+    const cleanTargetFacility = (clientUser.facilityName || '').trim().toLowerCase();
+    const matchingOrders = allOrders
+      .filter((o) => {
+        if (clientUser.id && o.userId && o.userId === clientUser.id) return true;
+        const orderPhone = normalizePhone(o.customer?.phone || '');
+        if (cleanTargetPhone && orderPhone && cleanTargetPhone === orderPhone) return true;
+        const orderFacility = (o.customer?.facilityName || '').trim().toLowerCase();
+        if (!cleanTargetPhone && cleanTargetFacility && orderFacility === cleanTargetFacility) return true;
+        return false;
+      })
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+    const validOrders = matchingOrders.filter((o) => o.status !== 'Annulée');
+    const totalSpent = validOrders.reduce((s, o) => s + (o.estimatedTotal || 0), 0);
+    const paidAmount = validOrders.filter((o) => o.isPaid).reduce((s, o) => s + (o.estimatedTotal || 0), 0);
+    const unpaidAmount = Math.max(0, totalSpent - paidAmount);
+    const averageOrderValue = validOrders.length > 0 ? Math.round(totalSpent / validOrders.length) : 0;
+    const lastOrder = validOrders[0] || matchingOrders[0];
+    const firstOrder = validOrders[validOrders.length - 1] || matchingOrders[matchingOrders.length - 1];
+    const daysSinceLastOrder = lastOrder
+      ? Math.max(0, Math.floor((Date.now() - new Date(lastOrder.createdAt).getTime()) / (1000 * 60 * 60 * 24)))
+      : 999;
+
+    const productMap = new Map<string, {
+      productId: string;
+      productName: string;
+      variant: string;
+      totalQuantity: number;
+      totalRevenue: number;
+      ordersCount: number;
+      lastPurchasedAt: string;
+    }>();
+
+    for (const ord of validOrders) {
+      for (const item of ord.items || []) {
+        const key = `${item.productId || item.productName}::${item.variant || ''}`;
+        const existing = productMap.get(key) || {
+          productId: item.productId || item.productName,
+          productName: item.productName,
+          variant: item.variant || 'Standard',
+          totalQuantity: 0,
+          totalRevenue: 0,
+          ordersCount: 0,
+          lastPurchasedAt: ord.createdAt,
+        };
+        existing.totalQuantity += item.quantity || 0;
+        existing.totalRevenue += item.total || 0;
+        existing.ordersCount += 1;
+        if (Date.parse(ord.createdAt) > Date.parse(existing.lastPurchasedAt)) {
+          existing.lastPurchasedAt = ord.createdAt;
+        }
+        productMap.set(key, existing);
+      }
+    }
+
+    const purchasedProducts = Array.from(productMap.values()).sort((a, b) => b.totalRevenue - a.totalRevenue || b.totalQuantity - a.totalQuantity);
+
+    return {
+      ...clientUser,
+      totalOrdersCount: validOrders.length,
+      allOrdersCount: matchingOrders.length,
+      totalSpent,
+      paidAmount,
+      unpaidAmount,
+      averageOrderValue,
+      firstOrderDate: firstOrder?.createdAt || null,
+      lastOrderDate: lastOrder?.createdAt || null,
+      daysSinceLastOrder,
+      isInactive10Days: daysSinceLastOrder >= 10,
+      orders: matchingOrders,
+      purchasedProducts,
+    };
+  };
+
   app.get('/api/clients', (_req, res) => {
     const user = (_req as AuthenticatedRequest).authenticatedUser!;
     const visibleAccounts = user.role === 'Commercial'
       ? store.accounts.filter(acc => acc.user.assignedToCommercialId === user.id)
       : store.accounts;
+    const knownPhones = new Set<string>();
     const enrichedClients = visibleAccounts.map(acc => {
-      const clientOrders = store.orders.filter(
-        o => o.status !== 'Annulée' && o.userId === acc.user.id
-      );
-      const totalSpent = clientOrders.reduce((s, o) => s + o.estimatedTotal, 0);
-      const lastOrder = clientOrders[0];
-      const daysSinceLastOrder = lastOrder
-        ? Math.floor((Date.now() - new Date(lastOrder.createdAt).getTime()) / (1000 * 60 * 60 * 24))
-        : 99;
-
-      return {
-        ...acc.user,
-        totalOrdersCount: clientOrders.length,
-        totalSpent,
-        lastOrderDate: lastOrder?.createdAt,
-        daysSinceLastOrder,
-        isInactive10Days: daysSinceLastOrder >= 10
-      };
+      if (acc.user.phone) knownPhones.add(normalizePhone(acc.user.phone));
+      return buildClientPurchaseSummary(acc.user, store.orders);
     });
+
+    // Also include any facility/client from orders that does not yet have a registered account row
+    if (user.role !== 'Commercial') {
+      const guestByPhone = new Map<string, Order>();
+      for (const ord of store.orders) {
+        const normPhone = normalizePhone(ord.customer?.phone || '');
+        const key = normPhone || (ord.customer?.facilityName || '').trim().toLowerCase();
+        if (!key || (normPhone && knownPhones.has(normPhone))) continue;
+        if (!guestByPhone.has(key)) {
+          guestByPhone.set(key, ord);
+        }
+      }
+      for (const [key, ord] of guestByPhone.entries()) {
+        enrichedClients.push(buildClientPurchaseSummary({
+          id: ord.userId || `client-${Buffer.from(key).toString('hex').slice(0, 16)}`,
+          phone: ord.customer.phone || '',
+          facilityName: ord.customer.facilityName || 'Établissement Client',
+          contactName: ord.customer.contactName || 'Responsable Achats',
+          facilityType: ord.customer.facilityType || 'Clinique',
+          deliveryAddress: ord.customer.deliveryAddress || 'Libreville, Gabon',
+          role: 'client',
+          createdAt: ord.createdAt,
+        }, store.orders));
+      }
+    }
+
     res.json(enrichedClients);
+  });
+
+  app.get('/api/admin/clients/:id/purchases', (req, res) => {
+    const targetId = String(req.params.id || '').trim();
+    const account = store.accounts.find(
+      (a) => a.user.id === targetId || normalizePhone(a.user.phone) === normalizePhone(targetId)
+    );
+    if (account) {
+      res.json(buildClientPurchaseSummary(account.user, store.orders));
+      return;
+    }
+    const matchingOrder = store.orders.find(
+      (o) => o.userId === targetId || normalizePhone(o.customer?.phone || '') === normalizePhone(targetId)
+    );
+    if (matchingOrder) {
+      res.json(buildClientPurchaseSummary({
+        id: matchingOrder.userId || targetId,
+        phone: matchingOrder.customer.phone,
+        facilityName: matchingOrder.customer.facilityName,
+        contactName: matchingOrder.customer.contactName,
+        facilityType: matchingOrder.customer.facilityType || 'Clinique',
+        deliveryAddress: matchingOrder.customer.deliveryAddress,
+        role: 'client',
+        createdAt: matchingOrder.createdAt,
+      }, store.orders));
+      return;
+    }
+    res.status(404).json({ error: 'Client ou historique d’achats introuvable.' });
   });
 
   app.patch('/api/clients/:id/assign', asyncHandler(async (req, res) => {
@@ -1628,11 +2014,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
     const user = (req as AuthenticatedRequest).authenticatedUser!;
     const order = store.orders[idx];
-    if (user.role !== 'Super-Admin' && (user.role !== 'client' || order.userId !== user.id)) {
+    const isStaff = ['Super-Admin', 'Admin simple', 'Commercial', 'Logistique'].includes(user.role);
+    if (!isStaff && (user.role !== 'client' || order.userId !== user.id)) {
       res.status(404).json({ error: 'Commande introuvable.' });
       return;
     }
-    if (typeof pdfBase64 !== 'string' || !pdfBase64.startsWith('data:application/pdf;base64,') || pdfBase64.length > 1_500_000) {
+    if (
+      typeof pdfBase64 !== 'string' ||
+      !/^data:application\/pdf(?:;[^,]+)*;base64,/i.test(pdfBase64) ||
+      pdfBase64.length > 4_000_000
+    ) {
       res.status(400).json({ error: 'Fichier PDF invalide ou trop volumineux.' });
       return;
     }
@@ -1956,6 +2347,27 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     if (cancellationReason) {
       store.orders[idx].cancellationReason = cancellationReason;
     }
+    if (user.role !== 'client') {
+      appendStaffLog(user, {
+        category: 'orders',
+        severity: status === 'Annulée' ? 'critical' : 'info',
+        actionLabel: status === 'Confirmée'
+          ? 'Validation bon de commande'
+          : status === 'En préparation'
+            ? 'Mise en préparation / colisage'
+            : status === 'Annulée'
+              ? 'Annulation de commande'
+              : `Statut commande -> ${status}`,
+        targetType: 'order',
+        targetId: order.id,
+        targetLabel: `${order.reference} · ${order.customer.facilityName}`,
+        details: status === 'Annulée'
+          ? `Commande ${order.reference} annulée (${order.estimatedTotal.toLocaleString('fr-FR')} FCFA). Motif : ${cancellationReason || 'Non précisé'}.`
+          : `Commande ${order.reference} (${order.estimatedTotal.toLocaleString('fr-FR')} FCFA) passée de « ${currentStatus} » à « ${status} ».`,
+        previousValue: currentStatus,
+        newValue: status
+      });
+    }
     if (store.orders[idx].userId) {
       store.notifications.unshift({
         id: `notif-${randomUUID()}`,
@@ -2120,6 +2532,25 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       store.notifications.unshift(...dispatchNotifications);
     }
 
+    const actorUser = (req as AuthenticatedRequest).authenticatedUser;
+    appendStaffLog(actorUser, {
+      category: 'orders',
+      severity: 'info',
+      actionLabel: stage === 'delivered'
+        ? 'Livraison terminée & validée'
+        : courierChanged
+          ? 'Affectation coursier & étape logistique'
+          : 'Avancement étape logistique',
+      targetType: 'order',
+      targetId: order.id,
+      targetLabel: `${order.reference} · ${order.customer.facilityName}`,
+      details: stage === 'delivered'
+        ? `Livraison confirmée pour ${order.reference} (Réceptionné par : ${order.deliveryProof?.receivedBy || 'Client'}, BL : ${order.deliveryProof?.receiptReference || 'Signé'}).`
+        : `Suivi logistique de ${order.reference} mis à jour : ${stageLabel[stage]}${order.courier?.name ? ` · Coursier : ${order.courier.name}` : ''}.`,
+      previousValue: stageLabel[currentStage],
+      newValue: stageLabel[stage]
+    });
+
     await saveStore(store, persistence);
     res.json(order);
   }));
@@ -2144,6 +2575,18 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         store.orders[idx].mobilePayment!.validatedAt = new Date().toISOString();
       }
     }
+    const actorUser = (req as AuthenticatedRequest).authenticatedUser;
+    appendStaffLog(actorUser, {
+      category: 'orders',
+      severity: isPaid ? 'info' : 'warning',
+      actionLabel: isPaid ? 'Validation paiement commande' : 'Annulation statut payé',
+      targetType: 'order',
+      targetId: store.orders[idx].id,
+      targetLabel: `${store.orders[idx].reference} · ${store.orders[idx].customer.facilityName}`,
+      details: `Statut financier de ${store.orders[idx].reference} (${store.orders[idx].estimatedTotal.toLocaleString('fr-FR')} FCFA) défini sur « ${isPaid ? 'Payée' : 'Non payée'} ».`,
+      previousValue: wasPaid ? 'Payée' : 'Non payée',
+      newValue: isPaid ? 'Payée' : 'Non payée'
+    });
     if (wasPaid !== isPaid && store.orders[idx].userId) {
       store.notifications.unshift({
         id: `notif-${randomUUID()}`,
@@ -2314,6 +2757,33 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     res.json(stats);
   });
 
+  app.get('/api/admin/logs', (_req, res) => {
+    const logs = Array.isArray(store.staffLogs) ? store.staffLogs.map(normalizeActivityLogEntry) : [];
+    res.json(logs);
+  });
+
+  app.get('/api/admin/activity-logs', (_req, res) => {
+    const logs = Array.isArray(store.staffLogs) ? store.staffLogs.map(normalizeActivityLogEntry) : [];
+    res.json(logs);
+  });
+
+  app.delete('/api/admin/logs', asyncHandler(async (req, res) => {
+    const actor = (req as AuthenticatedRequest).authenticatedUser;
+    store.staffLogs = [];
+    appendStaffLog(actor, {
+      actionType: 'LOGS_RESET',
+      category: 'system',
+      severity: 'warning',
+      actionLabel: 'Réinitialisation du journal des logs',
+      targetType: 'settings',
+      targetId: 'activity_logs',
+      targetLabel: 'Journal des actions collaborateurs',
+      details: 'Le journal des événements collaborateurs (activity_logs) a été archivé et réinitialisé par le Super-Admin.'
+    });
+    await saveStore(store, persistence);
+    res.json({ success: true, logs: store.staffLogs });
+  }));
+
   app.get('/api/events', (_req, res) => {
     const user = (_req as AuthenticatedRequest).authenticatedUser!;
     const requestedSince = Number(_req.query.since);
@@ -2384,7 +2854,11 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     try {
       const migrationsDir = path.join(__dirname, 'supabase', 'migrations');
       const fileNames = fs.readdirSync(migrationsDir).filter(name => name.endsWith('.sql')).sort();
-      const incrementalFiles = fileNames.filter(name => name.startsWith('20261021'));
+      const incrementalFiles = fileNames.filter(name =>
+        name.startsWith('20261021') ||
+        name.startsWith('20261022000001') ||
+        name.startsWith('20261023')
+      );
       const targetFiles = incrementalFiles.length > 0 ? incrementalFiles : fileNames.slice(-1);
       if (targetFiles.length > 0) {
         const combinedSql = targetFiles
@@ -2398,6 +2872,91 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
     res.json({ sql: '' });
   });
+
+  app.post('/api/admin/github/sync', asyncHandler(async (req, res) => {
+    const { execFile } = await import('child_process');
+    const execFileAsync = promisify(execFile);
+    const repoUrl = 'https://github.com/keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon-.git';
+    const personalToken = String(req.body?.token || process.env.GITHUB_TOKEN || '').trim();
+    const commitMsg = String(req.body?.commitMessage || 'Mise à jour Gloryday Pharma : activity_logs Supabase, historique achats clients & synchronisation temps réel').trim();
+    const actor = (req as AuthenticatedRequest).authenticatedUser;
+
+    try {
+      const gitRoot = await execFileAsync('git', ['rev-parse', '--show-toplevel'], { cwd: __dirname });
+      if (path.resolve(gitRoot.stdout.trim()) !== path.resolve(__dirname)) {
+        throw new Error('La synchronisation GitHub doit être lancée depuis la racine du dépôt.');
+      }
+      const branch = await execFileAsync('git', ['branch', '--show-current'], { cwd: __dirname });
+      if (branch.stdout.trim() !== 'main') {
+        throw new Error('La synchronisation est autorisée uniquement depuis la branche main.');
+      }
+      const origin = await execFileAsync('git', ['remote', 'get-url', 'origin'], { cwd: __dirname });
+      if (origin.stdout.trim().replace(/\.git$/i, '').toLowerCase() !== repoUrl.replace(/\.git$/i, '').toLowerCase()) {
+        throw new Error('Le dépôt distant ne correspond pas au dépôt Gloryday Pharma prévu.');
+      }
+      if (personalToken.length > 500 || /[\r\n]/.test(personalToken)) {
+        throw new Error('Le jeton GitHub fourni est invalide.');
+      }
+
+      await execFileAsync('git', ['add', '-A'], { cwd: __dirname });
+      await execFileAsync('git', ['-c', 'user.name=Gloryday Pharma Admin', '-c', 'user.email=admin@glorydaypharma.ga', 'commit', '-m', commitMsg], { cwd: __dirname }).catch(() => undefined);
+      const rev = await execFileAsync('git', ['rev-parse', '--short', 'HEAD'], { cwd: __dirname });
+      const commitHash = rev.stdout.trim();
+
+      if (!personalToken) {
+        appendStaffLog(actor, {
+          actionType: 'GITHUB_COMMIT_LOCAL',
+          category: 'system',
+          severity: 'info',
+          actionLabel: 'Commit Git préparé pour GitHub',
+          targetType: 'settings',
+          targetId: commitHash || 'main',
+          targetLabel: 'keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon-',
+          details: `Commit local ${commitHash} enregistré sur la branche main. Ajoutez un jeton GitHub (Personal Access Token) pour pousser directement vers le dépôt distant.`
+        });
+        await saveStore(store, persistence);
+        res.json({
+          success: true,
+          pushed: false,
+          commitHash,
+          repoUrl,
+          message: `Commit local (${commitHash}) créé avec succès. Pour pousser directement vers GitHub depuis ce serveur, renseignez votre jeton d'accès GitHub (Personal Access Token) ou téléchargez l'archive ZIP mise à jour.`
+        });
+        return;
+      }
+
+      const pushEnvironment: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+      if (personalToken) {
+        const authHeader = Buffer.from(`x-access-token:${personalToken}`).toString('base64');
+        pushEnvironment.GIT_CONFIG_COUNT = '1';
+        pushEnvironment.GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader';
+        pushEnvironment.GIT_CONFIG_VALUE_0 = `AUTHORIZATION: basic ${authHeader}`;
+      }
+      await execFileAsync('git', ['push', 'origin', 'HEAD:main'], { cwd: __dirname, env: pushEnvironment });
+
+      appendStaffLog(actor, {
+        actionType: 'GITHUB_PUSH_SUCCESS',
+        category: 'system',
+        severity: 'info',
+        actionLabel: 'Synchronisation & Push GitHub réussis',
+        targetType: 'settings',
+        targetId: commitHash || 'main',
+        targetLabel: 'keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon-',
+        details: `Le commit ${commitHash} a été poussé avec succès sur la branche main du dépôt GitHub.`
+      });
+      await saveStore(store, persistence);
+      res.json({
+        success: true,
+        pushed: true,
+        commitHash,
+        repoUrl,
+        message: `Synchronisation réussie : le commit ${commitHash} a été poussé sur keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon- (branche main).`
+      });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Erreur lors de la synchronisation Git.';
+      res.status(500).json({ error: `Synchronisation Git : ${errMsg}` });
+    }
+  }));
 
   app.get('/api/download-project-zip', (_req, res) => {
     const updatedZipPath = path.join(__dirname, 'public', 'gloryday-pharma-corrige-20261022.zip');

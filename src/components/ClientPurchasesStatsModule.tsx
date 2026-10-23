@@ -1,30 +1,25 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  TrendingUp, 
-  Building2, 
   Search, 
-  ArrowUpDown, 
   MessageCircle, 
-  Send, 
-  Clock, 
   Package, 
   AlertTriangle, 
   CheckCircle2, 
-  ExternalLink,
-  DollarSign,
-  Filter,
   BarChart3,
-  Calendar,
-  Sparkles,
   ChevronRight,
-  X
+  X,
+  Download,
+  ShoppingBag,
+  FileText
 } from 'lucide-react';
-import { Order, User, FacilityType, Product } from '../types';
+import { Order, Product } from '../types';
 
 interface ClientPurchasesStatsModuleProps {
   orders: Order[];
   clients: any[];
   products: Product[];
+  initialSelectedClientId?: string | null;
+  onClearSelectedClient?: () => void;
   onTriggerNotification?: (userId: string, title: string, message: string) => void;
   onOpenMessageModal?: (client: any) => void;
 }
@@ -32,19 +27,20 @@ interface ClientPurchasesStatsModuleProps {
 export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProps> = ({
   orders,
   clients,
-  products,
-  onTriggerNotification,
-  onOpenMessageModal
+  initialSelectedClientId,
+  onClearSelectedClient
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFacilityType, setSelectedFacilityType] = useState<string>('all');
   const [filterInactivity, setFilterInactivity] = useState<'all' | 'active' | 'inactive10'>('all');
   const [sortBy, setSortBy] = useState<'spent-desc' | 'orders-desc' | 'recent' | 'name'>('spent-desc');
   const [selectedClientDetail, setSelectedClientDetail] = useState<any | null>(null);
+  const [detailModalTab, setDetailModalTab] = useState<'orders' | 'products'>('orders');
 
-  // Compute rich purchasing statistics per client from orders + registered clients
+  const normalizePhoneKey = (phone: string) => (phone || '').replace(/[^0-9+]/g, '').toLowerCase();
+
+  // Compute rich purchasing statistics & complete history per client from orders + registered clients
   const clientStatsList = useMemo(() => {
-    // Group orders by client phone or facilityName
     const clientMap = new Map<string, {
       id: string;
       facilityName: string;
@@ -54,14 +50,25 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
       deliveryAddress: string;
       orders: Order[];
       totalSpent: number;
-      productQuantities: Map<string, { name: string; quantity: number; revenue: number }>;
+      paidAmount: number;
+      unpaidAmount: number;
+      productQuantities: Map<string, {
+        name: string;
+        variant: string;
+        quantity: number;
+        revenue: number;
+        ordersCount: number;
+        lastPurchasedAt: string;
+      }>;
+      firstOrderDate: string | null;
       lastOrderDate: string | null;
       daysSinceLastOrder: number;
     }>();
 
     // 1. Seed with known clients
     clients.forEach(c => {
-      const key = (c.phone || c.facilityName || c.id).toLowerCase().trim();
+      const key = normalizePhoneKey(c.phone) || (c.facilityName || c.id || '').toLowerCase().trim();
+      if (!key) return;
       clientMap.set(key, {
         id: c.id,
         facilityName: c.facilityName || 'Établissement Sans Nom',
@@ -71,7 +78,10 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
         deliveryAddress: c.deliveryAddress || 'Libreville',
         orders: [],
         totalSpent: 0,
+        paidAmount: 0,
+        unpaidAmount: 0,
         productQuantities: new Map(),
+        firstOrderDate: null,
         lastOrderDate: null,
         daysSinceLastOrder: 999
       });
@@ -79,12 +89,19 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
 
     // 2. Aggregate orders
     orders.forEach(o => {
-      const phoneKey = (o.customer.phone || o.customer.facilityName || '').toLowerCase().trim();
+      const phoneKey = normalizePhoneKey(o.customer?.phone || '') || (o.customer?.facilityName || '').toLowerCase().trim();
       let record = clientMap.get(phoneKey);
+      if (!record && o.userId) {
+        for (const existing of clientMap.values()) {
+          if (existing.id === o.userId) {
+            record = existing;
+            break;
+          }
+        }
+      }
       if (!record) {
-        // Guest customer who ordered
         record = {
-          id: `guest-${phoneKey}`,
+          id: o.userId || `guest-${phoneKey}`,
           facilityName: o.customer.facilityName,
           contactName: o.customer.contactName,
           phone: o.customer.phone,
@@ -92,37 +109,61 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
           deliveryAddress: o.customer.deliveryAddress,
           orders: [],
           totalSpent: 0,
+          paidAmount: 0,
+          unpaidAmount: 0,
           productQuantities: new Map(),
+          firstOrderDate: null,
           lastOrderDate: null,
           daysSinceLastOrder: 999
         };
-        clientMap.set(phoneKey, record);
+        clientMap.set(phoneKey || record.id, record);
       }
 
       record.orders.push(o);
-      record.totalSpent += o.estimatedTotal || 0;
+      if (o.status !== 'Annulée') {
+        const orderAmount = o.estimatedTotal || 0;
+        record.totalSpent += orderAmount;
+        if (o.isPaid) {
+          record.paidAmount += orderAmount;
+        } else {
+          record.unpaidAmount += orderAmount;
+        }
 
-      // Track last order date
-      if (!record.lastOrderDate || new Date(o.createdAt) > new Date(record.lastOrderDate)) {
-        record.lastOrderDate = o.createdAt;
+        if (!record.firstOrderDate || new Date(o.createdAt) < new Date(record.firstOrderDate)) {
+          record.firstOrderDate = o.createdAt;
+        }
+        if (!record.lastOrderDate || new Date(o.createdAt) > new Date(record.lastOrderDate)) {
+          record.lastOrderDate = o.createdAt;
+        }
+
+        o.items.forEach(it => {
+          const prodKey = `${it.productName}::${it.variant || ''}`;
+          const existing = record!.productQuantities.get(prodKey) || {
+            name: it.productName,
+            variant: it.variant || 'Standard',
+            quantity: 0,
+            revenue: 0,
+            ordersCount: 0,
+            lastPurchasedAt: o.createdAt
+          };
+          existing.quantity += it.quantity;
+          existing.revenue += it.total;
+          existing.ordersCount += 1;
+          if (new Date(o.createdAt) > new Date(existing.lastPurchasedAt)) {
+            existing.lastPurchasedAt = o.createdAt;
+          }
+          record!.productQuantities.set(prodKey, existing);
+        });
       }
-
-      // Track item breakdown
-      o.items.forEach(it => {
-        const prodKey = it.productName;
-        const existing = record!.productQuantities.get(prodKey) || { name: it.productName, quantity: 0, revenue: 0 };
-        existing.quantity += it.quantity;
-        existing.revenue += it.total;
-        record!.productQuantities.set(prodKey, existing);
-      });
     });
 
     // 3. Compute derived KPIs for each client
     const now = Date.now();
-    const result = Array.from(clientMap.values()).map(entry => {
-      const orderCount = entry.orders.length;
-      const averageOrderValue = orderCount > 0 ? Math.round(entry.totalSpent / orderCount) : 0;
-      
+    return Array.from(clientMap.values()).map(entry => {
+      const sortedOrders = [...entry.orders].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+      const validOrdersCount = sortedOrders.filter(o => o.status !== 'Annulée').length;
+      const averageOrderValue = validOrdersCount > 0 ? Math.round(entry.totalSpent / validOrdersCount) : 0;
+
       let daysSinceLast = 999;
       if (entry.lastOrderDate) {
         const orderTime = new Date(entry.lastOrderDate).getTime();
@@ -130,44 +171,53 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
       }
 
       const isInactive = daysSinceLast >= 10;
-
-      // Top 3 products
-      const topProducts = Array.from(entry.productQuantities.values())
-        .sort((a, b) => b.quantity - a.quantity)
-        .slice(0, 3);
+      const allPurchasedProducts = Array.from(entry.productQuantities.values())
+        .sort((a, b) => b.revenue - a.revenue || b.quantity - a.quantity);
+      const topProducts = allPurchasedProducts.slice(0, 3);
 
       return {
         ...entry,
-        totalOrdersCount: orderCount,
+        orders: sortedOrders,
+        totalOrdersCount: validOrdersCount,
+        allOrdersCount: sortedOrders.length,
         averageOrderValue,
         daysSinceLastOrder: daysSinceLast,
         isInactive10Days: isInactive,
-        topProducts
+        topProducts,
+        allPurchasedProducts
       };
     });
-
-    return result;
   }, [orders, clients]);
+
+  useEffect(() => {
+    if (!initialSelectedClientId) return;
+    const match = clientStatsList.find(
+      c => c.id === initialSelectedClientId || normalizePhoneKey(c.phone) === normalizePhoneKey(initialSelectedClientId)
+    );
+    if (match) {
+      setSelectedClientDetail(match);
+      setDetailModalTab('orders');
+    }
+  }, [initialSelectedClientId, clientStatsList]);
 
   // Overall Global Purchasing KPIs
   const globalKPIs = useMemo(() => {
     const totalRevenue = clientStatsList.reduce((sum, c) => sum + c.totalSpent, 0);
+    const totalPaid = clientStatsList.reduce((sum, c) => sum + c.paidAmount, 0);
+    const totalUnpaid = clientStatsList.reduce((sum, c) => sum + c.unpaidAmount, 0);
     const totalOrdersCount = clientStatsList.reduce((sum, c) => sum + c.totalOrdersCount, 0);
     const averageBasket = totalOrdersCount > 0 ? Math.round(totalRevenue / totalOrdersCount) : 0;
     const inactiveCount = clientStatsList.filter(c => c.isInactive10Days && c.totalOrdersCount > 0).length;
     const activeClientsCount = clientStatsList.filter(c => c.totalOrdersCount > 0 && !c.isInactive10Days).length;
 
-    // Top customer
-    const sortedByRevenue = [...clientStatsList].sort((a, b) => b.totalSpent - a.totalSpent);
-    const topClient = sortedByRevenue[0] || null;
-
     return {
       totalRevenue,
+      totalPaid,
+      totalUnpaid,
       totalOrdersCount,
       averageBasket,
       inactiveCount,
-      activeClientsCount,
-      topClient
+      activeClientsCount
     };
   }, [clientStatsList]);
 
@@ -215,31 +265,104 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
     return `https://wa.me/${cleanPhone || '24177003004'}?text=${encodeURIComponent(message)}`;
   };
 
+  const handleExportClientHistoryCsv = (client: any) => {
+    const headers = [
+      'Établissement',
+      'Téléphone',
+      'Référence Commande',
+      'Date Commande',
+      'Statut Commande',
+      'Paiement',
+      'Article Commandé',
+      'Format / Variante',
+      'Quantité',
+      'Prix Unitaire (FCFA)',
+      'Total Ligne (FCFA)',
+      'Total Commande (FCFA)'
+    ];
+    const rows: string[][] = [];
+    for (const ord of client.orders || []) {
+      if (!ord.items || ord.items.length === 0) {
+        rows.push([
+          client.facilityName,
+          client.phone,
+          ord.reference,
+          new Date(ord.createdAt).toLocaleString('fr-FR'),
+          ord.status,
+          ord.isPaid ? 'Payée' : 'En attente',
+          '-',
+          '-',
+          '0',
+          '0',
+          '0',
+          String(ord.estimatedTotal || 0)
+        ]);
+      } else {
+        for (const item of ord.items) {
+          rows.push([
+            client.facilityName,
+            client.phone,
+            ord.reference,
+            new Date(ord.createdAt).toLocaleString('fr-FR'),
+            ord.status,
+            ord.isPaid ? 'Payée' : 'En attente',
+            item.productName,
+            item.variant || 'Standard',
+            String(item.quantity),
+            String(item.price),
+            String(item.total),
+            String(ord.estimatedTotal || 0)
+          ]);
+        }
+      }
+    }
+    const csvContent = '\uFEFF' + [
+      headers.map(h => `"${h}"`).join(';'),
+      ...rows.map(r => r.map(c => `"${String(c || '').replace(/"/g, '""')}"`).join(';'))
+    ].join('\r\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const safeName = (client.facilityName || 'client').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    link.download = `historique-achats-${safeName}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const closeDetailModal = () => {
+    setSelectedClientDetail(null);
+    if (onClearSelectedClient) onClearSelectedClient();
+  };
+
   return (
     <div className="space-y-4">
       {/* KPI Cards Banner */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3.5">
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
           <span className="text-[10px] font-bold text-[#6a6a6b] uppercase block">
-            Valeur des commandes
+            Volume Global Commandé
           </span>
           <div className="text-base sm:text-xl font-extrabold text-[#0f0f12] mt-1 tabular-nums">
             {globalKPIs.totalRevenue.toLocaleString('fr-FR')} <span className="text-xs font-bold text-slate-500">FCFA</span>
           </div>
           <p className="text-[10px] text-slate-500 mt-0.5">
-            Sur {globalKPIs.totalOrdersCount} commandes totales
+            Sur {globalKPIs.totalOrdersCount} commande(s) validée(s)
           </p>
         </div>
 
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
           <span className="text-[10px] font-bold text-[#6a6a6b] uppercase block">
-            Panier Moyen Client
+            Encaissé vs En attente
           </span>
-          <div className="text-base sm:text-xl font-extrabold text-[#0d44e8] mt-1 tabular-nums">
-            {globalKPIs.averageBasket.toLocaleString('fr-FR')} <span className="text-xs font-bold text-slate-500">FCFA</span>
+          <div className="text-sm sm:text-base font-extrabold text-emerald-700 mt-1 tabular-nums">
+            {globalKPIs.totalPaid.toLocaleString('fr-FR')} F <span className="text-[10px] font-semibold text-slate-500">payés</span>
           </div>
-          <p className="text-[10px] text-slate-500 mt-0.5">
-            Valeur moyenne par commande
+          <p className="text-[10px] text-amber-700 font-semibold mt-0.5 tabular-nums">
+            Reste : {globalKPIs.totalUnpaid.toLocaleString('fr-FR')} FCFA
           </p>
         </div>
 
@@ -247,7 +370,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
           <span className="text-[10px] font-bold text-emerald-800 uppercase block">
             Clients Actifs
           </span>
-          <div className="text-base sm:text-xl font-extrabold text-emerald-900 mt-1">
+          <div className="text-base sm:text-xl font-extrabold text-emerald-900 mt-1 tabular-nums">
             {globalKPIs.activeClientsCount} <span className="text-xs font-medium text-emerald-700">établissements</span>
           </div>
           <p className="text-[10px] text-emerald-700 mt-0.5">
@@ -259,7 +382,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
           <span className="text-[10px] font-bold text-amber-800 uppercase block">
             Inactifs à Relancer (&gt; 10j)
           </span>
-          <div className="text-base sm:text-xl font-extrabold text-amber-900 mt-1">
+          <div className="text-base sm:text-xl font-extrabold text-amber-900 mt-1 tabular-nums">
             {globalKPIs.inactiveCount} <span className="text-xs font-medium text-amber-700">à relancer</span>
           </div>
           <p className="text-[10px] text-amber-700 mt-0.5">
@@ -275,7 +398,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="Rechercher par clinique, hôpital, pharmacie, contact, tél..."
+              placeholder="Rechercher un client (clinique, hôpital, pharmacie, contact, téléphone)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50/80 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#0d44e8] focus:bg-white"
@@ -292,7 +415,6 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
           </div>
 
           <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
-            {/* Status Segment */}
             <div className="flex bg-slate-100 p-0.5 rounded-xl text-xs font-semibold shrink-0">
               <button
                 type="button"
@@ -324,7 +446,6 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
               </button>
             </div>
 
-            {/* Sort Select */}
             <select
               value={sortBy}
               onChange={(e: any) => setSortBy(e.target.value)}
@@ -345,11 +466,11 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
           <div className="flex items-center gap-2">
             <BarChart3 className="w-4 h-4 text-[#0d44e8]" />
             <h3 className="text-xs sm:text-sm font-extrabold text-slate-900">
-              Statistiques Détaillées des Achats Clients ({filteredClients.length})
+              Historique & Statistiques des Achats par Client ({filteredClients.length})
             </h3>
           </div>
           <span className="text-[11px] text-slate-500 font-medium">
-            Tarifs en FCFA nets
+            Cliquez sur « Historique d'achats » pour voir toutes les commandes et les produits achetés
           </span>
         </div>
 
@@ -364,7 +485,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
               return (
                 <div 
                   key={client.id}
-                  className="p-3.5 sm:p-4 hover:bg-slate-50/70 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                  className="p-3.5 sm:p-4 hover:bg-slate-50/70 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs"
                 >
                   {/* Left: Client Identity */}
                   <div className="flex-1 min-w-0">
@@ -390,6 +511,11 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
                           Inscrit sans commande
                         </span>
                       )}
+                      {client.lastOrderDate && (
+                        <span className="text-[11px] text-slate-500 font-mono tabular-nums">
+                          · Dernier achat : {new Date(client.lastOrderDate).toLocaleDateString('fr-FR')}
+                        </span>
+                      )}
                     </div>
 
                     <div className="text-slate-600 text-[11px] flex items-center gap-3 flex-wrap">
@@ -402,11 +528,11 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
                       <span className="text-slate-500 truncate">{client.deliveryAddress}</span>
                     </div>
 
-                    {/* Top Purchased Products pills */}
+                    {/* Top Purchased Products */}
                     {client.topProducts.length > 0 && (
                       <div className="mt-2 flex items-center gap-1.5 flex-wrap">
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
-                          Articles fréquents :
+                          Produits achetés :
                         </span>
                         {client.topProducts.map((p: any, idx: number) => (
                           <span
@@ -414,15 +540,20 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
                             className="text-[10px] font-medium bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md flex items-center gap-1"
                           >
                             <Package className="w-2.5 h-2.5 text-slate-400" />
-                            {p.name} ({p.quantity})
+                            {p.name} ({p.quantity} u. · {p.revenue.toLocaleString('fr-FR')} F)
                           </span>
                         ))}
+                        {client.allPurchasedProducts.length > 3 && (
+                          <span className="text-[10px] font-bold text-[#0d44e8]">
+                            +{client.allPurchasedProducts.length - 3} autre(s)
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
 
                   {/* Middle: Financial Metrics */}
-                  <div className="grid grid-cols-3 sm:grid-cols-3 gap-2 text-center bg-slate-50 sm:bg-transparent p-2.5 sm:p-0 rounded-xl sm:rounded-none shrink-0 border sm:border-0 border-slate-200/60">
+                  <div className="grid grid-cols-3 gap-3 text-center bg-slate-50 sm:bg-transparent p-2.5 sm:p-0 rounded-xl sm:rounded-none shrink-0 border sm:border-0 border-slate-200/60">
                     <div>
                       <span className="text-[10px] font-bold text-[#6a6a6b] uppercase block">
                         Commandes
@@ -434,7 +565,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
 
                     <div>
                       <span className="text-[10px] font-bold text-[#6a6a6b] uppercase block">
-                        Montant commandé
+                        Total Acheté
                       </span>
                       <span className="font-extrabold text-sm text-[#000000] tabular-nums">
                         {client.totalSpent.toLocaleString('fr-FR')} <span className="text-[10px]">F</span>
@@ -452,15 +583,29 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
                   </div>
 
                   {/* Right: Quick Actions */}
-                  <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                  <div className="flex items-center gap-2 self-end lg:self-center shrink-0">
                     <button
                       type="button"
-                      onClick={() => setSelectedClientDetail(client)}
-                      className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors"
-                      title="Voir le détail des commandes"
+                      onClick={() => {
+                        setSelectedClientDetail(client);
+                        setDetailModalTab('orders');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                      title="Consulter l'historique complet des achats de ce client"
                     >
-                      <ChevronRight className="w-4 h-4" />
-                      <span className="hidden sm:inline">Détail</span>
+                      <ShoppingBag className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Historique d'achats ({client.allOrdersCount})</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleExportClientHistoryCsv(client)}
+                      disabled={client.orders.length === 0}
+                      className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-40"
+                      title="Exporter l'historique d'achats en CSV"
+                    >
+                      <Download className="w-3.5 h-3.5" />
                     </button>
 
                     <a
@@ -481,106 +626,254 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
         )}
       </div>
 
-      {/* Detailed Client Modal */}
+      {/* Detailed Client Purchase History Modal */}
       {selectedClientDetail && (
         <div 
-          onClick={() => setSelectedClientDetail(null)}
+          onClick={closeDetailModal}
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-200"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="w-full sm:max-w-2xl rounded-t-3xl sm:rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[85vh] text-slate-900"
+            className="w-full sm:max-w-3xl rounded-t-3xl sm:rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[88vh] text-slate-900"
           >
             {/* Modal Header */}
-            <div className="p-4 px-5 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
+            <div className="p-4 px-5 border-b border-slate-200 flex items-center justify-between bg-slate-950 text-white shrink-0">
               <div>
-                <h3 className="font-extrabold text-sm sm:text-base text-slate-900">
-                  {selectedClientDetail.facilityName}
-                </h3>
-                <p className="text-xs text-slate-500">
-                  {selectedClientDetail.facilityType} · {selectedClientDetail.contactName} ({selectedClientDetail.phone})
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                    Historique Client
+                  </span>
+                  <h3 className="font-extrabold text-sm sm:text-base text-white">
+                    {selectedClientDetail.facilityName}
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  {selectedClientDetail.facilityType} · {selectedClientDetail.contactName} ({selectedClientDetail.phone}) · {selectedClientDetail.deliveryAddress}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setSelectedClientDetail(null)}
-                className="w-8 h-8 rounded-full bg-slate-200/60 hover:bg-slate-200 flex items-center justify-center text-slate-600"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleExportClientHistoryCsv(selectedClientDetail)}
+                  disabled={selectedClientDetail.orders.length === 0}
+                  className="px-3 py-1.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b38c4] text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Exporter CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={closeDetailModal}
+                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* Modal Content */}
-            <div className="p-4 sm:p-6 overflow-y-auto space-y-4 text-xs">
-              {/* Financial Quick Cards */}
-              <div className="grid grid-cols-3 gap-2 text-center p-3 rounded-xl bg-slate-50 border border-slate-200">
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs">
+              {/* Financial Summary Strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center p-3 rounded-2xl bg-slate-50 border border-slate-200">
                 <div>
                   <span className="text-[10px] text-slate-500 font-bold uppercase block">Commandes</span>
-                  <span className="text-base font-extrabold text-slate-900">{selectedClientDetail.totalOrdersCount}</span>
+                  <span className="text-base font-extrabold text-slate-900 tabular-nums">{selectedClientDetail.totalOrdersCount}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Montant commandé</span>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Total Acheté</span>
                   <span className="text-base font-extrabold text-slate-900 tabular-nums">
                     {selectedClientDetail.totalSpent.toLocaleString('fr-FR')} F
                   </span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Panier Moyen</span>
-                  <span className="text-base font-extrabold text-[#0d44e8] tabular-nums">
-                    {selectedClientDetail.averageOrderValue.toLocaleString('fr-FR')} F
+                  <span className="text-[10px] text-emerald-700 font-bold uppercase block">Montant Payé</span>
+                  <span className="text-base font-extrabold text-emerald-700 tabular-nums">
+                    {(selectedClientDetail.paidAmount || 0).toLocaleString('fr-FR')} F
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-amber-700 font-bold uppercase block">Reste à Payer</span>
+                  <span className="text-base font-extrabold text-amber-700 tabular-nums">
+                    {(selectedClientDetail.unpaidAmount || 0).toLocaleString('fr-FR')} F
                   </span>
                 </div>
               </div>
 
-              {/* Order History */}
-              <div>
-                <h4 className="font-bold text-slate-800 uppercase tracking-wide text-[11px] mb-2">
-                  Historique des Bons de Commande ({selectedClientDetail.orders.length})
-                </h4>
-                {selectedClientDetail.orders.length === 0 ? (
-                  <p className="text-slate-400 italic">Aucune commande enregistrée pour ce client.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {selectedClientDetail.orders.map((ord: Order) => (
-                      <div key={ord.id} className="p-3 rounded-xl border border-slate-200 bg-white space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono font-bold text-[#0d44e8]">{ord.reference}</span>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">
-                            {ord.status}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-slate-600 text-[11px]">
-                          <span>{new Date(ord.createdAt).toLocaleDateString('fr-FR')}</span>
-                          <strong className="text-slate-900">{ord.estimatedTotal.toLocaleString('fr-FR')} FCFA</strong>
-                        </div>
-                        <div className="text-[11px] text-slate-500 truncate">
-                          {ord.items.map(it => `${it.productName} (${it.quantity})`).join(', ')}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+              {/* Sub-tabs inside Modal: Orders History vs Purchased Products Summary */}
+              <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                <button
+                  type="button"
+                  onClick={() => setDetailModalTab('orders')}
+                  className={`px-3.5 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors ${
+                    detailModalTab === 'orders'
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Bons de Commande ({selectedClientDetail.orders.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDetailModalTab('products')}
+                  className={`px-3.5 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors ${
+                    detailModalTab === 'products'
+                      ? 'bg-[#0d44e8] text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  <span>Produits Achetés ({selectedClientDetail.allPurchasedProducts?.length || 0})</span>
+                </button>
               </div>
+
+              {detailModalTab === 'orders' ? (
+                <div>
+                  {selectedClientDetail.orders.length === 0 ? (
+                    <div className="p-8 text-center text-slate-400 italic bg-slate-50 rounded-xl border border-slate-100">
+                      Aucune commande enregistrée pour cet établissement client.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {selectedClientDetail.orders.map((ord: Order) => (
+                        <div key={ord.id} className="p-3.5 rounded-2xl border border-slate-200 bg-white space-y-2.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-extrabold text-sm text-[#0d44e8]">{ord.reference}</span>
+                              <span className="text-[11px] text-slate-500 font-mono tabular-nums">
+                                · {new Date(ord.createdAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                ord.isPaid
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : 'bg-amber-50 text-amber-800 border-amber-200'
+                              }`}>
+                                {ord.isPaid ? '✓ Payée' : 'En attente de règlement'}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                ord.status === 'Livrée'
+                                  ? 'bg-emerald-100 text-emerald-900'
+                                  : ord.status === 'Annulée'
+                                    ? 'bg-rose-100 text-rose-800'
+                                    : 'bg-slate-100 text-slate-800'
+                              }`}>
+                                {ord.status}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Items Table inside Order */}
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-[11px]">
+                              <thead>
+                                <tr className="text-slate-400 font-bold uppercase border-b border-slate-100">
+                                  <th className="py-1 pr-2">Produit commandé</th>
+                                  <th className="py-1 px-2">Conditionnement</th>
+                                  <th className="py-1 px-2 text-right">Qté</th>
+                                  <th className="py-1 px-2 text-right">P.U.</th>
+                                  <th className="py-1 pl-2 text-right">Total</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-50">
+                                {ord.items.map((it, i) => (
+                                  <tr key={i} className="text-slate-700">
+                                    <td className="py-1.5 pr-2 font-semibold text-slate-900">{it.productName}</td>
+                                    <td className="py-1.5 px-2 text-slate-500">{it.variant}</td>
+                                    <td className="py-1.5 px-2 text-right font-mono tabular-nums font-bold">{it.quantity}</td>
+                                    <td className="py-1.5 px-2 text-right font-mono tabular-nums">
+                                      {it.isQuote ? 'Sur devis' : `${it.price.toLocaleString('fr-FR')} F`}
+                                    </td>
+                                    <td className="py-1.5 pl-2 text-right font-mono tabular-nums font-bold text-slate-900">
+                                      {it.isQuote ? 'Sur devis' : `${it.total.toLocaleString('fr-FR')} F`}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 text-xs">
+                            <span className="text-slate-500">
+                              Mode : <strong>{ord.customer.deliveryMode === 'retrait' ? 'Retrait dépôt' : 'Livraison'}</strong> · Paiement : <strong>{ord.customer.paymentMethod}</strong>
+                            </span>
+                            <span className="font-black text-slate-900 font-mono tabular-nums">
+                              Total : {ord.estimatedTotal.toLocaleString('fr-FR')} FCFA
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  {(!selectedClientDetail.allPurchasedProducts || selectedClientDetail.allPurchasedProducts.length === 0) ? (
+                    <div className="p-8 text-center text-slate-400 italic bg-slate-50 rounded-xl border border-slate-100">
+                      Aucun produit acheté par ce client pour le moment.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-500">
+                            <th className="py-2.5 px-3">Article Médical</th>
+                            <th className="py-2.5 px-3">Variante</th>
+                            <th className="py-2.5 px-3 text-right">Qté Totale</th>
+                            <th className="py-2.5 px-3 text-right">Nb Commandes</th>
+                            <th className="py-2.5 px-3 text-right">Montant Cumulé</th>
+                            <th className="py-2.5 px-3 text-right">Dernier Achat</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {selectedClientDetail.allPurchasedProducts.map((prod: any, idx: number) => (
+                            <tr key={idx} className="hover:bg-slate-50">
+                              <td className="py-2.5 px-3 font-bold text-slate-900">{prod.name}</td>
+                              <td className="py-2.5 px-3 text-slate-600">{prod.variant}</td>
+                              <td className="py-2.5 px-3 text-right font-mono tabular-nums font-extrabold text-[#0d44e8]">{prod.quantity}</td>
+                              <td className="py-2.5 px-3 text-right font-mono tabular-nums text-slate-600">{prod.ordersCount}</td>
+                              <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-slate-900">
+                                {prod.revenue.toLocaleString('fr-FR')} FCFA
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono tabular-nums text-slate-500">
+                                {new Date(prod.lastPurchasedAt).toLocaleDateString('fr-FR')}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
-              <a
-                href={generateRelaunchUrl(selectedClientDetail)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs"
-              >
-                <MessageCircle className="w-3.5 h-3.5" />
-                <span>Ouvrir WhatsApp</span>
-              </a>
-              <button
-                type="button"
-                onClick={() => setSelectedClientDetail(null)}
-                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-100"
-              >
-                Fermer
-              </button>
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-2 shrink-0">
+              <div className="text-[11px] text-slate-500">
+                {selectedClientDetail.firstOrderDate && (
+                  <span>Client actif depuis le {new Date(selectedClientDetail.firstOrderDate).toLocaleDateString('fr-FR')}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={generateRelaunchUrl(selectedClientDetail)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Contacter sur WhatsApp</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={closeDetailModal}
+                  className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 font-semibold text-xs hover:bg-slate-100 cursor-pointer"
+                >
+                  Fermer
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -588,3 +881,4 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
     </div>
   );
 };
+

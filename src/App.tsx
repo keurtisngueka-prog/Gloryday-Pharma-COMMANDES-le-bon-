@@ -32,7 +32,7 @@ import {
 } from './types';
 import { api } from './api';
 import { matchesProductSearch } from './utils/search';
-import { createPdfObjectUrl, generateOrderPdf } from './utils/pdfGenerator';
+import { generateOrderPdf } from './utils/pdfGenerator';
 import { getStoredDrafts, deleteDraft } from './utils/draftsStorage';
 import { CATEGORIES, CONSUMABLE_SUBCATEGORIES, MEDICAL_SPECIALTIES } from './data/initialProducts';
 import { getProductSpecialty } from './utils/specialties';
@@ -48,6 +48,7 @@ import { ProductDetailModal } from './components/ProductDetailModal';
 import { DeliveryTrackingModal } from './components/DeliveryTrackingModal';
 import { OrderPreviewModal } from './components/OrderPreviewModal';
 import { OrderConfirmationView } from './components/OrderConfirmationView';
+import { OrderPdfDocumentModal } from './components/OrderPdfDocumentModal';
 import { BestClientsModule } from './components/BestClientsModule';
 import { NotificationModal } from './components/NotificationModal';
 import { ProductFormModal } from './components/ProductFormModal';
@@ -207,8 +208,7 @@ export default function App() {
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const orderSubmissionInFlightRef = useRef(false);
   const orderSubmissionKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
-  const [previewPdfOrder, setPreviewPdfOrder] = useState<{ order: Order; dataUrl: string } | null>(null);
-  const [showZipDownloadBar, setShowZipDownloadBar] = useState(true);
+  const [previewPdfOrder, setPreviewPdfOrder] = useState<{ order: Order; dataUrl?: string } | null>(null);
   const [toastBanner, setToastBanner] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
 
   const showToast = (message: string, type: 'error' | 'success' | 'info' = 'info') => {
@@ -219,7 +219,6 @@ export default function App() {
   };
 
   const getOrderSubmissionKey = async (items: CartItem[]): Promise<string> => {
-    // Match retries to the same account and cart, even if delivery details are re-entered after a refresh.
     const fingerprintSource = JSON.stringify({
       userId: currentUser?.id,
       items: items.map(({ productId, variant, quantity, isQuote }) => ({ productId, variant, quantity, isQuote }))
@@ -242,16 +241,12 @@ export default function App() {
     const storageKey = `gloryday_order_submission_${currentUser?.id || 'guest'}`;
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null') as { fingerprint?: unknown; key?: unknown } | null;
-      if (
-        saved?.fingerprint === fingerprint &&
-        typeof saved.key === 'string' &&
-        /^[A-Za-z0-9_-]{8,128}$/.test(saved.key)
-      ) {
+      if (saved?.fingerprint === fingerprint && typeof saved.key === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(saved.key)) {
         orderSubmissionKeyRef.current = { fingerprint, key: saved.key };
         return saved.key;
       }
     } catch {
-      // Storage may be unavailable in private browsing; the in-memory guard still prevents rapid repeats.
+      // Session storage may be unavailable in private browsing.
     }
 
     const key = `order-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
@@ -259,7 +254,7 @@ export default function App() {
     try {
       sessionStorage.setItem(storageKey, JSON.stringify({ fingerprint, key }));
     } catch {
-      // The order can still be submitted when session storage is unavailable.
+      // Keep the in-memory protection if session storage is unavailable.
     }
     return key;
   };
@@ -268,7 +263,7 @@ export default function App() {
     try {
       sessionStorage.removeItem(`gloryday_order_submission_${currentUser?.id || 'guest'}`);
     } catch {
-      // Storage may be unavailable in private browsing.
+      // Session storage may be unavailable in private browsing.
     }
     if (clearInMemory) orderSubmissionKeyRef.current = null;
   };
@@ -639,7 +634,7 @@ export default function App() {
       try {
         localStorage.setItem(getCartStorageKey(currentUser), JSON.stringify([]));
       } catch {
-        // The server has accepted the order; do not prevent the success screen if local storage is unavailable.
+        // The server accepted the order; local storage must not block the success screen.
       }
       clearOrderSubmissionKey(false);
       setCartItems([]);
@@ -726,12 +721,12 @@ export default function App() {
   };
 
   const handleViewOrderPdf = async (order: Order) => {
+    setPreviewPdfOrder({ order, dataUrl: order.pdfUrl });
     try {
       const { dataUrl } = await generateOrderPdf(order);
-      setPreviewPdfOrder({ order, dataUrl });
+      setPreviewPdfOrder(curr => curr && curr.order.id === order.id ? { order, dataUrl } : curr);
     } catch (e) {
       console.error('Erreur génération PDF:', e);
-      showToast('Impossible de générer le document PDF.', 'error');
     }
   };
 
@@ -877,38 +872,6 @@ export default function App() {
 
       {/* PWA In-App Install Prompt Banner */}
       <PWAInstallBanner />
-
-      {/* Direct Corrected Project ZIP Download Bar */}
-      {showZipDownloadBar && (
-        <div className="bg-[#0f0f12] text-white border-b border-slate-800 px-3 sm:px-6 py-2">
-          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="font-semibold text-slate-200">
-                Archive complète corrigée prête : <strong className="text-white font-mono">gloryday-pharma-corrige-20261022.zip</strong>
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <a
-                href="/api/download-project-zip"
-                download="gloryday-pharma-corrige-20261022.zip"
-                className="px-3 py-1 rounded-lg bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-[11px] flex items-center gap-1.5 shadow-xs transition-colors"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>Télécharger le fichier ZIP corrigé</span>
-              </a>
-              <button
-                type="button"
-                onClick={() => setShowZipDownloadBar(false)}
-                className="text-slate-400 hover:text-white px-1.5 py-0.5 rounded text-xs"
-                aria-label="Masquer la barre"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Top Navbar */}
       <Navbar
@@ -1097,6 +1060,7 @@ export default function App() {
                             : 'kpi'
                     }
                     notifications={notifications}
+                    onViewOrderPdf={handleViewOrderPdf}
                     onOpenDeliveryModal={(order: Order) => {
                       setActiveDeliveryOrder(order);
                       setIsDeliveryModalOpen(true);
@@ -1475,52 +1439,11 @@ export default function App() {
 
       {/* In-App Order PDF Viewer Modal */}
       {previewPdfOrder && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6">
-          <div className="bg-white rounded-2xl w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
-            <div className="p-3.5 sm:px-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-              <div>
-                <h3 className="text-sm font-black text-slate-900">
-                  Bon de Commande — {previewPdfOrder.order.reference}
-                </h3>
-                <p className="text-[11px] text-slate-500">
-                  {previewPdfOrder.order.customer.facilityName} · {previewPdfOrder.order.estimatedTotal.toLocaleString('fr-FR')} FCFA
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const objectUrl = createPdfObjectUrl(previewPdfOrder.dataUrl);
-                    const link = document.createElement('a');
-                    link.href = objectUrl;
-                    link.download = `Bon_de_Commande_${previewPdfOrder.order.reference}.pdf`;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <span>Télécharger PDF</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPreviewPdfOrder(null)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold cursor-pointer"
-                >
-                  Fermer ✕
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 bg-slate-100 overflow-hidden">
-              <iframe
-                src={previewPdfOrder.dataUrl}
-                title={`Bon de commande ${previewPdfOrder.order.reference}`}
-                className="w-full h-full border-0"
-              />
-            </div>
-          </div>
-        </div>
+        <OrderPdfDocumentModal
+          order={previewPdfOrder.order}
+          pdfDataUrl={previewPdfOrder.dataUrl}
+          onClose={() => setPreviewPdfOrder(null)}
+        />
       )}
 
       {/* Toast Notification Banner */}

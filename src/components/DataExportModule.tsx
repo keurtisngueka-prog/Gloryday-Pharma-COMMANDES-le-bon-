@@ -19,9 +19,12 @@ import {
   Eye,
   FileText,
   Upload,
-  X
+  X,
+  RefreshCw,
+  GitBranch
 } from 'lucide-react';
 import { Product, Order, User, Pack, AppNotification } from '../types';
+import { api } from '../api';
 import { 
   downloadFullBackupJSON, 
   downloadProductsCSV, 
@@ -54,10 +57,50 @@ export const DataExportModule: React.FC<DataExportModuleProps> = ({
   const [activeGuideTab, setActiveGuideTab] = useState<'vercel' | 'supabase'>('vercel');
   const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
   const [sqlCopied, setSqlCopied] = useState(false);
+  const [migrationSql, setMigrationSql] = useState<string>('');
+  const [isMigrationModalOpen, setIsMigrationModalOpen] = useState(false);
+  const [migrationCopied, setMigrationCopied] = useState(false);
+  const [githubToken, setGithubToken] = useState('');
+  const [githubCommitMsg, setGithubCommitMsg] = useState('feat(supabase): add activity_logs schema, client purchase history & realtime logs');
+  const [githubSyncing, setGithubSyncing] = useState(false);
+  const [githubSyncResult, setGithubSyncResult] = useState<{ status: string; message: string; repositoryUrl: string } | null>(null);
 
   const fullSqlContent = React.useMemo(() => {
     return generateSupabaseSQLString(products, clients, orders);
   }, [products, clients, orders]);
+
+  const handleOpenMigrationSql = async () => {
+    try {
+      const sqlText = await api.getLatestMigrationSql();
+      setMigrationSql(sqlText || fullSqlContent);
+    } catch {
+      setMigrationSql(fullSqlContent);
+    }
+    setIsMigrationModalOpen(true);
+  };
+
+  const handleSyncGitHub = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGithubSyncing(true);
+    setGithubSyncResult(null);
+    try {
+      const res = await api.syncGitHubRepository(githubToken.trim() || undefined, githubCommitMsg.trim() || undefined);
+      setGithubSyncResult({
+        status: res.pushed ? 'pushed' : 'committed_local',
+        message: res.message,
+        repositoryUrl: res.repoUrl || 'https://github.com/keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon-'
+      });
+    } catch (err: any) {
+      setGithubSyncResult({
+        status: 'error',
+        message: err?.message || 'Erreur lors de la synchronisation GitHub.',
+        repositoryUrl: 'https://github.com/keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon-'
+      });
+    } finally {
+      setGithubToken('');
+      setGithubSyncing(false);
+    }
+  };
 
   const copyToClipboard = (text: string, sectionId: string) => {
     navigator.clipboard.writeText(text);
@@ -503,6 +546,136 @@ ADMIN_PASSWORD=<secret-unique-de-8-a-85-caracteres>`;
 
         </div>
       </div>
+
+      {/* GitHub Sync & Incremental Supabase SQL Migration Card */}
+      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs overflow-hidden">
+        <div className="p-4 sm:p-5 border-b border-slate-100 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shrink-0">
+              <GitBranch className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div>
+              <h3 className="font-black text-sm sm:text-base text-slate-900">
+                Synchronisation GitHub & Migration Supabase (`activity_logs` + Historique Client)
+              </h3>
+              <p className="text-xs text-slate-500">
+                Dépôt cible : <span className="font-mono font-bold text-slate-700">keurtisngueka-prog/Gloryday-Pharma-COMMANDES-le-bon-</span>
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleOpenMigrationSql}
+            className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-xs transition-colors"
+          >
+            <FileCode className="w-4 h-4" />
+            <span>Voir Migration SQL Supabase (activity_logs + Achats Client)</span>
+          </button>
+        </div>
+
+        <form onSubmit={handleSyncGitHub} className="p-4 sm:p-5 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                Message de Commit Git
+              </label>
+              <input
+                type="text"
+                value={githubCommitMsg}
+                onChange={(e) => setGithubCommitMsg(e.target.value)}
+                placeholder="feat: mise à jour activity_logs et historique client"
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                Personal Access Token GitHub (requis pour `git push origin main`)
+              </label>
+              <input
+                type="password"
+                value={githubToken}
+                onChange={(e) => setGithubToken(e.target.value)}
+                placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <p className="text-[11px] text-slate-500">
+              Sans token, les modifications sont enregistrées dans un commit Git local prêt à être poussé vers <span className="font-mono">origin/main</span>.
+            </p>
+            <button
+              type="submit"
+              disabled={githubSyncing}
+              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-xs transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${githubSyncing ? 'animate-spin' : ''}`} />
+              <span>{githubSyncing ? 'Synchronisation en cours...' : 'Commit & Push sur GitHub'}</span>
+            </button>
+          </div>
+
+          {githubSyncResult && (
+            <div className={`p-3.5 rounded-xl border text-xs font-semibold ${
+              githubSyncResult.status === 'pushed'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                : githubSyncResult.status === 'committed_local'
+                ? 'bg-blue-50 border-blue-200 text-blue-900'
+                : 'bg-rose-50 border-rose-200 text-rose-900'
+            }`}>
+              <div>{githubSyncResult.message}</div>
+              <div className="mt-1 text-[11px] font-mono opacity-80">{githubSyncResult.repositoryUrl}</div>
+            </div>
+          )}
+        </form>
+      </div>
+
+      {/* Incremental Migration SQL Modal */}
+      {isMigrationModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/75 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-4xl max-h-[90vh] rounded-2xl flex flex-col shadow-2xl text-white overflow-hidden">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base">
+                    Migration SQL Supabase : `public.activity_logs` & `client_purchase_history_view`
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Champs : userId, actionType, entityType, entityId, details, timestamp + Vue & Fonction Historique Achats Client
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(migrationSql);
+                    setMigrationCopied(true);
+                    setTimeout(() => setMigrationCopied(false), 2500);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  {migrationCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  <span>{migrationCopied ? 'Copié !' : 'Copier la Migration SQL'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsMigrationModalOpen(false)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-4 bg-[#0a0d14] font-mono text-xs leading-relaxed text-emerald-300 select-all">
+              <pre className="whitespace-pre-wrap">{migrationSql}</pre>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SQL Viewer Modal */}
       {isSqlModalOpen && (

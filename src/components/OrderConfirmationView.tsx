@@ -13,8 +13,9 @@ import { Order } from '../types';
 import { generateWhatsAppOrderUrl } from '../utils/whatsapp';
 import { computeDeliveryTimeWindow } from '../data/librevilleZones';
 import { MobilePaymentModal } from './MobilePaymentModal';
+import { OrderPdfDocumentModal } from './OrderPdfDocumentModal';
 import { api } from '../api';
-import { createPdfObjectUrl } from '../utils/pdfGenerator';
+import { downloadOrderPdf } from '../utils/pdfGenerator';
 
 interface OrderConfirmationViewProps {
   order: Order;
@@ -43,6 +44,7 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
   const [useSecondaryNumber, setUseSecondaryNumber] = useState(false);
   const [isMobilePaymentOpen, setIsMobilePaymentOpen] = useState(false);
   const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   const primaryUrl = generateWhatsAppOrderUrl(order, order.pdfUrl, false);
   const secondaryUrl = generateWhatsAppOrderUrl(order, order.pdfUrl, true);
@@ -54,20 +56,17 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleDownloadPdf = () => {
-    if (!pdfDataUrl || pdfPreparing) return;
-    const objectUrl = createPdfObjectUrl(pdfDataUrl);
-    const link = document.createElement('a');
-    link.href = objectUrl;
-    link.download = `Bon_de_Commande_${order.reference}.pdf`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  const handleDownloadPdf = async () => {
+    if (pdfPreparing || isDownloadingPdf) return;
+    setIsDownloadingPdf(true);
+    try {
+      await downloadOrderPdf(order, pdfDataUrl || order.pdfUrl);
+    } finally {
+      setIsDownloadingPdf(false);
+    }
   };
 
   const handleOpenPdf = () => {
-    if (!pdfDataUrl || pdfPreparing) return;
     setIsPdfPreviewOpen(true);
   };
 
@@ -152,32 +151,28 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
       {/* PDF Actions */}
       <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-left">
         <span className="text-xs font-bold text-slate-900 block mb-2">
-          Bon de commande (PDF)
+          Bon de commande officiel (PDF A4)
         </span>
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={handleDownloadPdf}
-            disabled={!pdfDataUrl || pdfPreparing}
-            className="h-10 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => void handleDownloadPdf()}
+            disabled={pdfPreparing || isDownloadingPdf}
+            className="h-10 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-xs"
           >
-            <Download className="w-3.5 h-3.5 text-slate-500" />
-            Télécharger PDF
+            <Download className="w-3.5 h-3.5" />
+            <span>{isDownloadingPdf ? 'Téléchargement...' : 'Télécharger PDF'}</span>
           </button>
           <button
             type="button"
             onClick={handleOpenPdf}
-            disabled={!pdfDataUrl || pdfPreparing}
-            className="h-10 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-10 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
           >
             <Eye className="w-3.5 h-3.5 text-slate-500" />
-            Visualiser
+            <span>Visualiser Bon & Visas</span>
           </button>
         </div>
-        {pdfPreparing && <p role="status" className="mt-2 text-xs text-blue-700">Preparation du bon PDF en cours...</p>}
-        {!pdfDataUrl && !pdfGenerationFailed && !pdfPreparing && (
-          <p role="status" className="mt-2 text-xs text-slate-500">Le bon PDF n'est pas encore pret.</p>
-        )}
+        {pdfPreparing && <p role="status" className="mt-2 text-xs text-blue-700">Préparation du fichier PDF en cours...</p>}
         {pdfGenerationFailed && onRetryPdf && (
           <button
             type="button"
@@ -185,17 +180,12 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
             disabled={pdfPreparing}
             className="mt-2 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-50 disabled:opacity-50"
           >
-            Reessayer la preparation du PDF
+            Réessayer la génération du PDF
           </button>
         )}
-        {pdfGenerationFailed && (
-          <p role="status" className="mt-2 text-xs text-amber-800">
-            La commande est enregistrée, mais le PDF n’a pas pu être préparé. Vous pourrez le réessayer depuis « Mes commandes ».
-          </p>
-        )}
         {pdfStorageFailed && pdfDataUrl && (
-          <p role="status" className="mt-2 text-xs text-amber-800">
-            Le PDF est prêt au téléchargement, mais son lien de partage n’a pas pu être enregistré.
+          <p role="status" className="mt-2 text-xs text-emerald-800">
+            ✓ Le fichier PDF est prêt au téléchargement et à la visualisation.
           </p>
         )}
       </div>
@@ -315,45 +305,12 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
       )}
 
       {/* In-App PDF Viewer Modal */}
-      {isPdfPreviewOpen && pdfDataUrl && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6">
-          <div className="bg-white rounded-2xl w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
-            <div className="p-3.5 sm:px-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-              <div className="text-left">
-                <h3 className="text-sm font-black text-slate-900">
-                  Bon de Commande — {order.reference}
-                </h3>
-                <p className="text-[11px] text-slate-500">
-                  {order.customer.facilityName} · {order.estimatedTotal.toLocaleString('fr-FR')} FCFA
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleDownloadPdf}
-                  className="px-3 py-1.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Télécharger PDF</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsPdfPreviewOpen(false)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold cursor-pointer"
-                >
-                  Fermer ✕
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 bg-slate-100 overflow-hidden">
-              <iframe
-                src={pdfDataUrl}
-                title={`Bon de commande ${order.reference}`}
-                className="w-full h-full border-0"
-              />
-            </div>
-          </div>
-        </div>
+      {isPdfPreviewOpen && (
+        <OrderPdfDocumentModal
+          order={order}
+          pdfDataUrl={pdfDataUrl}
+          onClose={() => setIsPdfPreviewOpen(false)}
+        />
       )}
     </div>
   );
