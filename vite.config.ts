@@ -51,6 +51,21 @@ export default defineConfig(async ({ command, mode }) => {
       'import.meta.env.APP_PUBLIC_VAPID_KEY': JSON.stringify(resolvedVapidPublicKey),
     },
     plugins,
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              {
+                name: 'react-vendor',
+                test: /node_modules[\\/](?:react|react-dom|scheduler)[\\/]/,
+                priority: 20,
+              },
+            ],
+          },
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': projectRoot,
