@@ -1,19 +1,12 @@
 import type { Request, Response } from 'express';
 import { getVercelApp } from '../server.js';
 
-process.on('warning', (warning) => {
-  if ((warning as Error & { code?: string }).code === 'DEP0169') {
-    console.warn('[DEP0169 stack]', warning.stack || warning.message);
-  }
-});
-
 const appPromise = getVercelApp();
 
 export default async function handler(req: Request, res: Response): Promise<void> {
   try {
     const incomingUrl = new URL(req.url || '/', 'https://gloryday.invalid');
-    // Vercel may forward an absolute-form URL; Express expects a path beginning with "/".
-    // Normalize it before Express or parseurl inspects the request.
+    // Vercel can pass an absolute-form URL; Express expects an origin-form path.
     req.url = `${incomingUrl.pathname}${incomingUrl.search}`;
     if (incomingUrl.searchParams.get('__gloryday_gateway') === '1') {
       const forwardedPath = incomingUrl.searchParams.get('__gloryday_path');
@@ -29,6 +22,22 @@ export default async function handler(req: Request, res: Response): Promise<void
       const forwardedQuery = query.toString();
       req.url = `/api/${segments.map(encodeURIComponent).join('/')}${forwardedQuery ? `?${forwardedQuery}` : ''}`;
     }
+
+    // Vercel exposes req.query through a legacy getter that calls url.parse() on Node 24.
+    // Parse the query with URLSearchParams and shadow that getter before Express reads it.
+    const queryStart = req.url.indexOf('?');
+    const queryString = queryStart >= 0 ? req.url.slice(queryStart + 1) : '';
+    const queryParams: Record<string, string | string[]> = Object.create(null);
+    for (const [key, value] of new URLSearchParams(queryString)) {
+      const existing = queryParams[key];
+      queryParams[key] = existing === undefined ? value : Array.isArray(existing) ? [...existing, value] : [existing, value];
+    }
+    Object.defineProperty(req, 'query', {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: queryParams
+    });
 
     const app = await appPromise;
     app(req, res);
