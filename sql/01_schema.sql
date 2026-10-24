@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS public.orders (
     
     -- Informations coursier
     courier_name VARCHAR(128) DEFAULT 'Alexandre Moundounga (Livreur Médical)',
-    courier_phone VARCHAR(32) DEFAULT '+24177003004',
+    courier_phone VARCHAR(32),
     courier_vehicle VARCHAR(64) DEFAULT 'Moto Médicale GP-04',
     courier_matricule VARCHAR(32) DEFAULT 'LOG-LBV-04',
     courier_current_zone VARCHAR(128) DEFAULT 'Dépôt Central Oloumi',
