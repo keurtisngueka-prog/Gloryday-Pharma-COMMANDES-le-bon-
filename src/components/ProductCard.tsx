@@ -3,7 +3,6 @@ import {
   Plus, 
   Minus, 
   Check, 
-  AlertOctagon, 
   HelpCircle, 
   FileText, 
   Eye, 
@@ -41,9 +40,6 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
   const selectedVariant = product.variants[selectedVariantIndex] || product.variants[0];
   const isQuote = selectedVariant?.price === 0 || Boolean(product.isQuote);
-  const isOutOfStock = !isQuote && product.status === 'rupture';
-  const stockQty = product.quantityAvailable ?? product.stockQuantity ?? 0;
-  const hasPhysicalStock = Boolean(product.hasPhysicalStock || (stockQty > 0 && product.status !== 'rupture'));
   const volumeConfig = getActiveVolumeDiscountSettings();
 
   const discountPercent = selectedVariant?.discountPercentage || product.discountPercentage || 0;
@@ -63,14 +59,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
   const handleQuickAdd = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isOutOfStock) return;
     onAddToCart(product, selectedVariant, 1);
     setJustAdded(true);
     setTimeout(() => setJustAdded(false), 1200);
   };
 
   const handleModalAdd = () => {
-    if (isOutOfStock) return;
     onAddToCart(product, selectedVariant, quantity);
     setJustAdded(true);
     setTimeout(() => {
@@ -113,11 +107,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       {/* 2-Column Responsive Card (CleanShot X: 20px radius, soft shadow, clean typography) */}
       <article
         onClick={() => setIsDetailOpen(true)}
-        className={`group relative flex flex-col justify-between rounded-2xl bg-white border border-slate-200/80 transition-all duration-200 cursor-pointer overflow-hidden ${
-          isOutOfStock
-            ? 'opacity-60 bg-slate-50'
-            : 'hover:border-slate-300 hover:shadow-[0_8px_24px_rgba(22,22,24,0.08)]'
-        }`}
+        className="group relative flex flex-col justify-between rounded-2xl bg-white border border-slate-200/80 transition-all duration-200 cursor-pointer overflow-hidden hover:border-slate-300 hover:shadow-[0_8px_24px_rgba(22,22,24,0.08)]"
         style={{
           boxShadow: 'rgba(22, 22, 24, 0.04) 0px 4px 16px -4px, rgba(22, 22, 24, 0.04) 0px 0px 0px 1px'
         }}
@@ -137,13 +127,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             </div>
           )}
 
-          {/* Availability & Promotion Badges */}
+          {/* Cart and promotion badges; inventory availability stays private. */}
           <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none gap-1">
-            {isOutOfStock ? (
-              <span className="text-[10px] font-bold text-rose-700 bg-rose-50/95 backdrop-blur-xs px-2 py-0.5 rounded-md border border-rose-200 shadow-2xs">
-                Rupture
-              </span>
-            ) : isInCart ? (
+            {isInCart ? (
               <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50/95 backdrop-blur-xs px-2 py-0.5 rounded-md border border-emerald-200 shadow-2xs">
                 {cartQuantity} au panier
               </span>
@@ -152,14 +138,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 <Sparkles className="w-2.5 h-2.5 text-amber-200" />
                 -{discountPercent}%
               </span>
-            ) : hasPhysicalStock ? (
-              <span className="text-[9px] font-bold text-emerald-800 bg-emerald-50/95 backdrop-blur-xs px-1.5 py-0.5 rounded-md border border-emerald-200 shadow-2xs">
-                ✓ En stock
-              </span>
             ) : (
-              <span className="text-[9px] font-bold text-amber-800 bg-amber-50/95 backdrop-blur-xs px-1.5 py-0.5 rounded-md border border-amber-200 shadow-2xs">
-                Sur commande / Devis
-              </span>
+              null
             )}
 
             <div className="flex items-center gap-1">
@@ -181,7 +161,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               <span className="text-[11px] text-[#6a6a6b] font-medium truncate leading-none">
                 {product.subcategory || product.category}
               </span>
-              {!isQuote && !isOutOfStock && volumeConfig.enabled && volumeConfig.tier1Percent > 0 && (
+              {!isQuote && volumeConfig.enabled && volumeConfig.tier1Percent > 0 && (
                 <span className="text-[9px] font-bold text-[#0d44e8] bg-blue-50/90 px-1.5 py-0.5 rounded border border-blue-200/80 whitespace-nowrap">
                   -{volumeConfig.tier1Percent}% dès {volumeConfig.tier1Qty}
                 </span>
@@ -231,8 +211,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             </div>
 
             {/* Quick Action Button with >= 44px touch hitbox */}
-            {!isOutOfStock ? (
-              <button
+            <button
                 type="button"
                 onClick={handleQuickAdd}
                 title={isQuote ? "Ajouter à la demande de devis" : "Ajouter 1 au panier"}
@@ -262,11 +241,6 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                   <Plus className="w-4 h-4 stroke-[2.5]" />
                 )}
               </button>
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center text-xs">
-                <AlertOctagon className="w-4 h-4" />
-              </div>
-            )}
           </div>
         </div>
       </article>
@@ -429,7 +403,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               </div>
 
               {/* Volume Discount Schedule */}
-              {!isQuote && !isOutOfStock && volumeConfig.enabled && (
+              {!isQuote && volumeConfig.enabled && (
                 <div className="p-3.5 bg-blue-50/70 border border-blue-100 rounded-xl space-y-2">
                   <div className="flex items-center justify-between text-xs font-bold text-[#0d44e8]">
                     <span className="flex items-center gap-1.5">
@@ -456,7 +430,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               )}
 
               {/* Quantity Stepper */}
-              {!isOutOfStock && (
+              {(
                 <div className="space-y-2">
                   <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200">
                     <span className="text-xs font-bold text-slate-700">Quantité désirée :</span>
@@ -510,18 +484,15 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               <button
                 type="button"
                 onClick={handleModalAdd}
-                disabled={isOutOfStock}
                 className={`flex-1 h-12 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md ${
-                  isOutOfStock
-                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                    : justAdded
-                      ? 'bg-emerald-600 text-white'
-                      : isQuote
-                        ? 'bg-amber-600 hover:bg-amber-700 text-white active:scale-[0.98]'
-                        : 'bg-[#0d44e8] hover:bg-[#0b3ac7] text-white active:scale-[0.98]'
+                  justAdded
+                    ? 'bg-emerald-600 text-white'
+                    : isQuote
+                      ? 'bg-amber-600 hover:bg-amber-700 text-white active:scale-[0.98]'
+                      : 'bg-[#0d44e8] hover:bg-[#0b3ac7] text-white active:scale-[0.98]'
                 }`}
                 style={{
-                  boxShadow: isOutOfStock || justAdded
+                  boxShadow: justAdded
                     ? 'none'
                     : isQuote
                       ? 'rgba(180, 83, 9, 0.28) 0px 2px 6px -1px'
@@ -533,8 +504,6 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                     <Check className="w-4 h-4" />
                     <span>{isQuote ? 'Ajouté à la demande de devis !' : 'Ajouté au panier !'}</span>
                   </>
-                ) : isOutOfStock ? (
-                  <span>Article temporairement indisponible</span>
                 ) : isQuote ? (
                   <>
                     <FileText className="w-4 h-4" />

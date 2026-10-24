@@ -365,14 +365,16 @@ async function migrateLegacyPasswords(store: ServerStore): Promise<void> {
 export async function createServerApp(options: { serveFrontend?: boolean } = {}) {
   if (process.env.NODE_ENV === 'production') {
     if (!process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD.length < 8 || process.env.ADMIN_PASSWORD.length > 85) {
-      console.warn('⚠️ ADMIN_PASSWORD non configuré ou longueur invalide. Utilisation du mot de passe admin de secours GlorydayAdmin2026!.');
+      console.error('ADMIN_PASSWORD non configuré ou invalide. La connexion Super-Admin restera désactivée.');
     }
     if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      console.warn('⚠️ Supabase non configuré. Mode autonome local actif (stockage fichier persistant).');
+      throw new Error('Supabase doit être configuré en production. Le stockage local temporaire de Vercel ne peut pas conserver le catalogue et les commandes.');
     }
     process.env.DATA_DIR ||= '/tmp/gloryday-pharma';
   }
   const app = express();
+  // Vercel is the trusted reverse proxy in production; use its forwarded client IP for rate limiting.
+  app.set('trust proxy', process.env.VERCEL ? 1 : false);
   let store = loadStore();
   const persistence = createSupabaseStorePersistence();
   if (persistence) {
@@ -380,7 +382,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       store = await persistence.hydrate(store);
       await saveStore(store, persistence);
     } catch (error) {
-      console.warn('⚠️ Hydratation Supabase partielle ou table non migrée, utilisation du cache local :', error instanceof Error ? error.message : error);
+      console.warn('Hydratation Supabase échouée; le démarrage sera interrompu en production :', error instanceof Error ? error.message : error);
+      if (process.env.NODE_ENV === 'production') throw error;
     }
   }
   const existingIds = new Set(store.products.map(p => p.id));
@@ -469,14 +472,50 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   const sessions = new Map<string, SessionEntry>();
   const loginAttempts = new Map<string, { count: number; resetAt: number }>();
   const deliveryTrackingLastPost = new Map<string, number>();
-  const loginBlocked = (key: string) => {
+  const localLoginBlocked = (key: string) => {
     const entry = loginAttempts.get(key);
     return Boolean(entry && entry.resetAt > Date.now() && entry.count >= 8);
   };
-  const recordLoginFailure = (key: string) => {
+  const localRecordLoginFailure = (key: string) => {
     const entry = loginAttempts.get(key);
     if (!entry || entry.resetAt <= Date.now()) loginAttempts.set(key, { count: 1, resetAt: Date.now() + 15 * 60 * 1000 });
     else entry.count += 1;
+  };
+  const authRateLimitHash = (key: string) => createHash('sha256').update(key).digest('hex');
+  const loginBlocked = async (key: string): Promise<boolean> => {
+    if (persistence) {
+      try {
+        return await persistence.isLoginRateLimited(authRateLimitHash(key));
+      } catch (error) {
+        if (process.env.NODE_ENV === 'production') throw error;
+        console.warn('Limitation de connexion Supabase indisponible en développement :', error instanceof Error ? error.message : error);
+      }
+    }
+    return localLoginBlocked(key);
+  };
+  const recordLoginFailure = async (key: string): Promise<void> => {
+    if (persistence) {
+      try {
+        await persistence.recordLoginFailure(authRateLimitHash(key));
+        return;
+      } catch (error) {
+        if (process.env.NODE_ENV === 'production') throw error;
+        console.warn('Enregistrement de la tentative dans Supabase indisponible en développement :', error instanceof Error ? error.message : error);
+      }
+    }
+    localRecordLoginFailure(key);
+  };
+  const clearLoginFailures = async (key: string): Promise<void> => {
+    if (persistence) {
+      try {
+        await persistence.clearLoginFailures(authRateLimitHash(key));
+        return;
+      } catch (error) {
+        if (process.env.NODE_ENV === 'production') throw error;
+        console.warn('Réinitialisation des tentatives Supabase indisponible en développement :', error instanceof Error ? error.message : error);
+      }
+    }
+    loginAttempts.delete(key);
   };
   app.disable('x-powered-by');
   app.use((_req, res, next) => {
@@ -488,39 +527,35 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   });
   app.use(express.json({ limit: '2mb' }));
 
-  const issueSession = async (res: express.Response, user: User): Promise<string> => {
+  const issueSession = async (res: express.Response, user: User): Promise<void> => {
     for (const [id, entry] of sessions) if (entry.expiresAt <= Date.now()) sessions.delete(id);
     const sessionId = randomBytes(32).toString('base64url');
     const expiresAt = Date.now() + SESSION_TTL_MS;
-    // Always store in-memory so sessions work even before public.app_sessions migration is applied in Supabase
+    // Keep a local copy for development; production authentication also requires its persistent DB record.
     sessions.set(sessionId, { user: cleanUser(user), expiresAt });
     if (persistence) {
       try {
         const tokenHash = createHash('sha256').update(sessionId).digest('hex');
         await persistence.createAppSession(tokenHash, cleanUser(user), new Date(expiresAt).toISOString());
       } catch (error) {
+        sessions.delete(sessionId);
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error('Impossible de créer la session sécurisée dans Supabase. Vérifiez la migration app_sessions.');
+        }
         console.warn('Session conservée en mémoire (table public.app_sessions non disponible) :', error instanceof Error ? error.message : error);
       }
     }
-    // Support iframe and cross-origin embedding while keeping httpOnly protection
+    // The app and its API share one origin, so Lax blocks cross-site form submissions.
     res.cookie(SESSION_COOKIE, sessionId, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      sameSite: 'lax',
       path: '/',
       maxAge: SESSION_TTL_MS
     });
-    return sessionId;
   };
 
   const getSessionId = (req: express.Request): string | null => {
-    // 1. Check Authorization: Bearer <token> (works seamlessly in iframe contexts)
-    const authHeader = req.headers.authorization || '';
-    if (authHeader.startsWith('Bearer ')) {
-      const token = authHeader.slice(7).trim();
-      if (token) return token;
-    }
-    // 2. Fall back to session cookie
     const cookieHeader = req.headers.cookie || '';
     const raw = cookieHeader.split(';').map(part => part.trim()).find(part => part.startsWith(`${SESSION_COOKIE}=`));
     if (!raw) return null;
@@ -539,7 +574,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         const tokenHash = createHash('sha256').update(sessionId).digest('hex');
         const remoteSession = await persistence.getAppSession(tokenHash);
         if (remoteSession) return cleanUser(remoteSession.user);
+        if (process.env.NODE_ENV === 'production') return null;
       } catch (error) {
+        if (process.env.NODE_ENV === 'production') return null;
         console.warn('Lecture de session Supabase ignorée, basculement sur la session en mémoire :', error instanceof Error ? error.message : error);
       }
     }
@@ -916,7 +953,15 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   }));
 
   app.get('/api/products', asyncHandler(async (_req, res) => {
-    if (persistence) store.products = await persistence.loadProducts();
+    if (persistence) {
+      try {
+        const latestProducts = await persistence.loadProducts();
+        store.products = latestProducts;
+      } catch (error) {
+        if (store.products.length === 0) throw error;
+        console.warn('Lecture du catalogue Supabase impossible, conservation du dernier catalogue chargé :', error instanceof Error ? error.message : error);
+      }
+    }
     const user = await readSession(_req);
     if (user && (['Super-Admin', 'Gestionnaire Catalogue'].includes(user.role) || user.permissions?.includes('catalog_stock'))) {
       res.json(store.products.map(product => enrichProductWithStockState(product)));
@@ -924,7 +969,13 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
     res.json(store.products.map((product) => {
       const enriched = enrichProductWithStockState(product);
-      const { purchasePrice, alertThreshold, lowStockAlertThreshold, ...publicProduct } = enriched;
+      const publicProduct: Product = { ...enriched, status: 'disponible' };
+      delete publicProduct.purchasePrice;
+      delete publicProduct.alertThreshold;
+      delete publicProduct.lowStockAlertThreshold;
+      delete publicProduct.quantityAvailable;
+      delete publicProduct.stockQuantity;
+      delete publicProduct.hasPhysicalStock;
       return publicProduct;
     }));
   }));
@@ -1162,7 +1213,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     res.clearCookie(SESSION_COOKIE, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      sameSite: 'lax',
       path: '/'
     });
     res.json({ success: true });
@@ -1170,11 +1221,11 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
 
   app.post('/api/auth/register', asyncHandler(async (req, res) => {
     const registrationKey = `${req.ip}:register`;
-    if (loginBlocked(registrationKey)) {
+    if (await loginBlocked(registrationKey)) {
       res.status(429).json({ error: 'Trop de tentatives. Réessayez dans 15 minutes.' });
       return;
     }
-    recordLoginFailure(registrationKey);
+    await recordLoginFailure(registrationKey);
     const { phone, facilityName, contactName, facilityType, facilityTypeOther, password, deliveryAddress, coordinates } = req.body || {};
     const cleanPhone = normalizePhone(String(phone || ''));
     const cleanPass = String(password || '');
@@ -1209,9 +1260,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     };
     store.accounts.push({ user: newUser, passwordHash: await hashPassword(cleanPass) });
     await saveStore(store, persistence);
-    loginAttempts.delete(registrationKey);
-    const token = await issueSession(res, newUser);
-    res.status(201).json({ user: cleanUser(newUser), token });
+    await clearLoginFailures(registrationKey);
+    await issueSession(res, newUser);
+    res.status(201).json({ user: cleanUser(newUser) });
   }));
 
   app.post('/api/auth/login', asyncHandler(async (req, res) => {
@@ -1222,20 +1273,20 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       return;
     }
     const key = `${req.ip}:client:${cleanPhone}`;
-    if (loginBlocked(key)) {
+    if (await loginBlocked(key)) {
       res.status(429).json({ error: 'Trop de tentatives. Réessayez dans 15 minutes.' });
       return;
     }
     const found = store.accounts.find(a => normalizePhone(a.user.phone) === cleanPhone);
     const valid = await verifyPassword(cleanPass, found?.passwordHash || 'scrypt$00112233445566778899aabbccddeeff$00');
     if (!valid || !found) {
-      recordLoginFailure(key);
+      await recordLoginFailure(key);
       res.status(401).json({ error: 'Numéro de téléphone ou mot de passe incorrect.' });
       return;
     }
-    loginAttempts.delete(key);
-    const token = await issueSession(res, found.user);
-    res.json({ user: cleanUser(found.user), token });
+    await clearLoginFailures(key);
+    await issueSession(res, found.user);
+    res.json({ user: cleanUser(found.user) });
   }));
 
   app.post('/api/auth/google', (_req, res) => {
@@ -1254,11 +1305,11 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
 
     const requestKey = `${req.ip}:recovery`;
-    if (loginBlocked(requestKey)) {
+    if (await loginBlocked(requestKey)) {
       res.status(429).json({ error: 'Trop de demandes. Réessayez dans 15 minutes.' });
       return;
     }
-    recordLoginFailure(requestKey);
+    await recordLoginFailure(requestKey);
 
     const account = store.accounts.find((entry) => normalizePhone(entry.user.phone) === cleanPhone);
     if (account) {
@@ -1286,20 +1337,24 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       return;
     }
     const key = `${req.ip}:${identifier.toLowerCase()}`;
-    if (loginBlocked(key)) {
+    if (await loginBlocked(key)) {
       res.status(429).json({ error: 'Trop de tentatives. Réessayez dans 15 minutes.' });
       return;
     }
-    const fail = () => {
-      recordLoginFailure(key);
+    const fail = async () => {
+      await recordLoginFailure(key);
       res.status(401).json({ error: 'Identifiant ou mot de passe incorrect.' });
     };
     const adminUserName = process.env.ADMIN_USERNAME || 'admin';
-    const adminPassword = process.env.ADMIN_PASSWORD || 'GlorydayAdmin2026!';
-    if (identifier.toLowerCase() === adminUserName.toLowerCase() && adminPassword.length >= 8 && adminPassword.length <= 85 && safeEqual(password, adminPassword)) {
+    const adminPassword = process.env.ADMIN_PASSWORD;
+    if (identifier.toLowerCase() === adminUserName.toLowerCase() && !adminPassword) {
+      res.status(503).json({ error: 'La connexion Super-Admin n’est pas configurée. Contactez le responsable du site.' });
+      return;
+    }
+    if (identifier.toLowerCase() === adminUserName.toLowerCase() && adminPassword && adminPassword.length >= 8 && adminPassword.length <= 85 && safeEqual(password, adminPassword)) {
       const user: User = { id: 'staff-super-admin', phone: '', facilityName: 'Direction Générale Gloryday', contactName: 'Super-Admin', role: 'Super-Admin', createdAt: new Date().toISOString() };
-      const token = await issueSession(res, user);
-      loginAttempts.delete(key);
+      await clearLoginFailures(key);
+      await issueSession(res, user);
       appendStaffLog(user, {
         category: 'access',
         severity: 'info',
@@ -1310,15 +1365,15 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         details: 'Session ouverte sur le Portail Direction & Logistique.'
       });
       saveStoreLocal(store);
-      res.json({ user, token });
+      res.json({ user });
       return;
     }
     const normalizedIdentifier = normalizeStaffIdentifier(identifier);
     const staff = environmentStaffAccounts().find(item => item.identifier === normalizedIdentifier);
     if (staff && safeEqual(password, staff.password)) {
       const user: User = { id: `staff-${Buffer.from(normalizedIdentifier).toString('hex').slice(0, 24)}`, phone: '', facilityName: 'Direction Générale Gloryday', contactName: staff.name || staff.role, role: staff.role, createdAt: new Date().toISOString() };
-      const token = await issueSession(res, user);
-      loginAttempts.delete(key);
+      await clearLoginFailures(key);
+      await issueSession(res, user);
       appendStaffLog(user, {
         category: 'access',
         severity: 'info',
@@ -1329,7 +1384,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         details: `Connexion réussie avec l'identifiant « ${normalizedIdentifier} ».`
       });
       saveStoreLocal(store);
-      res.json({ user, token });
+      res.json({ user });
       return;
     }
     const managedStaff = store.staffAccounts.find(item => item.identifier === normalizedIdentifier);
@@ -1360,12 +1415,12 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         details: `Session ouverte par « ${managedStaff.identifier} » (${permissions.length} droit(s) actif(s)).`
       });
       saveStoreLocal(store);
-      const token = await issueSession(res, user);
-      loginAttempts.delete(key);
-      res.json({ user, token });
+      await clearLoginFailures(key);
+      await issueSession(res, user);
+      res.json({ user });
       return;
     }
-    fail();
+    await fail();
   }));
 
   app.get('/api/admin/staff', (_req, res) => {

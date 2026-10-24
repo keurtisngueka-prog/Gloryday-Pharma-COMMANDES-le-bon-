@@ -1466,8 +1466,32 @@ export class SupabaseStorePersistence {
       user_data: user,
       expires_at: expiresAt,
     });
-    if (this.isMissingTableError(error, 'app_sessions')) return;
     assertNoError('création de la session sécurisée', error);
+  }
+
+  async isLoginRateLimited(keyHash: string): Promise<boolean> {
+    const { data, error } = await this.client.rpc('app_auth_is_blocked', {
+      p_key_hash: keyHash,
+    });
+    assertNoError('vérification de la limite de connexion', error);
+    return Boolean(data);
+  }
+
+  async recordLoginFailure(keyHash: string): Promise<boolean> {
+    const { data, error } = await this.client.rpc('app_auth_record_failure', {
+      p_key_hash: keyHash,
+      p_max_attempts: 8,
+      p_window_seconds: 900,
+    });
+    assertNoError('enregistrement d’une tentative de connexion', error);
+    return Boolean(data);
+  }
+
+  async clearLoginFailures(keyHash: string): Promise<void> {
+    const { error } = await this.client.rpc('app_auth_clear_failures', {
+      p_key_hash: keyHash,
+    });
+    assertNoError('réinitialisation des tentatives de connexion', error);
   }
 
   async getAppSession(tokenHash: string): Promise<{ user: User; expiresAt: string } | null> {

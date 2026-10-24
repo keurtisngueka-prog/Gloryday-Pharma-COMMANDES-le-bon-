@@ -129,11 +129,6 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                               -{itemCalc.discountPercent}%
                             </span>
                           )}
-                          {item.isDeferredStock && !item.isQuote && (
-                            <span className="text-[9px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
-                              Devis auto (Stock 0)
-                            </span>
-                          )}
                         </div>
                         {item.variant && item.variant !== 'Standard' && (
                           <span className="text-[11px] text-slate-500">{item.variant}</span>

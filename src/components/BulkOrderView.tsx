@@ -1,8 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   Table, 
   Search, 
-  ShoppingBag, 
   Check, 
   Plus, 
   Minus, 
@@ -12,7 +11,6 @@ import {
   Package, 
   ArrowRight,
   Filter,
-  CheckCircle2,
   AlertCircle,
   FileSpreadsheet
 } from 'lucide-react';
@@ -31,13 +29,13 @@ export const BulkOrderView: React.FC<BulkOrderViewProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedQuickFilter, setSelectedQuickFilter] = useState<string>('all');
+  const transferInProgress = useRef(false);
   
   // Map of `${productId}___${variantLabel}` -> quantity
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   // Selected variant per product: productId -> variantLabel
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({});
 
-  const [addedSuccessToast, setAddedSuccessToast] = useState(false);
 
   // Quick category filters targeted to hospital departments
   const quickFilters = [
@@ -115,7 +113,7 @@ export const BulkOrderView: React.FC<BulkOrderViewProps> = ({
       p.variants.forEach(v => {
         const key = getItemKey(p.id, v.label);
         const qty = quantities[key] || 0;
-        if (qty > 0 && p.status !== 'rupture') {
+        if (qty > 0) {
           entries.push({
             product: p,
             variant: v,
@@ -187,7 +185,8 @@ export const BulkOrderView: React.FC<BulkOrderViewProps> = ({
 
   // Submit all bulk lines to main cart
   const handleTransferToCart = () => {
-    if (selectedEntries.length === 0) return;
+    if (selectedEntries.length === 0 || transferInProgress.current) return;
+    transferInProgress.current = true;
     
     onAddMultipleToCart(
       selectedEntries.map(e => ({
@@ -197,10 +196,7 @@ export const BulkOrderView: React.FC<BulkOrderViewProps> = ({
       }))
     );
 
-    setAddedSuccessToast(true);
-    setTimeout(() => {
-      setAddedSuccessToast(false);
-    }, 3500);
+    onGoToCart();
   };
 
   return (
@@ -359,20 +355,13 @@ export const BulkOrderView: React.FC<BulkOrderViewProps> = ({
                   const currentVariant = getProductVariant(product);
                   const key = getItemKey(product.id, currentVariant.label);
                   const qty = quantities[key] || 0;
-                  const isOutOfStock = product.status === 'rupture';
                   const rowSubtotal = currentVariant.price * qty;
                   const isSelected = qty > 0;
 
                   return (
                     <tr 
                       key={product.id}
-                      className={`transition-colors ${
-                        isSelected 
-                          ? 'bg-blue-50/60 font-medium' 
-                          : isOutOfStock 
-                            ? 'bg-slate-50/40 opacity-75' 
-                            : 'hover:bg-slate-50/80'
-                      }`}
+                      className={`transition-colors ${isSelected ? 'bg-blue-50/60 font-medium' : 'hover:bg-slate-50/80'}`}
                     >
                       {/* Check / Status Icon */}
                       <td className="py-3 px-4 text-center">
@@ -380,8 +369,6 @@ export const BulkOrderView: React.FC<BulkOrderViewProps> = ({
                           <div className="w-6 h-6 rounded-lg bg-[#0d44e8] text-white flex items-center justify-center mx-auto shadow-xs">
                             <Check className="w-3.5 h-3.5 stroke-[3]" />
                           </div>
-                        ) : isOutOfStock ? (
-                          <span className="w-2.5 h-2.5 rounded-full bg-rose-400 block mx-auto" title="Rupture"></span>
                         ) : (
                           <span className="w-2 h-2 rounded-full bg-slate-300 block mx-auto"></span>
                         )}
@@ -423,7 +410,6 @@ export const BulkOrderView: React.FC<BulkOrderViewProps> = ({
                           <select
                             value={currentVariant.label}
                             onChange={(e) => handleVariantChange(product, e.target.value)}
-                            disabled={isOutOfStock}
                             className="w-full text-xs py-1.5 px-2 rounded-lg border border-slate-200 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-[#0d44e8] focus:outline-none"
                           >
                             {product.variants.map((v) => (
@@ -461,12 +447,7 @@ export const BulkOrderView: React.FC<BulkOrderViewProps> = ({
 
                       {/* Direct Numeric Quantity Input with Stepper */}
                       <td className="py-3 px-4">
-                        {isOutOfStock ? (
-                          <div className="text-center text-xs font-bold text-rose-600 bg-rose-50 py-1.5 px-2 rounded-lg border border-rose-200">
-                            En rupture temporaire
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-center gap-1.5">
+                        <div className="flex items-center justify-center gap-1.5">
                             <button
                               type="button"
                               onClick={() => setItemQuantity(product, currentVariant, qty - 1)}
@@ -520,8 +501,7 @@ export const BulkOrderView: React.FC<BulkOrderViewProps> = ({
                                 +50
                               </button>
                             </div>
-                          </div>
-                        )}
+                        </div>
                       </td>
 
                       {/* Row Subtotal */}
@@ -578,37 +558,19 @@ export const BulkOrderView: React.FC<BulkOrderViewProps> = ({
             <button
               type="button"
               onClick={handleTransferToCart}
-              className="flex-1 sm:flex-none py-2.5 px-5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
-            >
-              <ShoppingBag className="w-4 h-4 text-[#0d44e8]" />
-              <span>Transférer au Panier</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                handleTransferToCart();
-                onGoToCart();
-              }}
-              className="flex-1 sm:flex-none py-2.5 px-6 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+              disabled={selectedEntries.length === 0}
+              className="flex-1 sm:flex-none py-2.5 px-6 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
               style={{
                 boxShadow: 'rgba(4, 24, 85, 0.28) 0px 2px 6px -1px, rgba(66, 174, 247, 0.48) 0px 6px 14px 0px inset'
               }}
             >
-              <span>Valider la Commande</span>
+              <span>Ajouter {totalSelectedUnits > 0 ? `${totalSelectedUnits} unité${totalSelectedUnits > 1 ? 's' : ''} au panier` : 'au panier'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Success Toast */}
-      {addedSuccessToast && (
-        <div className="fixed top-20 right-4 z-50 bg-emerald-600 text-white py-3 px-5 rounded-2xl shadow-xl flex items-center gap-3 text-xs font-bold animate-bounce">
-          <CheckCircle2 className="w-5 h-5 text-white" />
-          <span>Articles transférés dans votre panier avec succès !</span>
-        </div>
-      )}
     </div>
   );
 };
