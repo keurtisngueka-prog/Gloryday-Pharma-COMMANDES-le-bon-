@@ -86,11 +86,11 @@ CREATE TABLE IF NOT EXISTS public.orders (
     cancellation_reason TEXT,
     notes TEXT,
     pdf_url TEXT,
-    courier_name VARCHAR(128) DEFAULT 'Alexandre Moundounga (Livreur Médical)',
-    courier_phone VARCHAR(32) DEFAULT '+24177003004',
-    courier_vehicle VARCHAR(64) DEFAULT 'Moto Médicale GP-04',
-    courier_matricule VARCHAR(32) DEFAULT 'LOG-LBV-04',
-    courier_current_zone VARCHAR(128) DEFAULT 'Dépôt Central Oloumi',
+    courier_name VARCHAR(128),
+    courier_phone VARCHAR(32),
+    courier_vehicle VARCHAR(64),
+    courier_matricule VARCHAR(32),
+    courier_current_zone VARCHAR(128),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -174,9 +174,9 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
 CREATE TABLE IF NOT EXISTS public.system_settings (
     id VARCHAR(32) PRIMARY KEY DEFAULT 'default',
     company_name VARCHAR(255) DEFAULT 'Gloryday Pharma Gabon',
-    whatsapp_number VARCHAR(32) DEFAULT '24165522611',
-    airtel_money_number VARCHAR(32) DEFAULT '074 00 11 22',
-    moov_money_number VARCHAR(32) DEFAULT '066 00 33 44',
+    whatsapp_number VARCHAR(32),
+    airtel_money_number VARCHAR(32),
+    moov_money_number VARCHAR(32),
     free_delivery_threshold BIGINT DEFAULT 150000,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
