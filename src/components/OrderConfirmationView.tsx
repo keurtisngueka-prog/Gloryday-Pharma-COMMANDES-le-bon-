@@ -47,6 +47,7 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
   const [isMobilePaymentOpen, setIsMobilePaymentOpen] = useState(false);
   const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [pdfDownloadError, setPdfDownloadError] = useState(false);
 
   const primaryUrl = generateWhatsAppOrderUrl(order, order.pdfUrl, false);
   const secondaryUrl = generateWhatsAppOrderUrl(order, order.pdfUrl, true);
@@ -87,9 +88,13 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
 
   const handleDownloadPdf = async () => {
     if (pdfPreparing || isDownloadingPdf) return;
+    setPdfDownloadError(false);
     setIsDownloadingPdf(true);
     try {
       await downloadOrderPdf(order, pdfDataUrl || order.pdfUrl);
+    } catch (error) {
+      console.error('Échec du téléchargement du bon de commande PDF.', error);
+      setPdfDownloadError(true);
     } finally {
       setIsDownloadingPdf(false);
     }
@@ -202,6 +207,11 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
           </button>
         </div>
         {pdfPreparing && <p role="status" className="mt-2 text-xs text-blue-700">Préparation du fichier PDF en cours...</p>}
+        {pdfDownloadError && (
+          <p role="alert" className="mt-2 text-xs font-medium text-red-700">
+            Le téléchargement du bon PDF a échoué. Réessayez dans un instant.
+          </p>
+        )}
         {pdfGenerationFailed && onRetryPdf && (
           <button
             type="button"

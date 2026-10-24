@@ -28,6 +28,7 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
   const [docMode, setDocMode] = useState<'order' | 'visa'>('order');
   const [downloadingOrder, setDownloadingOrder] = useState(false);
   const [downloadingVisa, setDownloadingVisa] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   const createdAt = new Date(order.createdAt);
   const formattedDate = Number.isNaN(createdAt.getTime())
@@ -47,15 +48,20 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
   const mobilePayment = order.mobilePayment || order.customer.mobilePayment;
 
   const handleDownloadOrderPdf = async () => {
+    setPdfError(null);
     setDownloadingOrder(true);
     try {
       await downloadOrderPdf(order, pdfDataUrl || order.pdfUrl);
+    } catch (error) {
+      console.error('Échec du téléchargement du bon de commande PDF.', error);
+      setPdfError('Le téléchargement du bon PDF a échoué. Réessayez dans un instant.');
     } finally {
       setDownloadingOrder(false);
     }
   };
 
   const handleDownloadVisaPdf = async () => {
+    setPdfError(null);
     setDownloadingVisa(true);
     try {
       const { blob } = await generateInternalPurchaseOrderPdf(order, {
@@ -63,6 +69,9 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
         requesterTitle: order.customer.contactName || 'Major de Bloc'
       });
       triggerPdfBlobDownload(blob, `Bon_Visa_Interne_${order.reference}.pdf`);
+    } catch (error) {
+      console.error('Échec de la génération de la fiche Visa PDF.', error);
+      setPdfError('La fiche Visa PDF n’a pas pu être générée. Réessayez dans un instant.');
     } finally {
       setDownloadingVisa(false);
     }
@@ -140,6 +149,12 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
             </button>
           </div>
         </div>
+
+        {pdfError && (
+          <p role="alert" className="mx-3 mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800 sm:mx-5">
+            {pdfError}
+          </p>
+        )}
 
         {/* Scrollable A4 Document Sheet */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-6">
