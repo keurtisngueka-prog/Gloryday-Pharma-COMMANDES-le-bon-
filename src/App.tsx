@@ -339,8 +339,13 @@ export default function App() {
   // Initial Data Load
   const loadInitialData = async () => {
     const generation = authGeneration.current;
-    const [productsResult, packsResult, authResult, discountResult] = await Promise.allSettled([
-      api.getProducts(),
+    // Load the public catalogue independently so a slow session, pack, or
+    // discount request cannot leave the customer looking at an empty catalogue.
+    void api.getProducts().then(setProducts).catch((error) => {
+      console.error('Chargement du catalogue impossible', error);
+    });
+
+    const [packsResult, authResult, discountResult] = await Promise.allSettled([
       api.getPacks(),
       api.getCurrentUser(),
       api.getVolumeDiscountSettings()
@@ -349,11 +354,6 @@ export default function App() {
 
     // A failure in packs, auth, or settings must never prevent the catalogue
     // from rendering. Keep each initial request independent.
-    if (productsResult.status === 'fulfilled') {
-      setProducts(productsResult.value);
-    } else {
-      console.error('Chargement du catalogue impossible', productsResult.reason);
-    }
     if (packsResult.status === 'fulfilled') {
       setPacks(packsResult.value);
     } else {
