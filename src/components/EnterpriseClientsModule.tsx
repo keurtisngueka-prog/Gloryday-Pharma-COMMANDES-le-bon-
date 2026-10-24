@@ -358,9 +358,16 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
                   return (
                     <tr key={client.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="py-2.5 px-3">
-                        <div className="font-bold text-slate-900">{client.facilityName}</div>
-                        <div className="text-[11px] text-slate-500">
-                          {client.facilityType || 'Clinique'} · {client.contactName || 'Responsable'} ({client.phone})
+                        <div className="flex items-center gap-2.5">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-blue-200/70 bg-[#eef3ff] text-xs font-black text-[#0d44e8]">
+                            {client.avatarUrl ? <img src={client.avatarUrl} alt={client.facilityName} className="h-full w-full object-cover" /> : client.facilityName.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-900">{client.facilityName}</div>
+                            <div className="text-[11px] text-slate-500">
+                              {client.facilityType || 'Clinique'} · {client.contactName || 'Responsable'} ({client.phone})
+                            </div>
+                          </div>
                         </div>
                       </td>
                       <td className="py-2.5 px-3">

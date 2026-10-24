@@ -11,10 +11,13 @@ import {
   MapPin,
   Compass,
   Eye,
-  EyeOff
+  EyeOff,
+  Camera,
+  ImagePlus
 } from 'lucide-react';
 import { api } from '../api';
 import { User, FacilityType, Coordinates } from '../types';
+import { processAvatarFile } from '../utils/avatarImage';
 import { PhoneNumberInput } from './PhoneNumberInput';
 
 interface AuthModalProps {
@@ -70,6 +73,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recoverySubmitted, setRecoverySubmitted] = useState(false);
+  const [registrationAvatarUrl, setRegistrationAvatarUrl] = useState<string | undefined>();
+  const [processingAvatar, setProcessingAvatar] = useState(false);
+  const galleryAvatarInputRef = useRef<HTMLInputElement>(null);
+  const cameraAvatarInputRef = useRef<HTMLInputElement>(null);
 
   // Google Sign-In state & profile
   const [googleProfile, setGoogleProfile] = useState<{
@@ -92,6 +99,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setShowPassword(false);
       setShowConfirmPassword(false);
       setShowAdminPassword(false);
+      setRegistrationAvatarUrl(undefined);
       return;
     }
 
@@ -230,7 +238,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         facilityType,
         password,
         deliveryAddress,
-        coordinates: coordinates || undefined
+        coordinates: coordinates || undefined,
+        avatarUrl: registrationAvatarUrl
       });
       onSuccess(res.user);
       onClose();
@@ -238,6 +247,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setError(err.message || 'Erreur lors de l inscription.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRegistrationAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setProcessingAvatar(true);
+    setError(null);
+    try {
+      setRegistrationAvatarUrl(await processAvatarFile(file));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Impossible de préparer cette photo.');
+    } finally {
+      setProcessingAvatar(false);
     }
   };
 
@@ -762,6 +786,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {/* REGISTER */}
           {mode === 'register' && (
             <form onSubmit={handleRegister} className="space-y-3 text-xs">
+              <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-white flex items-center justify-center text-[#0d44e8]">
+                  {registrationAvatarUrl ? <img src={registrationAvatarUrl} alt="Aperçu du logo" className="h-full w-full object-cover" /> : <Building2 className="h-6 w-6" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-slate-800">Logo ou photo de l’établissement <span className="font-normal text-slate-500">(facultatif)</span></p>
+                  <div className="mt-1.5 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => galleryAvatarInputRef.current?.click()} disabled={processingAvatar} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-semibold text-slate-700 disabled:opacity-50">
+                      <ImagePlus className="h-3.5 w-3.5" /> Galerie
+                    </button>
+                    <button type="button" onClick={() => cameraAvatarInputRef.current?.click()} disabled={processingAvatar} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-semibold text-slate-700 disabled:opacity-50">
+                      <Camera className="h-3.5 w-3.5" /> Caméra
+                    </button>
+                    {registrationAvatarUrl && <button type="button" onClick={() => setRegistrationAvatarUrl(undefined)} className="px-1.5 py-1 font-semibold text-rose-700">Retirer</button>}
+                  </div>
+                  <p className="mt-1 text-[10px] text-slate-500">JPG, PNG ou WEBP · photo compressée automatiquement</p>
+                  {processingAvatar && <p className="mt-1 text-[10px] font-semibold text-blue-700">Préparation de la photo…</p>}
+                </div>
+                <input ref={galleryAvatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleRegistrationAvatarChange} />
+                <input ref={cameraAvatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="hidden" onChange={handleRegistrationAvatarChange} />
+              </div>
               <div>
                 <label htmlFor="register-facility-name" className="block font-bold text-slate-700 uppercase mb-0.5">
                   Nom de l'établissement *
@@ -910,7 +955,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || processingAvatar}
                 className="w-full py-2.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs shadow-md cursor-pointer mt-1"
               >
                 {loading ? 'Création...' : 'Créer mon compte'}

@@ -1040,6 +1040,7 @@ export default function App() {
                   setActiveDeliveryOrder(order);
                   setIsDeliveryModalOpen(true);
                 }}
+                onProfileUpdated={setCurrentUser}
               />
             )}
 

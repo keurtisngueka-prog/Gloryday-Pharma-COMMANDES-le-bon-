@@ -679,6 +679,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       else if (method === 'POST') allowed = role === 'client';
     } else if (route === '/events') {
       allowed = method === 'GET';
+    } else if (route === '/auth/profile') {
+      allowed = method === 'PATCH' && role === 'client';
     } else if (route === '/events/announcement') {
       allowed = method === 'POST' && (isSuperAdmin || hasPerm('clients_manage'));
     } else if (route === '/push/subscriptions' || route === '/push/unsubscribe') {
@@ -1058,6 +1060,179 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     res.status(201).json(enrichProductWithStockState(newProduct));
   }));
 
+  app.post('/api/products/bulk', asyncHandler(async (req, res) => {
+    const incoming = req.body?.products;
+    if (!Array.isArray(incoming) || incoming.length === 0 || incoming.length > 500) {
+      res.status(400).json({ error: 'Import invalide : sélectionnez entre 1 et 500 articles.' });
+      return;
+    }
+
+    const normalizedItems: Array<{
+      id?: string;
+      name: string;
+      category?: string;
+      subcategory?: string;
+      description?: string;
+      status?: 'disponible' | 'rupture';
+      stock?: number;
+      alertThreshold?: number;
+      isPromotion?: boolean;
+      originalPrice?: number;
+      discountPercentage?: number;
+      variants?: Product['variants'];
+    }> = [];
+    const seenKeys = new Set<string>();
+
+    for (const [index, raw] of incoming.entries()) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        res.status(400).json({ error: `La ligne ${index + 1} du fichier n’est pas valide.` });
+        return;
+      }
+      const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 255) : '';
+      const id = typeof raw.id === 'string' ? raw.id.trim().slice(0, 64) : '';
+      if (!name || (id && !/^[A-Za-z0-9_:-]+$/.test(id))) {
+        res.status(400).json({ error: `Nom ou identifiant invalide à la ligne ${index + 1}.` });
+        return;
+      }
+      const key = id ? `id:${id.toLowerCase()}` : `name:${name.toLocaleLowerCase('fr')}`;
+      if (seenKeys.has(key)) {
+        res.status(400).json({ error: `L’article « ${name} » apparaît plusieurs fois dans le fichier.` });
+        return;
+      }
+      seenKeys.add(key);
+
+      const rawStock = raw.quantityAvailable ?? raw.stockQuantity;
+      const stock = rawStock === undefined ? undefined : Number(rawStock);
+      if (stock !== undefined && (!Number.isFinite(stock) || stock < 0 || stock > 1_000_000)) {
+        res.status(400).json({ error: `Quantité invalide à la ligne ${index + 1}.` });
+        return;
+      }
+
+      let variants: Product['variants'] | undefined;
+      if (raw.variants !== undefined) {
+        if (!Array.isArray(raw.variants) || raw.variants.length > 25) {
+          res.status(400).json({ error: `Les conditionnements sont invalides à la ligne ${index + 1}.` });
+          return;
+        }
+        variants = [];
+        for (const variant of raw.variants) {
+          const label = typeof variant?.label === 'string' ? variant.label.trim().slice(0, 120) : '';
+          const price = Number(variant?.price);
+          if (!label || !Number.isFinite(price) || price < 0 || price > 1_000_000_000) {
+            res.status(400).json({ error: `Prix ou conditionnement invalide à la ligne ${index + 1}.` });
+            return;
+          }
+          variants.push({
+            label,
+            price: Math.round(price),
+            ...(Number.isFinite(Number(variant.originalPrice)) && Number(variant.originalPrice) > 0
+              ? { originalPrice: Math.round(Number(variant.originalPrice)) }
+              : {}),
+            ...(Number.isFinite(Number(variant.discountPercentage)) && Number(variant.discountPercentage) > 0
+              ? { discountPercentage: Math.min(100, Math.round(Number(variant.discountPercentage))) }
+              : {})
+          });
+        }
+      }
+
+      const discount = raw.discountPercentage === undefined ? undefined : Number(raw.discountPercentage);
+      const originalPrice = raw.originalPrice === undefined ? undefined : Number(raw.originalPrice);
+      const alertThreshold = raw.alertThreshold === undefined ? undefined : Number(raw.alertThreshold);
+      if ((discount !== undefined && (!Number.isFinite(discount) || discount < 0 || discount > 100)) ||
+          (originalPrice !== undefined && (!Number.isFinite(originalPrice) || originalPrice < 0 || originalPrice > 1_000_000_000)) ||
+          (alertThreshold !== undefined && (!Number.isFinite(alertThreshold) || alertThreshold < 0 || alertThreshold > 1_000_000))) {
+        res.status(400).json({ error: `Remise, prix ou seuil de stock invalide à la ligne ${index + 1}.` });
+        return;
+      }
+
+      normalizedItems.push({
+        ...(id ? { id } : {}),
+        name,
+        ...(typeof raw.category === 'string' && raw.category.trim() ? { category: raw.category.trim().slice(0, 128) } : {}),
+        ...(typeof raw.subcategory === 'string' ? { subcategory: raw.subcategory.trim().slice(0, 128) } : {}),
+        ...(typeof raw.description === 'string' ? { description: raw.description.slice(0, 4_000) } : {}),
+        ...(raw.status === 'disponible' || raw.status === 'rupture' ? { status: raw.status } : {}),
+        ...(stock !== undefined ? { stock: Math.round(stock) } : {}),
+        ...(alertThreshold !== undefined ? { alertThreshold: Math.round(alertThreshold) } : {}),
+        ...(typeof raw.isPromotion === 'boolean' ? { isPromotion: raw.isPromotion } : {}),
+        ...(originalPrice !== undefined ? { originalPrice: Math.round(originalPrice) } : {}),
+        ...(discount !== undefined ? { discountPercentage: Math.round(discount) } : {}),
+        ...(variants ? { variants } : {})
+      });
+    }
+
+    const nextProducts = [...store.products];
+    let updatedCount = 0;
+    let createdCount = 0;
+    const importedProducts: Product[] = [];
+    for (const item of normalizedItems) {
+      const idMatch = item.id
+        ? nextProducts.findIndex(product => product.id.toLowerCase() === item.id?.toLowerCase())
+        : -1;
+      const nameMatch = nextProducts.findIndex(product => product.name.trim().toLocaleLowerCase('fr') === item.name.toLocaleLowerCase('fr'));
+      if (idMatch >= 0 && nameMatch >= 0 && idMatch !== nameMatch) {
+        res.status(409).json({ error: `L’identifiant et le nom de « ${item.name} » désignent deux produits différents.` });
+        return;
+      }
+      const existingIndex = idMatch >= 0 ? idMatch : nameMatch;
+      const existing = existingIndex >= 0 ? nextProducts[existingIndex] : undefined;
+      const stock = item.stock ?? (existing ? (getTrackedProductStock(existing) ?? 0) : 0);
+      const product: Product = enrichProductWithStockState({
+        ...(existing || {} as Product),
+        id: existing?.id || item.id || `prod-${randomUUID()}`,
+        name: item.name,
+        category: item.category || existing?.category || 'Consommables médicaux',
+        ...(item.subcategory !== undefined ? { subcategory: item.subcategory || undefined } : {}),
+        ...(item.description !== undefined ? { description: item.description || undefined } : {}),
+        variants: item.variants?.length ? item.variants : existing?.variants?.length ? existing.variants : [{ label: 'Boîte standard', price: 0 }],
+        status: item.status || existing?.status || 'disponible',
+        ...(item.isPromotion !== undefined ? { isPromotion: item.isPromotion } : {}),
+        ...(item.originalPrice !== undefined ? { originalPrice: item.originalPrice } : {}),
+        ...(item.discountPercentage !== undefined ? { discountPercentage: item.discountPercentage } : {}),
+        ...(item.alertThreshold !== undefined ? { alertThreshold: item.alertThreshold } : {}),
+        quantityAvailable: stock,
+        stockQuantity: stock,
+        hasPhysicalStock: stock > 0 && (item.status || existing?.status) !== 'rupture'
+      });
+      if (existingIndex >= 0) {
+        nextProducts[existingIndex] = product;
+        updatedCount += 1;
+      } else {
+        nextProducts.unshift(product);
+        createdCount += 1;
+      }
+      importedProducts.push(product);
+    }
+
+    const originalProducts = store.products;
+    store.products = nextProducts;
+    const actor = (req as AuthenticatedRequest).authenticatedUser;
+    appendStaffLog(actor, {
+      actionType: 'CATALOG_EXCEL_IMPORT',
+      category: 'stock_price',
+      severity: 'info',
+      actionLabel: 'Import Excel Catalogue & Stocks',
+      targetType: 'product',
+      targetId: 'catalog-excel-bulk',
+      targetLabel: `${updatedCount + createdCount} article(s) synchronisé(s)`,
+      details: `Import catalogue validé : ${updatedCount} article(s) mis à jour et ${createdCount} créé(s).`,
+      newValue: `${updatedCount} mis à jour · ${createdCount} créés`
+    });
+    try {
+      await saveStore(store, persistence);
+    } catch (error) {
+      store.products = originalProducts;
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      updatedCount,
+      createdCount,
+      products: store.products.map(product => enrichProductWithStockState(product))
+    });
+  }));
+
   app.put('/api/products/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
     const idx = store.products.findIndex(p => p.id === id);
@@ -1226,7 +1401,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       return;
     }
     await recordLoginFailure(registrationKey);
-    const { phone, facilityName, contactName, facilityType, facilityTypeOther, password, deliveryAddress, coordinates } = req.body || {};
+    const { phone, facilityName, contactName, facilityType, facilityTypeOther, password, deliveryAddress, coordinates, avatarUrl: rawAvatarUrl } = req.body || {};
     const cleanPhone = normalizePhone(String(phone || ''));
     const cleanPass = String(password || '');
     if (!cleanPhone || !facilityName || !/^\+?\d{8,15}$/.test(cleanPhone)) {
@@ -1235,6 +1410,13 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
     if (cleanPass.length < 8 || cleanPass.length > 85) {
       res.status(400).json({ error: 'Choisissez un mot de passe de 8 à 85 caractères.' });
+      return;
+    }
+    let avatarUrl: string | undefined;
+    try {
+      avatarUrl = sanitizeAvatarUrl(rawAvatarUrl);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Photo de profil invalide.' });
       return;
     }
     if (store.accounts.some(a => normalizePhone(a.user.phone) === cleanPhone)) {
@@ -1250,6 +1432,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       facilityTypeOther: facilityTypeOther ? String(facilityTypeOther).slice(0, 120) : undefined,
       role: 'client',
       authProvider: 'credentials',
+      avatarUrl,
       deliveryAddress: String(deliveryAddress || 'Libreville, Gabon').slice(0, 300),
       coordinates: coordinates &&
         typeof coordinates.lat === 'number' && Number.isFinite(coordinates.lat) && coordinates.lat >= -90 && coordinates.lat <= 90 &&
@@ -1263,6 +1446,66 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     await clearLoginFailures(registrationKey);
     await issueSession(res, newUser);
     res.status(201).json({ user: cleanUser(newUser) });
+  }));
+
+  function sanitizeAvatarUrl(raw: unknown): string | undefined {
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    if (typeof raw !== 'string') throw new Error('Photo de profil invalide.');
+    const value = raw.trim();
+    if (!value) return undefined;
+    if (value.length > 300_000) throw new Error('La photo compressée est trop volumineuse.');
+
+    const dataUrlMatch = value.match(/^data:image\/(webp|jpeg|png);base64,([A-Za-z0-9+/]+={0,2})$/);
+    if (dataUrlMatch) {
+      const imageBytes = Buffer.from(dataUrlMatch[2], 'base64');
+      if (!imageBytes.length || imageBytes.length > 220_000) {
+        throw new Error('La photo compressée dépasse la taille autorisée.');
+      }
+      return value;
+    }
+
+    if (value.startsWith('/') && !value.startsWith('//') && !value.includes('\\')) return value;
+    try {
+      const parsed = new URL(value);
+      if (parsed.protocol === 'https:') return value;
+    } catch {
+      // Reject malformed or non-HTTPS external URLs below.
+    }
+    throw new Error('La photo doit être une image HTTPS ou une image JPG, PNG ou WEBP compressée.');
+  }
+
+  app.patch('/api/auth/profile', asyncHandler(async (req, res) => {
+    const currentUser = (req as AuthenticatedRequest).authenticatedUser;
+    if (!currentUser || currentUser.role !== 'client') {
+      res.status(401).json({ error: 'Connexion client requise.' });
+      return;
+    }
+
+    const accountIndex = store.accounts.findIndex(account => account.user.id === currentUser.id);
+    if (accountIndex < 0) {
+      res.status(404).json({ error: 'Compte client introuvable.' });
+      return;
+    }
+
+    let avatarUrl: string | undefined;
+    try {
+      avatarUrl = sanitizeAvatarUrl(req.body?.avatarUrl);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Photo de profil invalide.' });
+      return;
+    }
+
+    const updatedUser: User = { ...store.accounts[accountIndex].user, avatarUrl };
+    store.accounts[accountIndex] = { ...store.accounts[accountIndex], user: updatedUser };
+    for (const [sessionId, session] of sessions) {
+      if (session.user.id === updatedUser.id) {
+        sessions.set(sessionId, { ...session, user: cleanUser(updatedUser) });
+      }
+    }
+
+    await saveStore(store, persistence);
+    await issueSession(res, updatedUser);
+    res.json({ user: cleanUser(updatedUser) });
   }));
 
   app.post('/api/auth/login', asyncHandler(async (req, res) => {

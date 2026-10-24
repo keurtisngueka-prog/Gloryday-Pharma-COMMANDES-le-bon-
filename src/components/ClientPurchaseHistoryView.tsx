@@ -60,6 +60,7 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
         contactName: string;
         phone: string;
         deliveryAddress: string;
+        avatarUrl?: string;
         orders: Order[];
         rawClient: any;
       }
@@ -77,6 +78,7 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
         contactName: c.contactName || 'Responsable Achats',
         phone: c.phone || '',
         deliveryAddress: c.deliveryAddress || 'Libreville',
+        avatarUrl: c.avatarUrl || undefined,
         orders: [],
         rawClient: c
       });
@@ -401,6 +403,11 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
+                {c.avatarUrl ? (
+                  <img src={c.avatarUrl} alt="" className="h-4 w-4 shrink-0 rounded-md object-cover" />
+                ) : (
+                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-md text-[9px] ${isSelected ? 'bg-white/20' : 'bg-white'}`}>{c.facilityName.charAt(0).toUpperCase()}</span>
+                )}
                 <span>{c.facilityName}</span>
                 <span
                   className={`text-[10px] font-mono tabular-nums ${
