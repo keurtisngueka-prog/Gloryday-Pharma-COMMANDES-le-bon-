@@ -774,6 +774,7 @@ export default function App() {
       setPreviewPdfOrder(curr => curr && curr.order.id === order.id ? { order, dataUrl } : curr);
     } catch (e) {
       console.error('Erreur génération PDF:', e);
+      showToast('Le bon PDF n’a pas pu être préparé. Réessayez dans un instant.', 'error');
     }
   };
 
