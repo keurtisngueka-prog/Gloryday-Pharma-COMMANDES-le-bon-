@@ -163,6 +163,18 @@ export const api = {
     });
   },
 
+  async bulkUpsertProducts(products: Partial<Product>[]): Promise<{
+    success: boolean;
+    updatedCount: number;
+    createdCount: number;
+    products: Product[];
+  }> {
+    return request('/api/products/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ products })
+    });
+  },
+
   async updateProduct(id: string, productData: Partial<Product>): Promise<Product> {
     return request<Product>(`/api/products/${id}`, {
       method: 'PUT',
@@ -263,12 +275,20 @@ export const api = {
     password: string;
     deliveryAddress?: string;
     coordinates?: { lat: number; lng: number };
+    avatarUrl?: string;
   }): Promise<{ user: User }> {
     const res = await request<{ user: User }>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify(registrationData)
     });
     return res;
+  },
+
+  async updateClientProfile(profileData: { avatarUrl: string | null }): Promise<{ user: User }> {
+    return request<{ user: User }>('/api/auth/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(profileData)
+    });
   },
 
   async login(phone: string, password: string): Promise<{ user: User }> {

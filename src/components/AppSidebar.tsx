@@ -117,8 +117,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
           {/* 2. User & Facility Profile */}
           <div className="p-4 border-b border-slate-100">
             <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-[#eef3ff] text-[#0d44e8] flex items-center justify-center font-black text-base shrink-0">
-                {currentUser ? currentUser.facilityName.charAt(0).toUpperCase() : 'V'}
+              <div className="w-10 h-10 rounded-xl bg-[#eef3ff] text-[#0d44e8] flex items-center justify-center font-black text-base shrink-0 overflow-hidden border border-blue-100">
+                {currentUser?.avatarUrl ? (
+                  <img src={currentUser.avatarUrl} alt={currentUser.facilityName} className="w-full h-full object-cover" />
+                ) : currentUser ? currentUser.facilityName.charAt(0).toUpperCase() : 'V'}
               </div>
               <div className="min-w-0 flex-1">
                 <span className="font-bold text-xs text-slate-900 block truncate">
