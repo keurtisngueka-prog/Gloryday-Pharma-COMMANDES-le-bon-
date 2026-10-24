@@ -1,11 +1,20 @@
 import type { Request, Response } from 'express';
 import { getVercelApp } from '../server.js';
 
+process.on('warning', (warning) => {
+  if ((warning as Error & { code?: string }).code === 'DEP0169') {
+    console.warn('[DEP0169 stack]', warning.stack || warning.message);
+  }
+});
+
 const appPromise = getVercelApp();
 
 export default async function handler(req: Request, res: Response): Promise<void> {
   try {
     const incomingUrl = new URL(req.url || '/', 'https://gloryday.invalid');
+    // Vercel may forward an absolute-form URL; Express expects a path beginning with "/".
+    // Normalize it before Express or parseurl inspects the request.
+    req.url = `${incomingUrl.pathname}${incomingUrl.search}`;
     if (incomingUrl.searchParams.get('__gloryday_gateway') === '1') {
       const forwardedPath = incomingUrl.searchParams.get('__gloryday_path');
       const segments = forwardedPath?.split('/').filter(Boolean) ?? [];
