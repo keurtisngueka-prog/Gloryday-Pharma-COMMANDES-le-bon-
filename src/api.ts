@@ -52,6 +52,7 @@ export function clearLocalDraftsAndCaches(): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.removeItem('gloryday_auth_token');
+    localStorage.removeItem('gloryday_session_token');
     localStorage.removeItem('gloryday_registered_users');
     localStorage.removeItem('gloryday_guest_orders');
     localStorage.removeItem('gloryday_customer_info');
@@ -65,25 +66,9 @@ if (typeof window !== 'undefined') {
   clearLocalDraftsAndCaches();
 }
 
-let memoryToken: string | null = null;
-
-export function getStoredToken(): string | null {
-  if (memoryToken) return memoryToken;
+export function clearStoredSessionToken() {
   try {
-    return localStorage.getItem('gloryday_session_token');
-  } catch {
-    return null;
-  }
-}
-
-export function setStoredToken(token: string | null) {
-  memoryToken = token;
-  try {
-    if (token) {
-      localStorage.setItem('gloryday_session_token', token);
-    } else {
-      localStorage.removeItem('gloryday_session_token');
-    }
+    localStorage.removeItem('gloryday_session_token');
   } catch {}
 }
 
@@ -91,10 +76,6 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string> || {})
   };
-  const token = getStoredToken();
-  if (token && !headers['Authorization']) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
   if (!(options.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
@@ -282,21 +263,19 @@ export const api = {
     password: string;
     deliveryAddress?: string;
     coordinates?: { lat: number; lng: number };
-  }): Promise<{ token?: string; user: User }> {
-    const res = await request<{ user: User; token?: string }>('/api/auth/register', {
+  }): Promise<{ user: User }> {
+    const res = await request<{ user: User }>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify(registrationData)
     });
-    if (res.token) setStoredToken(res.token);
     return res;
   },
 
-  async login(phone: string, password: string): Promise<{ token?: string; user: User }> {
-    const res = await request<{ user: User; token?: string }>('/api/auth/login', {
+  async login(phone: string, password: string): Promise<{ user: User }> {
+    const res = await request<{ user: User }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ phone, password })
     });
-    if (res.token) setStoredToken(res.token);
     return res;
   },
 
@@ -311,7 +290,7 @@ export const api = {
     email: string;
     name: string;
     avatarUrl?: string;
-  }): Promise<{ isNewUser: boolean; token?: string; user?: User; profileData: { email: string; name: string; avatarUrl?: string } }> {
+  }): Promise<{ isNewUser: boolean; user?: User; profileData: { email: string; name: string; avatarUrl?: string } }> {
     await request('/api/auth/google', { method: 'POST', body: JSON.stringify(googleProfile) });
     return { isNewUser: false, profileData: googleProfile };
   },
@@ -326,21 +305,19 @@ export const api = {
     facilityType?: string;
     deliveryAddress?: string;
     coordinates?: { lat: number; lng: number };
-  }): Promise<{ token?: string; user: User }> {
-    const res = await request<{ user: User; token?: string }>('/api/auth/google/complete', { method: 'POST', body: JSON.stringify(data) });
-    if (res.token) setStoredToken(res.token);
+  }): Promise<{ user: User }> {
+    const res = await request<{ user: User }>('/api/auth/google/complete', { method: 'POST', body: JSON.stringify(data) });
     return res;
   },
 
-  async adminLogin(identifier: string, passwordOrRole?: string | AppRole, _roleOption?: AppRole): Promise<{ token?: string; user: User }> {
+  async adminLogin(identifier: string, passwordOrRole?: string | AppRole, _roleOption?: AppRole): Promise<{ user: User }> {
     const password = typeof passwordOrRole === 'string' && !['client', 'Super-Admin', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'].includes(passwordOrRole)
       ? passwordOrRole
       : '';
-    const res = await request<{ user: User; token?: string }>('/api/auth/admin', {
+    const res = await request<{ user: User }>('/api/auth/admin', {
       method: 'POST',
       body: JSON.stringify({ identifier, password })
     });
-    if (res.token) setStoredToken(res.token);
     return res;
   },
 
@@ -378,7 +355,7 @@ export const api = {
     try {
       await request('/api/auth/logout', { method: 'POST', body: '{}' });
     } finally {
-      setStoredToken(null);
+      clearStoredSessionToken();
       clearLocalDraftsAndCaches();
     }
   },

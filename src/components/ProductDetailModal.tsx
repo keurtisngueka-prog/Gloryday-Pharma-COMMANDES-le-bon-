@@ -109,15 +109,6 @@ export function ProductDetailModal({
                   </div>
                 )}
                 
-                {product.status === 'rupture' ? (
-                  <span className="absolute top-3 left-3 bg-rose-500 text-white text-[11px] font-bold px-2.5 py-1 rounded-md shadow-xs">
-                    Rupture temporaire
-                  </span>
-                ) : (
-                  <span className="absolute top-3 left-3 bg-emerald-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-md shadow-xs">
-                    En stock Libreville
-                  </span>
-                )}
               </div>
 
               {/* Thumbnails if multiple images */}
@@ -317,11 +308,8 @@ export function ProductDetailModal({
 
             <button
               onClick={handleAdd}
-              disabled={product.status === 'rupture'}
               className={`w-full sm:w-auto px-6 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 ${
-                product.status === 'rupture'
-                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                  : addedSuccess
+                addedSuccess
                   ? 'bg-emerald-600 text-white shadow-emerald-600/20'
                   : 'bg-[#0d44e8] hover:bg-[#0b3ac7] text-white shadow-[#0d44e8]/25'
               }`}

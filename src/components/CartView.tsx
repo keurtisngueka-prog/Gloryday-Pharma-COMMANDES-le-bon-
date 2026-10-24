@@ -96,7 +96,6 @@ export const CartView: React.FC<CartViewProps> = ({
   }, [currentUser]);
 
   const quoteItems = items.filter(it => it.isQuote);
-  const deferredStockItems = items.filter(it => !it.isQuote && it.isDeferredStock);
   const volumeSummary = calculateCartVolumeSummary(items);
   const itemsSubtotal = volumeSummary.netTotal;
 
@@ -317,11 +316,6 @@ export const CartView: React.FC<CartViewProps> = ({
                       <span className="text-[10px] text-[#6a6a6b] font-medium truncate">
                         {item.category}
                       </span>
-                      {item.isDeferredStock && !item.isQuote && (
-                        <span className="text-[9px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
-                          Sur commande / Devis auto
-                        </span>
-                      )}
                       {calc.discountPercent > 0 && (
                         <span className="text-[9px] font-extrabold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
                           Remise -{calc.discountPercent}%
@@ -397,11 +391,11 @@ export const CartView: React.FC<CartViewProps> = ({
             })}
           </div>
 
-          {(quoteItems.length > 0 || deferredStockItems.length > 0) && (
+          {quoteItems.length > 0 && (
             <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs leading-relaxed flex items-start gap-2">
               <HelpCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div>
-                <strong>Conversion automatique en Bon de Commande / Devis :</strong> Votre sélection inclut des articles sur devis ou en réapprovisionnement (stock à 0). Votre bon de commande PDF sera généré immédiatement et transmis au service commercial pour confirmation.
+                <strong>Articles sur devis :</strong> Votre bon de commande PDF sera généré immédiatement et transmis à notre équipe commerciale pour confirmation.
               </div>
             </div>
           )}

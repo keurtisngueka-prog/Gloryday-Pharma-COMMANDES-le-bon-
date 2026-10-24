@@ -339,41 +339,59 @@ export default function App() {
   // Initial Data Load
   const loadInitialData = async () => {
     const generation = authGeneration.current;
-    try {
-      const [prodsData, packsData, authData, discountData] = await Promise.all([
-        api.getProducts(),
-        api.getPacks(),
-        api.getCurrentUser(),
-        api.getVolumeDiscountSettings().catch(() => null)
-      ]);
-      if (generation !== authGeneration.current) return;
-      if (discountData) {
-        setActiveVolumeDiscountSettings(discountData);
-      }
-      setProducts(prodsData);
-      setPacks(packsData);
+    const [productsResult, packsResult, authResult, discountResult] = await Promise.allSettled([
+      api.getProducts(),
+      api.getPacks(),
+      api.getCurrentUser(),
+      api.getVolumeDiscountSettings()
+    ]);
+    if (generation !== authGeneration.current) return;
 
-      if (authData) {
-        setCurrentUser(authData.user);
-        setCartItems(loadCartForUser(authData.user));
-        const userOrders = await api.getOrders(authData.user.phone);
-        if (generation !== authGeneration.current) return;
-        setOrders(userOrders);
-        const perms = authData.user.permissions || [];
-        if (authData.role === 'Super-Admin' || authData.role === 'Admin simple' || perms.includes('stats_view')) {
-          api.getAdminStats().then(setAdminStats).catch(() => {});
-        }
-        if (authData.role === 'Super-Admin' || authData.role === 'Admin simple' || authData.role === 'Commercial' || perms.includes('clients_manage')) {
-          api.getClients().then(setClients).catch(() => {});
-        }
-        if (authData.role === 'Super-Admin' || authData.role === 'Commercial' || perms.includes('quotes_manage')) {
-          api.getQuotes().then(setQuotes).catch(() => {});
-        }
-      } else {
-        setOrders([]);
-      }
-    } catch (err) {
-      console.error('Initialization error', err);
+    // A failure in packs, auth, or settings must never prevent the catalogue
+    // from rendering. Keep each initial request independent.
+    if (productsResult.status === 'fulfilled') {
+      setProducts(productsResult.value);
+    } else {
+      console.error('Chargement du catalogue impossible', productsResult.reason);
+    }
+    if (packsResult.status === 'fulfilled') {
+      setPacks(packsResult.value);
+    } else {
+      console.warn('Chargement des packs impossible', packsResult.reason);
+    }
+    if (discountResult.status === 'fulfilled') {
+      setActiveVolumeDiscountSettings(discountResult.value);
+    }
+    if (authResult.status === 'rejected') {
+      console.warn('Vérification de session impossible', authResult.reason);
+      setOrders([]);
+      return;
+    }
+
+    const authData = authResult.value;
+    if (!authData) {
+      setOrders([]);
+      return;
+    }
+
+    setCurrentUser(authData.user);
+    setCartItems(loadCartForUser(authData.user));
+    try {
+      const userOrders = await api.getOrders(authData.user.phone);
+      if (generation !== authGeneration.current) return;
+      setOrders(userOrders);
+    } catch (error) {
+      console.warn('Chargement des commandes impossible', error);
+    }
+    const perms = authData.user.permissions || [];
+    if (authData.role === 'Super-Admin' || authData.role === 'Admin simple' || perms.includes('stats_view')) {
+      api.getAdminStats().then(setAdminStats).catch(() => {});
+    }
+    if (authData.role === 'Super-Admin' || authData.role === 'Admin simple' || authData.role === 'Commercial' || perms.includes('clients_manage')) {
+      api.getClients().then(setClients).catch(() => {});
+    }
+    if (authData.role === 'Super-Admin' || authData.role === 'Commercial' || perms.includes('quotes_manage')) {
+      api.getQuotes().then(setQuotes).catch(() => {});
     }
   };
 
@@ -494,9 +512,6 @@ export default function App() {
 
   // Cart Operations
   const handleAddToCart = (product: Product, variant: ProductVariant, quantity: number) => {
-    if (product.status === 'rupture') return;
-    const stockQty = product.quantityAvailable ?? product.stockQuantity ?? 0;
-    const hasStock = Boolean(product.hasPhysicalStock || stockQty > 0);
     setCartItems(prev => {
       const existingIndex = prev.findIndex(
         it => it.productId === product.id && it.variant === variant.label
@@ -504,7 +519,6 @@ export default function App() {
       if (existingIndex > -1) {
         const copy = [...prev];
         copy[existingIndex].quantity = Math.min(9999, copy[existingIndex].quantity + quantity);
-        copy[existingIndex].isDeferredStock = !hasStock || copy[existingIndex].quantity > stockQty;
         return copy;
       } else {
         const cleanQty = Math.min(9999, Math.max(1, quantity));
@@ -515,8 +529,7 @@ export default function App() {
           variant: variant.label,
           price: variant.price,
           quantity: cleanQty,
-          isQuote: variant.price === 0 || Boolean(product.isQuote),
-          isDeferredStock: !hasStock || cleanQty > stockQty
+          isQuote: variant.price === 0 || Boolean(product.isQuote)
         };
         return [...prev, newItem];
       }
@@ -527,7 +540,7 @@ export default function App() {
     pack.items.forEach(item => {
       const foundProduct = products.find(p => p.name === item.productName) || products[0];
       const foundVariant = foundProduct?.variants.find(v => v.label === item.variant) || foundProduct?.variants[0];
-      if (foundProduct && foundVariant && foundProduct.status !== 'rupture') {
+      if (foundProduct && foundVariant) {
         handleAddToCart(foundProduct, foundVariant, item.quantity);
       }
     });
@@ -541,13 +554,10 @@ export default function App() {
     setCartItems(prev => {
       const copy = [...prev];
       const item = copy[index];
-      const prod = products.find(p => p.id === item.productId);
-      const stockQty = prod ? (prod.quantityAvailable ?? prod.stockQuantity ?? 0) : 0;
       const nextQty = Math.min(9999, quantity);
       copy[index] = {
         ...item,
-        quantity: nextQty,
-        isDeferredStock: stockQty <= 0 || nextQty > stockQty
+        quantity: nextQty
       };
       return copy;
     });
@@ -565,13 +575,11 @@ export default function App() {
     setCartItems(prev => {
       let copy = [...prev];
       itemsToAdd.forEach(({ product, variant, quantity }) => {
-        const stockQty = product.quantityAvailable ?? product.stockQuantity ?? 0;
         const existingIndex = copy.findIndex(
           it => it.productId === product.id && it.variant === variant.label
         );
         if (existingIndex > -1) {
           copy[existingIndex].quantity = Math.min(9999, copy[existingIndex].quantity + quantity);
-          copy[existingIndex].isDeferredStock = stockQty <= 0 || copy[existingIndex].quantity > stockQty;
         } else {
           const cleanQty = Math.min(9999, Math.max(1, quantity));
           copy.push({
@@ -581,8 +589,7 @@ export default function App() {
             variant: variant.label,
             price: variant.price,
             quantity: cleanQty,
-            isQuote: variant.price === 0 || Boolean(product.isQuote),
-            isDeferredStock: stockQty <= 0 || cleanQty > stockQty
+            isQuote: variant.price === 0 || Boolean(product.isQuote)
           });
         }
       });
@@ -606,7 +613,7 @@ export default function App() {
     const newCartItems: CartItem[] = [];
     order.items.forEach(it => {
       const currentProd = products.find(p => p.id === it.productId || p.name === it.productName);
-      if (currentProd && currentProd.status !== 'rupture') {
+      if (currentProd) {
         const currentVariant = currentProd.variants.find(v => v.label === it.variant) || currentProd.variants[0];
         newCartItems.push({
           productId: currentProd.id,
