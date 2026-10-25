@@ -284,7 +284,10 @@ export const api = {
     return res;
   },
 
-  async updateClientProfile(profileData: { avatarUrl: string | null }): Promise<{ user: User }> {
+  async updateClientProfile(profileData: Partial<Pick<User,
+    'facilityName' | 'contactName' | 'facilityType' | 'facilityTypeOther' |
+    'neighborhoodId' | 'deliveryInstructions'
+  >> & { avatarUrl?: string | null }): Promise<{ user: User }> {
     return request<{ user: User }>('/api/auth/profile', {
       method: 'PATCH',
       body: JSON.stringify(profileData)

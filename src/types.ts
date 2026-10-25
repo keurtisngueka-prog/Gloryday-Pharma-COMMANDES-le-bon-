@@ -370,6 +370,8 @@ export interface User {
   assignedToCommercialName?: string;
   coordinates?: Coordinates;
   deliveryAddress?: string;
+  neighborhoodId?: string;
+  deliveryInstructions?: string;
   googleMapsUrl?: string;
   lastActiveAt?: string;
   lastOrderDate?: string;

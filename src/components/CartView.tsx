@@ -22,8 +22,10 @@ import { PhoneNumberInput } from './PhoneNumberInput';
 import { calculateCartVolumeSummary, calculateItemVolumePrice } from '../utils/volumeDiscount';
 import { 
   LIBREVILLE_ZONE_GROUPS, 
+  buildNeighborhoodDeliveryAddress,
   getNeighborhoodById, 
   detectNeighborhoodFromAddress,
+  extractDeliveryInstructions,
   computeDeliveryTimeWindow
 } from '../data/librevilleZones';
 
@@ -76,10 +78,18 @@ export const CartView: React.FC<CartViewProps> = ({
       if (currentUser.phone) setPhone(currentUser.phone);
       setDeliveryCoordinates(null);
       setGpsMessage('Relevez le GPS à l’adresse de livraison pour associer un point exact à cette commande.');
-      if (currentUser.deliveryAddress) {
+      const detected = (currentUser.neighborhoodId && getNeighborhoodById(currentUser.neighborhoodId))
+        || detectNeighborhoodFromAddress(currentUser.deliveryAddress || '');
+      const instructions = currentUser.deliveryInstructions !== undefined
+        ? currentUser.deliveryInstructions
+        : extractDeliveryInstructions(currentUser.deliveryAddress || '', detected?.id);
+      if (detected) {
+        setNeighborhoodId(detected.id);
+        setAddressDetails(instructions);
+        setDeliveryAddress(buildNeighborhoodDeliveryAddress(detected.id, instructions));
+      } else if (currentUser.deliveryAddress) {
+        setAddressDetails(instructions);
         setDeliveryAddress(currentUser.deliveryAddress);
-        const detected = detectNeighborhoodFromAddress(currentUser.deliveryAddress);
-        if (detected) setNeighborhoodId(detected.id);
       }
     } else {
       setFacilityName('');
@@ -114,8 +124,7 @@ export const CartView: React.FC<CartViewProps> = ({
     setGpsMessage('Quartier modifié : reprenez le GPS à l’adresse de livraison pour confirmer le point exact.');
     const found = getNeighborhoodById(newId);
     if (found) {
-      const landmarkSuffix = addressDetails ? ` (${addressDetails})` : '';
-      setDeliveryAddress(`${found.name}, ${found.zone}, Libreville${landmarkSuffix}`);
+      setDeliveryAddress(buildNeighborhoodDeliveryAddress(newId, addressDetails));
     }
   };
 
@@ -126,8 +135,7 @@ export const CartView: React.FC<CartViewProps> = ({
     setGpsMessage('Adresse modifiée : reprenez le GPS à l’adresse de livraison pour confirmer le point exact.');
     const found = getNeighborhoodById(neighborhoodId);
     if (found) {
-      const landmarkSuffix = details.trim() ? ` · Repère : ${details.trim()}` : '';
-      setDeliveryAddress(`${found.name}, Libreville${landmarkSuffix}`);
+      setDeliveryAddress(buildNeighborhoodDeliveryAddress(neighborhoodId, details));
     }
   };
 

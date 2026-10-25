@@ -284,6 +284,37 @@ export function getNeighborhoodById(id: string): LibrevilleNeighborhood | undefi
   return ALL_LIBREVILLE_NEIGHBORHOODS.find(n => n.id === id);
 }
 
+export function buildNeighborhoodDeliveryAddress(neighborhoodId: string, instructions = ''): string {
+  const neighborhood = getNeighborhoodById(neighborhoodId);
+  if (!neighborhood) return instructions.trim();
+  const details = instructions.trim();
+  const base = `${neighborhood.name}, ${neighborhood.zone}, Libreville`;
+  return details ? `${base} · Repère : ${details}` : base;
+}
+
+export function extractDeliveryInstructions(address: string, neighborhoodId?: string): string {
+  const neighborhood = (neighborhoodId && getNeighborhoodById(neighborhoodId)) || detectNeighborhoodFromAddress(address);
+  if (!address.trim()) return '';
+  if (!neighborhood) {
+    return address
+      .replace(/\b(Libreville|Gabon)\b/gi, ' ')
+      .replace(/[·,;|]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  let remainder = address;
+  for (const part of [neighborhood.name, neighborhood.zone, 'Libreville', 'Gabon']) {
+    const escaped = part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    remainder = remainder.replace(new RegExp(escaped, 'ig'), ' ');
+  }
+  return remainder
+    .replace(/rep[eè]re\s*:?/gi, ' ')
+    .replace(/[·,;|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function detectNeighborhoodFromAddress(address: string): LibrevilleNeighborhood | undefined {
   if (!address) return undefined;
   const lower = address.toLowerCase();

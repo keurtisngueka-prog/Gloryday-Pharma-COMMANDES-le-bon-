@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import { Product, ProductVariant, Order, User, Pack, AppNotification } from '../types';
 
 export interface CatalogImportDiffItem {
@@ -175,7 +174,8 @@ export function downloadProductsCSV(products: Product[]) {
 }
 
 // 2B. PRODUCTS NATIVE EXCEL (.XLSX) EXPORT
-export function downloadProductsXLSX(products: Product[]) {
+export async function downloadProductsXLSX(products: Product[]) {
+  const XLSX = await import('xlsx');
   const dateStr = new Date().toISOString().split('T')[0];
   const sheetRows: Record<string, string | number>[] = [];
 
@@ -352,6 +352,7 @@ export async function parseCatalogSpreadsheet(
       const text = new TextDecoder('utf-8').decode(buffer);
       rawRows = parseCsvToObjects(text);
     } else {
+      const XLSX = await import('xlsx');
       const workbook = XLSX.read(buffer, { type: 'array', cellFormula: false, bookVBA: false, WTF: false });
       const firstSheetName = workbook.SheetNames[0];
       if (!firstSheetName) {

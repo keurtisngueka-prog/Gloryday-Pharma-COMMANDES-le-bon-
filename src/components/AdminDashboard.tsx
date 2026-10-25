@@ -43,7 +43,7 @@ import { ClientAnnouncementModal } from './ClientAnnouncementModal';
 import { AdminPacksModule } from './AdminPacksModule';
 import { ClientPurchasesStatsModule } from './ClientPurchasesStatsModule';
 import { ClientPurchaseHistoryView } from './ClientPurchaseHistoryView';
-import { DataExportModule } from './DataExportModule';
+const DataExportModule = React.lazy(() => import('./DataExportModule').then(module => ({ default: module.DataExportModule })));
 import { AuditLogModule } from './AuditLogModule';
 import { StockLotsModule } from './StockLotsModule';
 import { SystemSettingsModule } from './SystemSettingsModule';
@@ -51,7 +51,7 @@ import { StaffAccountsModule } from './StaffAccountsModule';
 import { StaffLogsRealtimeModule } from './StaffLogsRealtimeModule';
 const SalesMonthlyChart = React.lazy(() => import('./SalesMonthlyChart').then(module => ({ default: module.SalesMonthlyChart })));
 import { generateWhatsAppMessageForStage } from '../utils/whatsappNotifications';
-import { downloadProductsCSV, downloadProductsXLSX, parseCatalogSpreadsheet, type CatalogImportPreviewResult } from '../utils/dataExport';
+import type { CatalogImportPreviewResult } from '../utils/dataExport';
 import { CatalogExcelImportModal } from './CatalogExcelImportModal';
 
 const hasValidOrderCoordinates = (order: Order): boolean => {
@@ -157,6 +157,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setExcelImportFeedback('Le fichier doit peser au maximum 5 Mo.');
       return;
     }
+    const { parseCatalogSpreadsheet } = await import('../utils/dataExport');
     const preview = await parseCatalogSpreadsheet(file, products);
     if (!preview.success) {
       setExcelImportFeedback(preview.message);
@@ -164,6 +165,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
     setExcelImportFeedback(null);
     setExcelImportPreview(preview);
+  };
+
+  const handleProductExport = async (format: 'xlsx' | 'csv') => {
+    try {
+      const exports = await import('../utils/dataExport');
+      if (format === 'xlsx') await exports.downloadProductsXLSX(displayedProducts);
+      else exports.downloadProductsCSV(displayedProducts);
+    } catch {
+      setExcelImportFeedback('L’export n’a pas pu être préparé. Réessayez dans un instant.');
+    }
   };
 
   useEffect(() => {
@@ -1217,10 +1228,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <Upload className="h-3.5 w-3.5" /> Importer Excel / CSV
                 <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcelFileSelected} />
               </label>
-              <button type="button" onClick={() => downloadProductsXLSX(displayedProducts)} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50">
+              <button type="button" onClick={() => void handleProductExport('xlsx')} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50">
                 <FileSpreadsheet className="h-3.5 w-3.5" /> Exporter Excel
               </button>
-              <button type="button" onClick={() => downloadProductsCSV(displayedProducts)} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50">
+              <button type="button" onClick={() => void handleProductExport('csv')} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50">
                 <Download className="h-3.5 w-3.5" /> CSV
               </button>
               <div className="relative w-full max-w-xs">
@@ -1518,7 +1529,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* 8. TAB 6: EXPORT & CLOUD BACKUP */}
       {activeTab === 'export-deploy' && isSuperAdmin && (
-        <DataExportModule orders={orders} products={products} packs={packs} clients={clients} notifications={notifications} />
+        <React.Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Chargement des outils d’export…</div>}>
+          <DataExportModule orders={orders} products={products} packs={packs} clients={clients} notifications={notifications} />
+        </React.Suspense>
       )}
 
       {/* MODALS */}

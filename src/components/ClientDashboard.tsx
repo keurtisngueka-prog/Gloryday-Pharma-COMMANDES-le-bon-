@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Building2, 
   Package, 
@@ -21,8 +21,7 @@ import {
   ListFilter,
   CalendarDays,
   CalendarClock,
-  Camera,
-  ImagePlus
+  UserRound
 } from 'lucide-react';
 import { Order, OrderStatus, User, MobilePaymentDetails } from '../types';
 import { generateInternalPurchaseOrderPdf } from '../utils/pdfGenerator';
@@ -32,8 +31,8 @@ import {
   getNeighborhoodById 
 } from '../data/librevilleZones';
 import { api } from '../api';
-import { processAvatarFile } from '../utils/avatarImage';
 import { MobilePaymentModal } from './MobilePaymentModal';
+import { ClientProfileModal } from './ClientProfileModal';
 
 interface ClientDashboardProps {
   orders: Order[];
@@ -173,6 +172,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   onProfileUpdated
 }) => {
   const [selectedPaymentOrder, setSelectedPaymentOrder] = useState<Order | null>(null);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_progress' | 'delivered' | 'unpaid'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('calendar');
@@ -190,10 +190,6 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const [draftDeliverySlot, setDraftDeliverySlot] = useState<string>(DELIVERY_SLOTS[0]);
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [scheduleFeedback, setScheduleFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const [avatarBusy, setAvatarBusy] = useState(false);
-  const [avatarFeedback, setAvatarFeedback] = useState<string | null>(null);
-  const galleryAvatarInputRef = useRef<HTMLInputElement>(null);
-  const cameraAvatarInputRef = useRef<HTMLInputElement>(null);
 
   const nonCancelledOrders = orders.filter(o => o.status !== 'Annulée');
   const totalOrdered = nonCancelledOrders.reduce((sum, o) => sum + o.estimatedTotal, 0);
@@ -386,39 +382,6 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     };
   }, [calendarMonth, filteredSchedules]);
 
-  const saveProfileAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file || !currentUser) return;
-    setAvatarBusy(true);
-    setAvatarFeedback(null);
-    try {
-      const avatarUrl = await processAvatarFile(file);
-      const result = await api.updateClientProfile({ avatarUrl });
-      onProfileUpdated?.(result.user);
-      setAvatarFeedback('Photo de profil enregistrée.');
-    } catch (error) {
-      setAvatarFeedback(error instanceof Error ? error.message : 'Impossible d’enregistrer la photo.');
-    } finally {
-      setAvatarBusy(false);
-    }
-  };
-
-  const removeProfileAvatar = async () => {
-    if (!currentUser?.avatarUrl) return;
-    setAvatarBusy(true);
-    setAvatarFeedback(null);
-    try {
-      const result = await api.updateClientProfile({ avatarUrl: null });
-      onProfileUpdated?.(result.user);
-      setAvatarFeedback('Photo de profil retirée.');
-    } catch (error) {
-      setAvatarFeedback(error instanceof Error ? error.message : 'Impossible de retirer la photo.');
-    } finally {
-      setAvatarBusy(false);
-    }
-  };
-
   return (
     <div className="client-dashboard-enter max-w-5xl mx-auto pb-24 space-y-6 px-2 sm:px-0">
       {/* 1. MODERN HEADER & PROFILE BANNER */}
@@ -433,18 +396,6 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                   <img src={currentUser.avatarUrl} alt={currentUser.facilityName} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                 ) : currentUser ? currentUser.facilityName.charAt(0).toUpperCase() : <Building2 className="w-8 h-8 text-blue-400" />}
               </div>
-              {currentUser && (
-                <>
-                  <button type="button" title="Choisir dans la galerie" aria-label="Choisir une photo dans la galerie" onClick={() => galleryAvatarInputRef.current?.click()} disabled={avatarBusy} className="absolute -bottom-2 -right-2 flex h-7 w-7 items-center justify-center rounded-full border-2 border-slate-900 bg-white text-[#0d44e8] shadow disabled:opacity-50">
-                    <ImagePlus className="h-3.5 w-3.5" />
-                  </button>
-                  <button type="button" title="Prendre une photo" aria-label="Prendre une photo avec la caméra" onClick={() => cameraAvatarInputRef.current?.click()} disabled={avatarBusy} className="absolute -bottom-2 -left-2 flex h-7 w-7 items-center justify-center rounded-full border-2 border-slate-900 bg-white text-[#0d44e8] shadow disabled:opacity-50">
-                    <Camera className="h-3.5 w-3.5" />
-                  </button>
-                  <input ref={galleryAvatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={saveProfileAvatar} />
-                  <input ref={cameraAvatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="hidden" onChange={saveProfileAvatar} />
-                </>
-              )}
             </div>
 
             <div>
@@ -484,8 +435,6 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                   </span>
                 )}
               </div>
-              {currentUser && avatarFeedback && <p className="mt-1 text-[11px] text-blue-200" role="status">{avatarFeedback}</p>}
-              {currentUser?.avatarUrl && <button type="button" onClick={removeProfileAvatar} disabled={avatarBusy} className="mt-1 text-[10px] text-slate-300 underline underline-offset-2 disabled:opacity-50">Retirer la photo</button>}
             </div>
           </div>
 
@@ -501,15 +450,20 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 <span>Se connecter</span>
               </button>
             ) : (
-              <a
-                href="https://wa.me/24177003004"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-shine px-3.5 py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs whitespace-nowrap shrink-0"
-              >
-                <MessageCircle className="w-4 h-4 text-white" />
-                <span>Support Pharmacie 24/7</span>
-              </a>
+              <>
+                <button type="button" onClick={() => setIsProfileModalOpen(true)} className="inline-flex items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-3.5 py-2 text-xs font-bold text-white hover:bg-white/20">
+                  <UserRound className="h-4 w-4" /> Mon profil
+                </button>
+                <a
+                  href="https://wa.me/24177003004"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-shine px-3.5 py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs whitespace-nowrap shrink-0"
+                >
+                  <MessageCircle className="w-4 h-4 text-white" />
+                  <span>Support Pharmacie 24/7</span>
+                </a>
+              </>
             )}
             <button
               type="button"
@@ -1420,6 +1374,13 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
               amount: selectedPaymentOrder.estimatedTotal
             });
           }}
+        />
+      )}
+      {isProfileModalOpen && currentUser && (
+        <ClientProfileModal
+          user={currentUser}
+          onClose={() => setIsProfileModalOpen(false)}
+          onProfileUpdated={onProfileUpdated}
         />
       )}
     </div>

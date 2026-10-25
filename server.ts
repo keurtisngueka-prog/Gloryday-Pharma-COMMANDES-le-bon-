@@ -7,7 +7,7 @@ import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSa
 import { promisify } from 'util';
 import { createRequire } from 'module';
 import { INITIAL_PRODUCTS, INITIAL_PACKS, LEGACY_DEMO_PRODUCT_IDS, LEGACY_DEMO_PACK_IDS } from './src/data/initialProducts.js';
-import { getEstimatedDeliveryText, getNeighborhoodById, resolveOrderDestinationCoordinates } from './src/data/librevilleZones.js';
+import { buildNeighborhoodDeliveryAddress, getEstimatedDeliveryText, getNeighborhoodById, resolveOrderDestinationCoordinates } from './src/data/librevilleZones.js';
 import {
   calculateCartVolumeSummary,
   calculateItemVolumePrice,
@@ -29,6 +29,7 @@ import type {
   Order,
   CartItem,
   User,
+  FacilityType,
   AppNotification,
   AdminStats,
   CommercialQuote,
@@ -1487,15 +1488,69 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       return;
     }
 
-    let avatarUrl: string | undefined;
-    try {
-      avatarUrl = sanitizeAvatarUrl(req.body?.avatarUrl);
-    } catch (error) {
-      res.status(400).json({ error: error instanceof Error ? error.message : 'Photo de profil invalide.' });
-      return;
-    }
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+      ? req.body as Record<string, unknown>
+      : {};
+    const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+    const updatedUser: User = { ...store.accounts[accountIndex].user };
+    const cleanProfileText = (value: unknown, maxLength: number) =>
+      typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, maxLength) : '';
 
-    const updatedUser: User = { ...store.accounts[accountIndex].user, avatarUrl };
+    if (has('facilityName')) {
+      const facilityName = cleanProfileText(body.facilityName, 120);
+      if (!facilityName) {
+        res.status(400).json({ error: 'Le nom de votre établissement est obligatoire.' });
+        return;
+      }
+      updatedUser.facilityName = facilityName;
+    }
+    if (has('contactName')) {
+      updatedUser.contactName = cleanProfileText(body.contactName, 120) || undefined;
+    }
+    if (has('facilityType')) {
+      const allowedFacilityTypes: FacilityType[] = ['Clinique', 'Polyclinique', 'Hôpital', 'Laboratoire', 'Pharmacie', 'Cabinet médical', 'Autre'];
+      if (!allowedFacilityTypes.includes(body.facilityType as FacilityType)) {
+        res.status(400).json({ error: 'Le type d’établissement sélectionné est invalide.' });
+        return;
+      }
+      updatedUser.facilityType = body.facilityType as FacilityType;
+    }
+    if (has('facilityTypeOther')) {
+      updatedUser.facilityTypeOther = cleanProfileText(body.facilityTypeOther, 120) || undefined;
+    }
+    if (has('neighborhoodId')) {
+      const neighborhoodId = cleanProfileText(body.neighborhoodId, 64);
+      if (!getNeighborhoodById(neighborhoodId)) {
+        res.status(400).json({ error: 'Choisissez un quartier de livraison valide.' });
+        return;
+      }
+      updatedUser.neighborhoodId = neighborhoodId;
+    }
+    if (has('deliveryInstructions')) {
+      if (typeof body.deliveryInstructions !== 'string' || body.deliveryInstructions.length > 250) {
+        res.status(400).json({ error: 'La précision d’adresse doit rester sous 250 caractères.' });
+        return;
+      }
+      updatedUser.deliveryInstructions = cleanProfileText(body.deliveryInstructions, 250) || undefined;
+    }
+    if (has('neighborhoodId') || has('deliveryInstructions')) {
+      if (!updatedUser.neighborhoodId || !getNeighborhoodById(updatedUser.neighborhoodId)) {
+        res.status(400).json({ error: 'Choisissez un quartier de livraison valide.' });
+        return;
+      }
+      updatedUser.deliveryAddress = buildNeighborhoodDeliveryAddress(
+        updatedUser.neighborhoodId,
+        updatedUser.deliveryInstructions || ''
+      );
+    }
+    if (has('avatarUrl')) {
+      try {
+        updatedUser.avatarUrl = sanitizeAvatarUrl(body.avatarUrl);
+      } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : 'Photo de profil invalide.' });
+        return;
+      }
+    }
     store.accounts[accountIndex] = { ...store.accounts[accountIndex], user: updatedUser };
     for (const [sessionId, session] of sessions) {
       if (session.user.id === updatedUser.id) {
