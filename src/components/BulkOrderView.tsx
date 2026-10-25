@@ -200,7 +200,7 @@ export const BulkOrderView: React.FC<BulkOrderViewProps> = ({
   };
 
   return (
-    <div className="space-y-5 pb-32">
+    <div className="space-y-5 pb-48 md:pb-32">
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-5 sm:p-7 shadow-lg relative overflow-hidden">
         <div className="absolute top-0 right-0 -mt-10 -mr-10 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -528,7 +528,7 @@ export const BulkOrderView: React.FC<BulkOrderViewProps> = ({
       </div>
 
       {/* Floating Action Bar at Bottom when Items are Selected */}
-      <div className={`fixed bottom-0 inset-x-0 z-30 transition-all duration-300 p-3 sm:p-4 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-2xl ${
+      <div className={`fixed bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] md:bottom-0 inset-x-0 z-30 transition-all duration-300 p-3 sm:p-4 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-2xl ${
         totalSelectedLines > 0 ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0 pointer-events-none'
       }`}>
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
