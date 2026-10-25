@@ -7,8 +7,7 @@ export default async function handler(req: Request, res: Response): Promise<void
   try {
     const incomingUrl = new URL(req.url || '/', 'https://gloryday.invalid');
     // Vercel can pass an absolute-form URL; Express expects an origin-form path.
-    // Keeping only pathname + query avoids Express falling back to legacy url.parse().
-    req.url = `${incomingUrl.pathname.startsWith('/') ? '' : '/'}${incomingUrl.pathname}${incomingUrl.search}`;
+    req.url = `${incomingUrl.pathname}${incomingUrl.search}`;
     if (incomingUrl.searchParams.get('__gloryday_gateway') === '1') {
       const forwardedPath = incomingUrl.searchParams.get('__gloryday_path');
       const segments = forwardedPath?.split('/').filter(Boolean) ?? [];
@@ -28,16 +27,16 @@ export default async function handler(req: Request, res: Response): Promise<void
     // Parse the query with URLSearchParams and shadow that getter before Express reads it.
     const queryStart = req.url.indexOf('?');
     const queryString = queryStart >= 0 ? req.url.slice(queryStart + 1) : '';
-    const query: Record<string, string | string[]> = Object.create(null);
+    const queryParams: Record<string, string | string[]> = Object.create(null);
     for (const [key, value] of new URLSearchParams(queryString)) {
-      const existing = query[key];
-      query[key] = existing === undefined ? value : Array.isArray(existing) ? [...existing, value] : [existing, value];
+      const existing = queryParams[key];
+      queryParams[key] = existing === undefined ? value : Array.isArray(existing) ? [...existing, value] : [existing, value];
     }
     Object.defineProperty(req, 'query', {
       configurable: true,
       enumerable: true,
       writable: true,
-      value: query
+      value: queryParams
     });
 
     const app = await appPromise;
