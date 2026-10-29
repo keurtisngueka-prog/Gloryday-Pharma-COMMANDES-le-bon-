@@ -1,8 +1,6 @@
 import type { Request, Response } from 'express';
 import { getVercelApp } from '../server.js';
 
-const appPromise = getVercelApp();
-
 export default async function handler(req: Request, res: Response): Promise<void> {
   try {
     const incomingUrl = new URL(req.url || '/', 'https://gloryday.invalid');
@@ -39,7 +37,9 @@ export default async function handler(req: Request, res: Response): Promise<void
       value: queryParams
     });
 
-    const app = await appPromise;
+    // Do not cache a rejected initialization promise at module scope. A transient
+    // Supabase/network failure must be allowed to recover on the next request.
+    const app = await getVercelApp();
     app(req, res);
   } catch (error) {
     console.error('Vercel API initialization failed:', error);

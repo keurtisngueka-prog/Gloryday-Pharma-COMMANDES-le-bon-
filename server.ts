@@ -3493,7 +3493,15 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
 
 let vercelAppPromise: ReturnType<typeof createServerApp> | undefined;
 export function getVercelApp() {
-  if (!vercelAppPromise) vercelAppPromise = createServerApp();
+  if (!vercelAppPromise) {
+    const pending = createServerApp();
+    vercelAppPromise = pending;
+    void pending.catch(() => {
+      // Keep successful initialization warm, but let a later request retry after
+      // transient Supabase or network failures during cold start.
+      if (vercelAppPromise === pending) vercelAppPromise = undefined;
+    });
+  }
   return vercelAppPromise;
 }
 
