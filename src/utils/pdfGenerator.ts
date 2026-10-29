@@ -122,7 +122,7 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.text(text(logoDataUrl ? 'Distribution médicale · Libreville, Gabon' : 'Distribution médicale, consommables et équipements hospitaliers'), logoDataUrl ? margin + 33 : margin, 21);
-    doc.text('Libreville, Gabon | +241 77 003 004 / +241 66 240 399', pageWidth - margin, 21, { align: 'right' });
+    doc.text('Libreville, Gabon', pageWidth - margin, 21, { align: 'right' });
 
     doc.setTextColor(ink[0], ink[1], ink[2]);
     doc.setFont('helvetica', 'bold');
@@ -512,7 +512,7 @@ export async function generateInvoiceProjectPdf(
   }
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  doc.text('+241 77 003 004 / +241 66 240 399', pageWidth - margin, 21, { align: 'right' });
+  doc.text('Libreville, Gabon', pageWidth - margin, 21, { align: 'right' });
 
   doc.setTextColor(150, 65, 0);
   doc.setFillColor(255, 247, 237);
