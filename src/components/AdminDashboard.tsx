@@ -28,6 +28,7 @@ import {
   Megaphone,
   Activity,
   FileText,
+  Receipt,
   RefreshCw,
   ArrowUpRight,
   FileSpreadsheet,
@@ -85,6 +86,7 @@ interface AdminDashboardProps {
   onRefresh: () => void;
   defaultSubTab?: AdminSubTab;
   onOpenDeliveryModal?: (order: Order) => void;
+  onOpenFinanceModal?: (order: Order) => void;
   onViewOrderPdf?: (order: Order) => void;
 }
 
@@ -108,12 +110,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onRefresh,
   defaultSubTab = 'kpi',
   onOpenDeliveryModal,
+  onOpenFinanceModal,
   onViewOrderPdf
 }) => {
   const role: AppRole = currentUser.role;
   const isSuperAdmin = role === 'Super-Admin';
   const hasPerm = (perm: StaffPermission) => isSuperAdmin || Boolean(currentUser.permissions?.includes(perm));
   const isSimpleAdmin = role === 'Admin simple' || hasPerm('stats_view');
+  const canManageFinance = isSuperAdmin || role === 'Admin simple' || hasPerm('orders_manage');
   const isCommercial = role === 'Commercial' || hasPerm('orders_manage') || hasPerm('quotes_manage');
   const isGestionnaire = role === 'Gestionnaire Catalogue' || isSuperAdmin || hasPerm('catalog_stock');
   const isLogistique = role === 'Logistique' || isSuperAdmin || isSimpleAdmin || hasPerm('logistics_manage') || hasPerm('orders_view') || hasPerm('orders_manage');
@@ -962,6 +966,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                   {/* Operational & Logistic Action Controls */}
                   <div className="flex items-center gap-1.5 self-end xl:self-center flex-wrap">
+                    {onOpenFinanceModal && canManageFinance && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenFinanceModal(order)}
+                        className="py-1.5 px-3 rounded-xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-bold border border-emerald-200 flex items-center gap-1 cursor-pointer transition-colors"
+                        title="Ouvrir les acomptes, factures et avoirs de cette commande"
+                      >
+                        <Receipt className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>Facture / Avoir</span>
+                      </button>
+                    )}
                     {onViewOrderPdf && (
                       <button
                         type="button"

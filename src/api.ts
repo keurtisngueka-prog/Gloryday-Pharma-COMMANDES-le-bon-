@@ -510,6 +510,22 @@ export const api = {
     });
   },
 
+  async updateOrderFinance(orderId: string, order: Order): Promise<Order> {
+    return request<Order>(`/api/orders/${encodeURIComponent(orderId)}/finance`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        amountPaid: order.amountPaid,
+        isPaid: order.isPaid,
+        installments: order.installments || [],
+        invoices: order.invoices || [],
+        courier: order.courier,
+        deliveryProof: order.deliveryProof,
+        isPartialDelivery: order.isPartialDelivery,
+        partialDeliveryNotes: order.partialDeliveryNotes,
+      })
+    });
+  },
+
   async updateOrderMobilePayment(orderId: string, mobilePayment: import('./types').MobilePaymentDetails): Promise<Order> {
     return request<Order>(`/api/orders/${orderId}/mobile-payment`, {
       method: 'PATCH',

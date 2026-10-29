@@ -23,7 +23,7 @@ interface OrderFinanceModalProps {
   order: Order;
   currentUser: User;
   onClose: () => void;
-  onUpdateOrder: (updated: Order) => void;
+  onUpdateOrder: (updated: Order) => Promise<void> | void;
 }
 
 export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
@@ -32,7 +32,9 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   onClose,
   onUpdateOrder
 }) => {
-  const [activeTab, setActiveTab] = useState<'installments' | 'invoices' | 'delivery' | 'partial'>('installments');
+  const [activeTab, setActiveTab] = useState<'installments' | 'invoices' | 'delivery' | 'partial'>('invoices');
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const couriers: Courier[] = getCouriers();
 
   // Installment State
@@ -61,7 +63,21 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   const totalPaid = (order.installments || []).reduce((sum, inst) => sum + (inst.status === 'valide' ? inst.amount : 0), 0) + (order.isPaid && (!order.installments || order.installments.length === 0) ? order.estimatedTotal : 0);
   const remainingDue = Math.max(0, order.estimatedTotal - totalPaid);
 
-  const handleAddInstallment = (e: React.FormEvent) => {
+  const saveUpdatedOrder = async (updatedOrder: Order): Promise<boolean> => {
+    setIsSaving(true);
+    setSaveError('');
+    try {
+      await onUpdateOrder(updatedOrder);
+      return true;
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'L’enregistrement a échoué. Réessayez.');
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAddInstallment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (installmentAmount <= 0) return;
 
@@ -87,7 +103,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       isPaid: isNowFullyPaid
     };
 
-    onUpdateOrder(updatedOrder);
+    if (!await saveUpdatedOrder(updatedOrder)) return;
 
     logAuditEvent(
       currentUser,
@@ -102,12 +118,15 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     setInstallmentRef('');
   };
 
-  const handleCreateInvoiceOrCredit = (e: React.FormEvent) => {
+  const handleCreateInvoiceOrCredit = async (e: React.FormEvent) => {
     e.preventDefault();
     const isFacture = invoiceType === 'facture';
-    const num = isFacture 
-      ? `FAC-2026-${order.reference.replace(/\D/g, '').slice(-4) || '0001'}`
-      : `AVOIR-2026-${Date.now().toString().slice(-4)}`;
+    const documentYear = new Date().getFullYear();
+    const orderCode = order.reference.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const sequence = String((order.invoices || []).length + 1).padStart(2, '0');
+    const num = isFacture
+      ? `FAC-${documentYear}-${orderCode}-${sequence}`
+      : `AVOIR-${documentYear}-${orderCode}-${sequence}`;
 
     const totalTTC = order.estimatedTotal;
     const totalHT = tvaRate > 0 ? Math.round(totalTTC / (1 + tvaRate)) : totalTTC;
@@ -133,7 +152,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       invoices: [...(order.invoices || []), newDoc]
     };
 
-    onUpdateOrder(updatedOrder);
+    if (!await saveUpdatedOrder(updatedOrder)) return;
 
     logAuditEvent(
       currentUser,
@@ -157,7 +176,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     }
   };
 
-  const handleSaveDeliveryProofAndCourier = (e: React.FormEvent) => {
+  const handleSaveDeliveryProofAndCourier = async (e: React.FormEvent) => {
     e.preventDefault();
     const courierFound = couriers.find(c => c.id === selectedCourierId);
 
@@ -179,7 +198,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       partialDeliveryNotes: isPartial ? partialNotes.trim() : undefined
     };
 
-    onUpdateOrder(updatedOrder);
+    if (!await saveUpdatedOrder(updatedOrder)) return;
 
     logAuditEvent(
       currentUser,
@@ -256,6 +275,12 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
         </div>
 
         <div className="p-4 space-y-4">
+          {isSaving && <p role="status" className="text-xs font-semibold text-blue-700">Enregistrement en cours…</p>}
+          {saveError && (
+            <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+              {saveError}
+            </p>
+          )}
           {/* TAB 1: INSTALLMENTS */}
           {activeTab === 'installments' && (
             <div className="space-y-3">
@@ -347,6 +372,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
                   <button
                     type="submit"
+                    disabled={isSaving}
                     className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl cursor-pointer shadow-xs mt-1"
                   >
                     Valider l'Encaissement
@@ -443,6 +469,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
                 <button
                   type="submit"
+                  disabled={isSaving}
                   className="w-full py-2 bg-[#0d44e8] hover:bg-blue-700 text-white font-bold rounded-xl cursor-pointer shadow-xs mt-1"
                 >
                   Créer {invoiceType === 'facture' ? 'le projet de facture' : 'le projet d’avoir'}
@@ -513,6 +540,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
               <button
                 type="submit"
+                disabled={isSaving}
                 className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl cursor-pointer shadow-xs mt-2"
               >
                 Valider Preuve & Affectation Coursier
@@ -556,6 +584,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
               <button
                 type="button"
                 onClick={handleSaveDeliveryProofAndCourier}
+                disabled={isSaving}
                 className="w-full py-2 bg-slate-900 hover:bg-black text-white font-bold rounded-xl cursor-pointer shadow-xs"
               >
                 Enregistrer le Statut Partiel

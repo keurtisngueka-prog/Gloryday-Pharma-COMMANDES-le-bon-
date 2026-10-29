@@ -37,6 +37,10 @@ import type {
   AppRole,
   DeliveryStage,
   OrderStatus,
+  PaymentInstallment,
+  InvoiceRecord,
+  CourierInfo,
+  DeliveryProof,
   DeliveryLocationPoint,
   StaffPermission,
   VolumeDiscountSettings,
@@ -676,6 +680,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
           : isSuperAdmin || isSimpleAdmin || isLogistics || hasPerm('logistics_manage');
       }
       else if (route.endsWith('/tracking-link')) allowed = isSuperAdmin || isSimpleAdmin || isLogistics || hasPerm('logistics_manage');
+      else if (route.endsWith('/finance')) allowed = isSuperAdmin || isSimpleAdmin || hasPerm('orders_manage');
       else if (route.endsWith('/payment')) allowed = isSuperAdmin || isSimpleAdmin || hasPerm('orders_manage');
       else if (route.endsWith('/mobile-payment')) allowed = role === 'client' || isSuperAdmin || hasPerm('orders_manage');
       else if (route.endsWith('/expected-delivery')) allowed = role === 'client' || isSuperAdmin || isSimpleAdmin || isLogistics || hasPerm('logistics_manage');
@@ -3067,6 +3072,183 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
 
     await saveStore(store, persistence);
     if (customerDeliveryNotification) await sendPushForNotification(customerDeliveryNotification);
+    res.json(order);
+  }));
+
+  app.patch('/api/orders/:id/finance', asyncHandler(async (req, res) => {
+    const user = (req as AuthenticatedRequest).authenticatedUser!;
+    if (persistence) store.orders = await persistence.loadOrders();
+
+    const idx = store.orders.findIndex(order => order.id === req.params.id || order.reference === req.params.id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Commande introuvable.' });
+      return;
+    }
+
+    const order = store.orders[idx];
+    const body = req.body || {};
+    const currentInvoices = order.invoices || [];
+    const currentInstallments = order.installments || [];
+    const invoices = Array.isArray(body.invoices) ? body.invoices : [];
+    const installments = Array.isArray(body.installments) ? body.installments : [];
+    if ((body.invoices !== undefined && (!Array.isArray(body.invoices) || invoices.length > 200)) ||
+        (body.installments !== undefined && (!Array.isArray(body.installments) || installments.length > 200))) {
+      res.status(400).json({ error: 'La liste des documents ou des paiements est invalide.' });
+      return;
+    }
+
+    const invoiceIds = new Set<string>();
+    const invoiceNumbers = new Set(store.orders.flatMap(item => (item.invoices || []).map(invoice => invoice.number)));
+    const newInvoices: InvoiceRecord[] = [];
+    for (const raw of invoices) {
+      if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !raw.id.trim() || invoiceIds.has(raw.id)) {
+        res.status(400).json({ error: 'Un identifiant de facture ou d’avoir est invalide ou en double.' });
+        return;
+      }
+      invoiceIds.add(raw.id);
+      if (currentInvoices.some(invoice => invoice.id === raw.id)) continue;
+
+      const type = raw.type === 'facture' || raw.type === 'avoir' ? raw.type : null;
+      const number = typeof raw.number === 'string' ? raw.number.trim().slice(0, 100) : '';
+      const issueDate = typeof raw.issueDate === 'string' ? raw.issueDate : '';
+      const tvaRate = Number(raw.tvaRate);
+      const reason = typeof raw.reason === 'string' ? raw.reason.trim().slice(0, 500) : undefined;
+      const numberMatchesType = type === 'facture' ? /^FAC-\d{4}-[A-Z0-9-]+$/.test(number) : /^AVOIR-\d{4}-[A-Z0-9-]+$/.test(number);
+      if (!type || !numberMatchesType || invoiceNumbers.has(number) ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(issueDate) || !Number.isFinite(Date.parse(issueDate)) ||
+          !Number.isFinite(tvaRate) || tvaRate < 0 || tvaRate > 1 || (type === 'avoir' && !reason)) {
+        res.status(400).json({ error: 'Les informations de la facture ou de l’avoir sont invalides.' });
+        return;
+      }
+      invoiceNumbers.add(number);
+      const totalTTC = Math.max(0, Math.trunc(order.estimatedTotal));
+      const totalHT = tvaRate > 0 ? Math.round(totalTTC / (1 + tvaRate)) : totalTTC;
+      newInvoices.push({
+        id: raw.id.slice(0, 120),
+        orderId: order.id,
+        orderReference: order.reference,
+        type,
+        number,
+        issueDate,
+        clientFacilityName: order.customer.facilityName,
+        tvaRate,
+        tvaAmount: totalTTC - totalHT,
+        totalHT,
+        totalTTC,
+        reason: type === 'avoir' ? reason : undefined,
+      });
+    }
+
+    const installmentIds = new Set<string>();
+    const newInstallments: PaymentInstallment[] = [];
+    for (const raw of installments) {
+      if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !raw.id.trim() || installmentIds.has(raw.id)) {
+        res.status(400).json({ error: 'Un identifiant de paiement est invalide ou en double.' });
+        return;
+      }
+      installmentIds.add(raw.id);
+      if (currentInstallments.some(installment => installment.id === raw.id)) continue;
+
+      const amount = Number(raw.amount);
+      const paymentMethod = ['especes', 'airtel_money', 'moov_money', 'virement'].includes(raw.paymentMethod)
+        ? raw.paymentMethod as PaymentInstallment['paymentMethod']
+        : null;
+      const type = raw.type === 'acompte' || raw.type === 'solde' ? raw.type : null;
+      const paidAt = typeof raw.paidAt === 'string' ? raw.paidAt : '';
+      if (!type || !paymentMethod || !Number.isSafeInteger(amount) || amount <= 0 ||
+          raw.status !== 'valide' || !Number.isFinite(Date.parse(paidAt))) {
+        res.status(400).json({ error: 'Les informations du paiement sont invalides.' });
+        return;
+      }
+      newInstallments.push({
+        id: raw.id.slice(0, 120),
+        type,
+        amount,
+        paymentMethod,
+        transactionReference: typeof raw.transactionReference === 'string' ? raw.transactionReference.trim().slice(0, 120) || undefined : undefined,
+        status: 'valide',
+        paidAt,
+        validatedBy: typeof raw.validatedBy === 'string' ? raw.validatedBy.trim().slice(0, 120) || undefined : undefined,
+      });
+    }
+
+    if (newInstallments.length > 0) {
+      const totalPaid = [...currentInstallments, ...newInstallments]
+        .reduce((sum, installment) => sum + (installment.status === 'valide' ? installment.amount : 0), 0);
+      if (totalPaid > order.estimatedTotal) {
+        res.status(409).json({ error: 'Le montant des versements dépasse le total de la commande.' });
+        return;
+      }
+      order.installments = [...currentInstallments, ...newInstallments];
+      order.amountPaid = totalPaid;
+      order.isPaid = totalPaid >= order.estimatedTotal;
+    }
+
+    if (newInvoices.length > 0) order.invoices = [...currentInvoices, ...newInvoices];
+
+    if (body.courier !== undefined) {
+      if (body.courier === null) {
+        order.courier = undefined;
+      } else if (typeof body.courier === 'object' && typeof body.courier.name === 'string' && body.courier.name.trim()) {
+        order.courier = {
+          name: body.courier.name.trim().slice(0, 120),
+          phone: typeof body.courier.phone === 'string' ? body.courier.phone.trim().slice(0, 40) : '',
+          vehicle: typeof body.courier.vehicle === 'string' ? body.courier.vehicle.trim().slice(0, 80) : '',
+          matricule: typeof body.courier.matricule === 'string' ? body.courier.matricule.trim().slice(0, 80) : '',
+        };
+      } else {
+        res.status(400).json({ error: 'Les informations du coursier sont invalides.' });
+        return;
+      }
+    }
+
+    if (body.deliveryProof !== undefined) {
+      if (body.deliveryProof === null) {
+        order.deliveryProof = undefined;
+      } else if (typeof body.deliveryProof === 'object' && typeof body.deliveryProof.receivedBy === 'string' && body.deliveryProof.receivedBy.trim()) {
+        const timestamp = typeof body.deliveryProof.timestamp === 'string' ? body.deliveryProof.timestamp : '';
+        if (!Number.isFinite(Date.parse(timestamp))) {
+          res.status(400).json({ error: 'La date de preuve de livraison est invalide.' });
+          return;
+        }
+        order.deliveryProof = {
+          receivedBy: body.deliveryProof.receivedBy.trim().slice(0, 120),
+          receiptReference: typeof body.deliveryProof.receiptReference === 'string' ? body.deliveryProof.receiptReference.trim().slice(0, 120) || undefined : undefined,
+          signatureUrl: typeof body.deliveryProof.signatureUrl === 'string' ? body.deliveryProof.signatureUrl.trim().slice(0, 1000) || undefined : undefined,
+          photoUrl: typeof body.deliveryProof.photoUrl === 'string' ? body.deliveryProof.photoUrl.trim().slice(0, 2000) || undefined : undefined,
+          timestamp,
+        };
+      } else {
+        res.status(400).json({ error: 'Les informations de preuve de livraison sont invalides.' });
+        return;
+      }
+    }
+
+    if (body.isPartialDelivery !== undefined) {
+      if (typeof body.isPartialDelivery !== 'boolean') {
+        res.status(400).json({ error: 'Le statut de livraison partielle est invalide.' });
+        return;
+      }
+      order.isPartialDelivery = body.isPartialDelivery;
+    }
+    if (body.partialDeliveryNotes !== undefined) {
+      if (typeof body.partialDeliveryNotes !== 'string') {
+        res.status(400).json({ error: 'Le détail de livraison partielle est invalide.' });
+        return;
+      }
+      order.partialDeliveryNotes = body.partialDeliveryNotes.trim().slice(0, 2000) || undefined;
+    }
+
+    appendStaffLog(user, {
+      category: 'orders',
+      severity: 'info',
+      actionLabel: 'Mise à jour financière et logistique',
+      targetType: 'order',
+      targetId: order.id,
+      targetLabel: `${order.reference} · ${order.customer.facilityName}`,
+      details: `${newInvoices.length} document(s) créé(s), ${newInstallments.length} versement(s) ajouté(s) pour ${order.reference}.`,
+    });
+    await saveStore(store, persistence);
     res.json(order);
   }));
 

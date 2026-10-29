@@ -48,6 +48,7 @@ import { AuthModal } from './components/AuthModal';
 import { ProductCard } from './components/ProductCard';
 import { ProductDetailModal } from './components/ProductDetailModal';
 import { DeliveryTrackingModal } from './components/DeliveryTrackingModal';
+import { OrderFinanceModal } from './components/OrderFinanceModal';
 import { OrderPreviewModal } from './components/OrderPreviewModal';
 import { OrderConfirmationView } from './components/OrderConfirmationView';
 import { OrderPdfDocumentModal } from './components/OrderPdfDocumentModal';
@@ -205,6 +206,7 @@ export default function App() {
   const [isPreparingConfirmedPdf, setIsPreparingConfirmedPdf] = useState(false);
   const [activeDeliveryOrder, setActiveDeliveryOrder] = useState<Order | null>(null);
   const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
+  const [activeFinanceOrder, setActiveFinanceOrder] = useState<Order | null>(null);
   const [pendingCustomerInfo, setPendingCustomerInfo] = useState<CustomerInfo | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const orderSubmissionInFlightRef = useRef(false);
@@ -795,6 +797,12 @@ export default function App() {
     setOrders(updated);
   };
 
+  const handleAdminUpdateFinance = async (updatedOrder: Order) => {
+    const savedOrder = await api.updateOrderFinance(updatedOrder.id, updatedOrder);
+    setOrders(prev => prev.map(order => order.id === savedOrder.id ? savedOrder : order));
+    setActiveFinanceOrder(current => current?.id === savedOrder.id ? savedOrder : current);
+  };
+
   const handleAdminCreatePack = async (packData: Omit<Pack, 'id'>) => {
     await api.createPack(packData);
     const updated = await api.getPacks();
@@ -1112,6 +1120,7 @@ export default function App() {
                     }
                     notifications={notifications}
                     onViewOrderPdf={handleViewOrderPdf}
+                    onOpenFinanceModal={(order: Order) => setActiveFinanceOrder(order)}
                     onOpenDeliveryModal={(order: Order) => {
                       setActiveDeliveryOrder(order);
                       setIsDeliveryModalOpen(true);
@@ -1516,6 +1525,15 @@ export default function App() {
           }}
           onUpdateStage={handleUpdateDeliveryStage}
           isAdmin={Boolean(currentUser && (currentUser.role === 'Super-Admin' || currentUser.role === 'Admin simple' || currentUser.role === 'Logistique'))}
+        />
+      )}
+
+      {activeFinanceOrder && currentUser && (
+        <OrderFinanceModal
+          order={activeFinanceOrder}
+          currentUser={currentUser}
+          onClose={() => setActiveFinanceOrder(null)}
+          onUpdateOrder={handleAdminUpdateFinance}
         />
       )}
 
