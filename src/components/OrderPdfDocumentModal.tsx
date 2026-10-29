@@ -165,7 +165,7 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
                 <img
                   src="/gloryday-logo.png"
                   alt="Logo Gloryday Pharma"
-                  className="h-12 w-12 shrink-0 rounded-lg bg-white object-contain p-1"
+                  className="h-20 w-20 shrink-0 rounded-xl bg-white object-contain p-1"
                 />
                 <div>
                   <div className="text-base sm:text-lg font-black tracking-tight">
