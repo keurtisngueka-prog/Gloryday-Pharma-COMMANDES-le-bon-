@@ -1364,10 +1364,21 @@ export class SupabaseStorePersistence {
 
   private async persistNotifications(store: PersistentServerStore): Promise<void> {
     const oldById = new Map((this.baseline?.notifications || []).map((item) => [item.id, item]));
+    const changedRows: Array<{
+      id: string;
+      user_id: string | null;
+      target_role: string;
+      title: string;
+      message: string;
+      type: string;
+      is_read: boolean;
+      data: AppNotification;
+      created_at: string;
+    }> = [];
     for (const notification of store.notifications) {
       const previous = oldById.get(notification.id);
       if (previous && same(previous, notification)) continue;
-      const { error } = await this.client.from('notifications').upsert({
+      changedRows.push({
         id: notification.id,
         user_id: await this.profileIdFor(notification.userId, store),
         target_role: notification.targetRole,
@@ -1377,8 +1388,16 @@ export class SupabaseStorePersistence {
         is_read: Boolean(notification.read),
         data: notification,
         created_at: notification.timestamp,
-      }, { onConflict: 'id' });
-      assertNoError(`enregistrement de la notification ${notification.id}`, error);
+      });
+    }
+
+    // Campaigns can create one notification per client. Batch those rows so
+    // Supabase receives a handful of requests instead of one request per user.
+    for (let offset = 0; offset < changedRows.length; offset += 100) {
+      const { error } = await this.client
+        .from('notifications')
+        .upsert(changedRows.slice(offset, offset + 100), { onConflict: 'id' });
+      assertNoError('enregistrement des notifications', error);
     }
   }
 
