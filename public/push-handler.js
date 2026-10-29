@@ -10,8 +10,8 @@ self.addEventListener('push', event => {
   const title = String(payload.title || 'Gloryday Pharma').slice(0, 120);
   const options = {
     body: String(payload.body || 'Vous avez une nouvelle information.').slice(0, 800),
-    icon: '/pwa-192x192.png',
-    badge: '/icon.svg',
+    icon: '/pwa-192x192.png?v=2',
+    badge: '/icon.svg?v=2',
     data: { url: typeof payload.url === 'string' ? payload.url : '/' },
     tag: typeof payload.tag === 'string' ? payload.tag.slice(0, 64) : 'gloryday-notification',
     renotify: false

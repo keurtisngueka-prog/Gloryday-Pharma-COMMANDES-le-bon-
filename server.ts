@@ -325,6 +325,10 @@ function saveStoreLocal(store: ServerStore): void {
 
 async function saveStore(store: ServerStore, persistence: SupabaseStorePersistence | null): Promise<void> {
   if (persistence) await persistence.persist(store);
+  // In production on Vercel, Supabase is the durable source of truth. Writing
+  // and JSON-stringifying the complete in-memory store to the ephemeral
+  // function filesystem after every mutation only adds synchronous latency.
+  if (persistence && process.env.VERCEL) return;
   try {
     saveStoreLocal(store);
   } catch (err) {

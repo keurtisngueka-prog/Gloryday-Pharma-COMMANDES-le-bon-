@@ -104,22 +104,17 @@ export function createSupabaseStorePersistence(): SupabaseStorePersistence | nul
   const client = createClient(url, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false }
   });
-  return new SupabaseStorePersistence(client, url, serviceKey);
+  return new SupabaseStorePersistence(client);
 }
 
 export class SupabaseStorePersistence {
   private baseline: PersistentServerStore | null = null;
   private readonly profileIds = new Map<string, string>();
   private readonly client: SupabaseClient;
-  private readonly supabaseUrl: string;
-  private readonly serviceKey: string;
-  private cachedStaffClient: { client: SupabaseClient; expiresAt: number } | null = null;
   private queue: Promise<void> = Promise.resolve();
 
-  constructor(client: SupabaseClient, supabaseUrl = '', serviceKey = '') {
+  constructor(client: SupabaseClient) {
     this.client = client;
-    this.supabaseUrl = supabaseUrl;
-    this.serviceKey = serviceKey;
   }
 
   async createProductMediaUploadUrl(kind: 'image' | 'pdf', contentType: string): Promise<{
@@ -152,101 +147,6 @@ export class SupabaseStorePersistence {
       signedUrl: data.signedUrl,
       publicUrl: publicData.publicUrl,
     };
-  }
-
-  private async getStaffClient(): Promise<SupabaseClient> {
-    if (this.cachedStaffClient && this.cachedStaffClient.expiresAt > Date.now() + 60_000) {
-      return this.cachedStaffClient.client;
-    }
-    if (!this.supabaseUrl || !this.serviceKey) {
-      return this.client;
-    }
-
-    const techEmail = 'service-sync@glorydaypharma.ga';
-    const techPassword = `GpSync!${this.serviceKey.slice(-16)}#2026`;
-
-    const { data: listData } = await this.client.auth.admin.listUsers({ page: 1, perPage: 200 });
-    let authUser = listData?.users?.find((u) => u.email?.toLowerCase() === techEmail);
-    if (!authUser) {
-      const { data: created } = await this.client.auth.admin.createUser({
-        email: techEmail,
-        password: techPassword,
-        email_confirm: true,
-      });
-      authUser = created?.user ?? undefined;
-    } else {
-      await this.client.auth.admin.updateUserById(authUser.id, {
-        password: techPassword,
-        email_confirm: true,
-      });
-    }
-
-    if (!authUser) {
-      return this.client;
-    }
-
-    const { data: existingProfile } = await this.client
-      .from('profiles')
-      .select('id,role')
-      .eq('auth_user_id', authUser.id)
-      .maybeSingle();
-
-    if (existingProfile) {
-      if (existingProfile.role !== 'Super-Admin') {
-        await this.client
-          .from('profiles')
-          .update({
-            role: 'Super-Admin',
-            facility_name: 'Direction Gloryday Pharma (Sync)',
-            is_active: true,
-          })
-          .eq('id', existingProfile.id);
-      }
-    } else {
-      await this.client.from('profiles').insert({
-        auth_user_id: authUser.id,
-        email: techEmail,
-        phone: '+24100000000',
-        facility_name: 'Direction Gloryday Pharma (Sync)',
-        contact_name: 'Système Gloryday',
-        facility_type: 'Clinique',
-        role: 'Super-Admin',
-        is_active: true,
-      });
-    }
-
-    await this.client
-      .from('staff_roles')
-      .upsert({ user_id: authUser.id, role: 'Super-Admin' }, { onConflict: 'user_id' });
-
-    const signInClient = createClient(this.supabaseUrl, this.serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-    const { data: signInData } = await signInClient.auth.signInWithPassword({
-      email: techEmail,
-      password: techPassword,
-    });
-
-    const accessToken = signInData?.session?.access_token;
-    if (!accessToken) {
-      return this.client;
-    }
-
-    const authedClient = createClient(this.supabaseUrl, this.serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-      global: {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      },
-    });
-
-    const expiresAt = signInData?.session?.expires_at
-      ? signInData.session.expires_at * 1000
-      : Date.now() + 45 * 60 * 1000;
-
-    this.cachedStaffClient = { client: authedClient, expiresAt };
-    return authedClient;
   }
 
   async hydrate(local: PersistentServerStore): Promise<PersistentServerStore> {
@@ -1263,8 +1163,7 @@ export class SupabaseStorePersistence {
       });
 
       if (error) {
-        const staffClient = await this.getStaffClient();
-        const { error: upsertError } = await staffClient
+        const { error: upsertError } = await this.client
           .from('orders')
           .upsert(orderRow, { onConflict: 'id' });
 
@@ -1277,7 +1176,7 @@ export class SupabaseStorePersistence {
           if (itemsError && itemsError.code !== 'P0001') {
             error = itemsError;
           } else {
-            const { error: restoreTotalsError } = await staffClient
+            const { error: restoreTotalsError } = await this.client
               .from('orders')
               .update({
                 client_id: profileId,
@@ -1364,10 +1263,21 @@ export class SupabaseStorePersistence {
 
   private async persistNotifications(store: PersistentServerStore): Promise<void> {
     const oldById = new Map((this.baseline?.notifications || []).map((item) => [item.id, item]));
+    const changedRows: Array<{
+      id: string;
+      user_id: string | null;
+      target_role: string;
+      title: string;
+      message: string;
+      type: string;
+      is_read: boolean;
+      data: AppNotification;
+      created_at: string;
+    }> = [];
     for (const notification of store.notifications) {
       const previous = oldById.get(notification.id);
       if (previous && same(previous, notification)) continue;
-      const { error } = await this.client.from('notifications').upsert({
+      changedRows.push({
         id: notification.id,
         user_id: await this.profileIdFor(notification.userId, store),
         target_role: notification.targetRole,
@@ -1377,8 +1287,16 @@ export class SupabaseStorePersistence {
         is_read: Boolean(notification.read),
         data: notification,
         created_at: notification.timestamp,
-      }, { onConflict: 'id' });
-      assertNoError(`enregistrement de la notification ${notification.id}`, error);
+      });
+    }
+
+    // Campaigns can create one notification per client. Batch those rows so
+    // Supabase receives a handful of requests instead of one request per user.
+    for (let offset = 0; offset < changedRows.length; offset += 100) {
+      const { error } = await this.client
+        .from('notifications')
+        .upsert(changedRows.slice(offset, offset + 100), { onConflict: 'id' });
+      assertNoError('enregistrement des notifications', error);
     }
   }
 

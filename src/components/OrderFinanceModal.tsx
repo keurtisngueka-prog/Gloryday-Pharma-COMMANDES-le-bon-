@@ -11,11 +11,13 @@ import {
   Camera, 
   UserCheck, 
   Clock,
-  Plus
+  Plus,
+  Download
 } from 'lucide-react';
 import { Order, User, Courier, PaymentInstallment, InvoiceRecord } from '../types';
 import { getCouriers } from '../utils/courierDirectory';
 import { logAuditEvent } from '../utils/auditLogger';
+import { downloadInvoiceProjectPdf } from '../utils/pdfGenerator';
 
 interface OrderFinanceModalProps {
   order: Order;
@@ -43,6 +45,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   const [invoiceType, setInvoiceType] = useState<'facture' | 'avoir'>('facture');
   const [tvaRate, setTvaRate] = useState<number>(0); // 0% dispositifs médicaux ou 18%
   const [creditReason, setCreditReason] = useState('');
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
+  const [invoiceDownloadError, setInvoiceDownloadError] = useState('');
 
   // Delivery Proof State
   const [selectedCourierId, setSelectedCourierId] = useState(order.courier?.matricule || couriers[0]?.id || '');
@@ -138,6 +142,19 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       order.reference,
       `Émission de ${invoiceType === 'facture' ? 'Facture' : 'Avoir'} ${num} (${totalTTC.toLocaleString('fr-FR')} FCFA TTC)`
     );
+  };
+
+  const handleDownloadInvoiceProject = async (invoice: InvoiceRecord) => {
+    setDownloadingInvoiceId(invoice.id);
+    setInvoiceDownloadError('');
+    try {
+      await downloadInvoiceProjectPdf(order, invoice);
+    } catch (error) {
+      console.error('Impossible de générer le projet de facture PDF:', error);
+      setInvoiceDownloadError('Le PDF n’a pas pu être créé. Réessayez dans un instant.');
+    } finally {
+      setDownloadingInvoiceId(null);
+    }
   };
 
   const handleSaveDeliveryProofAndCourier = (e: React.FormEvent) => {
@@ -362,11 +379,26 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                       <div className="text-right">
                         <strong className="font-mono text-slate-900">{inv.totalTTC.toLocaleString('fr-FR')} F</strong>
                         <div className="text-[10px] text-slate-400">TVA: {inv.tvaRate * 100}%</div>
+                        <button
+                          type="button"
+                          onClick={() => void handleDownloadInvoiceProject(inv)}
+                          disabled={downloadingInvoiceId === inv.id}
+                          className="mt-1 inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-[#0d44e8] hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
+                        >
+                          <Download className="h-3 w-3" />
+                          {downloadingInvoiceId === inv.id ? 'Création…' : 'Télécharger le projet PDF'}
+                        </button>
                       </div>
                     </div>
                   ))
                 )}
               </div>
+
+              {invoiceDownloadError && (
+                <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                  {invoiceDownloadError}
+                </p>
+              )}
 
               <form onSubmit={handleCreateInvoiceOrCredit} className="p-3 border border-slate-200 rounded-xl space-y-2 bg-slate-50/50">
                 <span className="font-bold text-slate-800">Créer un projet de document :</span>

@@ -161,14 +161,21 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
           <div className="bg-white max-w-3xl mx-auto rounded-xl shadow-lg border border-slate-200 overflow-hidden text-left">
             {/* Official Top Blue/Slate Banner */}
             <div className={`${docMode === 'order' ? 'bg-[#0d44e8]' : 'bg-slate-800'} text-white px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2`}>
-              <div>
-                <div className="text-base sm:text-lg font-black tracking-tight">
-                  {docMode === 'order' ? 'GLORYDAY PHARMA' : "FICHE DE DEMANDE D'ENGAGEMENT & VISA INTERNE"}
-                </div>
-                <div className="text-[11px] text-white/85">
-                  {docMode === 'order'
-                    ? 'Distribution médicale, consommables et équipements hospitaliers'
-                    : 'Gloryday Pharma Gabon · Circuit de Validation Hiérarchique Clinique & Hôpital'}
+              <div className="flex items-center gap-3">
+                <img
+                  src="/gloryday-logo.png"
+                  alt="Logo Gloryday Pharma"
+                  className="h-20 w-20 shrink-0 rounded-xl bg-white object-contain p-1"
+                />
+                <div>
+                  <div className="text-base sm:text-lg font-black tracking-tight">
+                    {docMode === 'order' ? 'GLORYDAY PHARMA' : "FICHE DE DEMANDE D'ENGAGEMENT & VISA INTERNE"}
+                  </div>
+                  <div className="text-[11px] text-white/85">
+                    {docMode === 'order'
+                      ? 'Distribution médicale, consommables et équipements hospitaliers'
+                      : 'Gloryday Pharma Gabon · Circuit de Validation Hiérarchique Clinique & Hôpital'}
+                  </div>
                 </div>
               </div>
               <div className="text-[11px] sm:text-right text-white/90 font-medium">

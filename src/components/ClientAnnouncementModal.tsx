@@ -40,14 +40,14 @@ export const ClientAnnouncementModal: React.FC<ClientAnnouncementModalProps> = (
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-3 sm:p-4 overscroll-contain">
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="client-announcement-title"
-        className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden"
+        className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:max-w-lg"
       >
-        <div className="p-4 sm:p-5 bg-slate-950 text-white flex items-center justify-between">
+        <div className="flex shrink-0 items-center justify-between bg-slate-950 p-4 text-white sm:p-5">
           <div className="flex items-center gap-3">
             <span className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center">
               <Megaphone className="w-4 h-4" />
@@ -63,7 +63,7 @@ export const ClientAnnouncementModal: React.FC<ClientAnnouncementModalProps> = (
         </div>
 
         {sentCount !== null ? (
-          <div className="p-6 sm:p-8 text-center space-y-4">
+          <div className="space-y-4 overflow-y-auto p-6 text-center sm:p-8">
             <CheckCircle2 className="w-12 h-12 text-emerald-600 mx-auto" />
             <div>
               <h3 className="font-bold text-slate-900">Information envoyée</h3>
@@ -77,7 +77,7 @@ export const ClientAnnouncementModal: React.FC<ClientAnnouncementModalProps> = (
             <button type="button" onClick={onClose} className="px-5 py-2.5 rounded-xl bg-slate-950 text-white text-sm font-bold">Terminer</button>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto overscroll-contain p-5 sm:p-6">
             {error && (
               <div role="alert" className="p-3 rounded-xl bg-rose-50 text-rose-800 text-sm flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
