@@ -57,6 +57,15 @@ const same = (left: unknown, right: unknown): boolean => JSON.stringify(left) ==
 const rows = (value: unknown): Row[] => Array.isArray(value) ? value as Row[] : [];
 const dataObject = (value: unknown): Row => value && typeof value === 'object' && !Array.isArray(value) ? value as Row : {};
 const numberOr = (value: unknown, fallback = 0): number => Number.isFinite(Number(value)) ? Number(value) : fallback;
+const isEmbeddedPdf = (value: unknown): value is string =>
+  typeof value === 'string' && /^data:application\/pdf(?:;[^,]+)*;base64,/i.test(value);
+const pdfUrlForDatabase = (value: unknown): string | null =>
+  typeof value === 'string' && value.trim() && !isEmbeddedPdf(value) ? value : null;
+const orderForDatabase = (order: Order): Order => {
+  if (!isEmbeddedPdf(order.pdfUrl)) return order;
+  const { pdfUrl: _discardedPdf, ...orderWithoutEmbeddedPdf } = order;
+  return orderWithoutEmbeddedPdf as Order;
+};
 
 function mergeById<T>(remote: T[], local: T[], keyOf: (item: T) => string): T[] {
   const merged = new Map<string, T>();
@@ -314,7 +323,7 @@ export class SupabaseStorePersistence {
         status: row.status,
         cancellationReason: row.cancellation_reason || undefined,
         isPaid: Boolean(row.is_paid),
-        pdfUrl: row.pdf_url || saved.pdfUrl,
+        pdfUrl: row.pdf_url || (isEmbeddedPdf(saved.pdfUrl) ? undefined : saved.pdfUrl),
         deliveryStage: row.delivery_stage || 'preparation',
         deliveryZone: row.delivery_zone || undefined,
         deliveryEstimated: row.delivery_estimated || undefined,
@@ -590,7 +599,7 @@ export class SupabaseStorePersistence {
           status: row.status,
           cancellationReason: row.cancellation_reason || undefined,
           isPaid: Boolean(row.is_paid),
-          pdfUrl: row.pdf_url || saved.pdfUrl,
+          pdfUrl: row.pdf_url || (isEmbeddedPdf(saved.pdfUrl) ? undefined : saved.pdfUrl),
           deliveryStage: row.delivery_stage || 'preparation',
           deliveryZone: row.delivery_zone || undefined,
           deliveryEstimated: row.delivery_estimated || undefined,
@@ -742,13 +751,13 @@ export class SupabaseStorePersistence {
       delivery_stage: order.deliveryStage || 'preparation',
       cancellation_reason: order.cancellationReason || null,
       notes: customer.notes || null,
-      pdf_url: order.pdfUrl || null,
+      pdf_url: pdfUrlForDatabase(order.pdfUrl),
       courier_name: order.courier?.name || null,
       courier_phone: order.courier?.phone || null,
       courier_vehicle: order.courier?.vehicle || null,
       courier_matricule: order.courier?.matricule || null,
       courier_current_zone: order.courier?.currentZone || null,
-      app_data: order,
+      app_data: orderForDatabase(order),
       created_at: order.createdAt,
       updated_at: new Date().toISOString(),
     };
@@ -1127,13 +1136,13 @@ export class SupabaseStorePersistence {
         delivery_stage: order.deliveryStage || 'preparation',
         cancellation_reason: order.cancellationReason || null,
         notes: customer.notes || null,
-        pdf_url: order.pdfUrl || null,
+        pdf_url: pdfUrlForDatabase(order.pdfUrl),
         courier_name: order.courier?.name || null,
         courier_phone: order.courier?.phone || null,
         courier_vehicle: order.courier?.vehicle || null,
         courier_matricule: order.courier?.matricule || null,
         courier_current_zone: order.courier?.currentZone || null,
-        app_data: order,
+        app_data: orderForDatabase(order),
         created_at: order.createdAt,
         updated_at: new Date().toISOString(),
       };

@@ -22,7 +22,6 @@ interface OrderConfirmationViewProps {
   pdfDataUrl?: string;
   pdfPreparing?: boolean;
   pdfGenerationFailed?: boolean;
-  pdfStorageFailed?: boolean;
   onRetryPdf?: () => void;
   onNewOrder: () => void;
   onViewDashboard: () => void;
@@ -34,7 +33,6 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
   pdfDataUrl,
   pdfPreparing = false,
   pdfGenerationFailed = false,
-  pdfStorageFailed = false,
   onRetryPdf,
   onNewOrder,
   onViewDashboard,
@@ -222,9 +220,9 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
             Réessayer la génération du PDF
           </button>
         )}
-        {pdfStorageFailed && pdfDataUrl && (
+        {pdfDataUrl && !pdfPreparing && !pdfGenerationFailed && (
           <p role="status" className="mt-2 text-xs text-emerald-800">
-            ✓ Le fichier PDF est prêt au téléchargement et à la visualisation.
+            ✓ Le PDF est prêt sur cet appareil. Vous pouvez le télécharger ou le visualiser.
           </p>
         )}
       </div>

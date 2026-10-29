@@ -2537,9 +2537,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(400).json({ error: 'Fichier PDF invalide ou trop volumineux.' });
       return;
     }
-    store.orders[idx].pdfUrl = pdfBase64;
-    await saveStore(store, persistence);
-    res.json({ success: true, pdfUrl: pdfBase64 });
+    // Keep compatibility with older installed clients without storing a
+    // multi-hundred-kilobyte data URL in every order row. PDFs are generated
+    // in the browser whenever they are viewed or downloaded.
+    res.json({ success: true, pdfUrl: '' });
   }));
 
   app.get('/api/courier-tracking/:token', asyncHandler(async (req, res) => {

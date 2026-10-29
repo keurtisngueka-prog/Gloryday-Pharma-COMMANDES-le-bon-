@@ -441,14 +441,6 @@ export const api = {
     }
   },
 
-  async uploadOrderPdf(orderReference: string, pdfBase64: string): Promise<string> {
-    const res = await request<{ success: boolean; pdfUrl: string }>('/api/orders/upload-pdf', {
-      method: 'POST',
-      body: JSON.stringify({ orderReference, pdfBase64 })
-    });
-    return res.pdfUrl;
-  },
-
   async getOrders(phone?: string): Promise<Order[]> {
     const query = phone ? `?phone=${encodeURIComponent(phone)}` : '';
     return request<Order[]>(`/api/orders${query}`);

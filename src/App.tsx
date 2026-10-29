@@ -202,7 +202,6 @@ export default function App() {
   const [confirmedOrder, setConfirmedOrder] = useState<Order | null>(null);
   const [confirmedPdfDataUrl, setConfirmedPdfDataUrl] = useState<string | undefined>(undefined);
   const [confirmedPdfFailed, setConfirmedPdfFailed] = useState(false);
-  const [confirmedPdfStorageFailed, setConfirmedPdfStorageFailed] = useState(false);
   const [isPreparingConfirmedPdf, setIsPreparingConfirmedPdf] = useState(false);
   const [activeDeliveryOrder, setActiveDeliveryOrder] = useState<Order | null>(null);
   const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
@@ -641,21 +640,9 @@ export default function App() {
   const prepareConfirmedOrderPdf = async (order: Order) => {
     setIsPreparingConfirmedPdf(true);
     setConfirmedPdfFailed(false);
-    setConfirmedPdfStorageFailed(false);
     try {
       const { dataUrl } = await generateOrderPdf(order);
       setConfirmedPdfDataUrl(dataUrl);
-      if (currentUser?.role === 'client') {
-        try {
-          const pdfUrl = await api.uploadOrderPdf(order.reference, dataUrl);
-          const savedOrder = { ...order, pdfUrl };
-          setConfirmedOrder(current => current?.id === order.id ? savedOrder : current);
-          setOrders(previous => previous.map(existing => existing.id === order.id ? savedOrder : existing));
-        } catch (storageError) {
-          console.warn('PDF prêt sur cet appareil, mais sa sauvegarde pour le partage a échoué.', storageError);
-          setConfirmedPdfStorageFailed(true);
-        }
-      }
     } catch (pdfError) {
       console.error('La commande est enregistrée, mais le PDF n’a pas pu être préparé.', pdfError);
       setConfirmedPdfDataUrl(undefined);
@@ -963,20 +950,17 @@ export default function App() {
             pdfDataUrl={confirmedPdfDataUrl}
             pdfPreparing={isPreparingConfirmedPdf}
             pdfGenerationFailed={confirmedPdfFailed}
-            pdfStorageFailed={confirmedPdfStorageFailed}
             onRetryPdf={() => { void prepareConfirmedOrderPdf(confirmedOrder); }}
             onNewOrder={() => {
               clearOrderSubmissionKey();
               setConfirmedOrder(null);
               setConfirmedPdfDataUrl(undefined);
               setConfirmedPdfFailed(false);
-              setConfirmedPdfStorageFailed(false);
               setActiveTab('catalog');
             }}
             onViewDashboard={() => {
               clearOrderSubmissionKey();
               setConfirmedOrder(null);
-              setConfirmedPdfStorageFailed(false);
               setActiveTab('dashboard');
             }}
           />
