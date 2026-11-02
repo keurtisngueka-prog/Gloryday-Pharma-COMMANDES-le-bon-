@@ -16,17 +16,17 @@ interface BestClientsModuleProps {
   clients: any[];
   orders?: Order[];
   commercials: User[];
-  isSuperAdmin: boolean;
   onRefreshClients: () => void;
-  onOpenMessageModal: (client: any) => void;
+  onOpenMessageModal?: (client: any) => void;
+  canSendMessages?: boolean;
   onViewOrderPdf?: (order: Order) => void;
 }
 
 export const BestClientsModule: React.FC<BestClientsModuleProps> = ({
   clients,
   orders = [],
-  isSuperAdmin,
   onOpenMessageModal,
+  canSendMessages = false,
   onViewOrderPdf
 }) => {
   const [activeView, setActiveView] = useState<'directory' | 'purchase-history'>('directory');
@@ -128,7 +128,7 @@ export const BestClientsModule: React.FC<BestClientsModuleProps> = ({
             onSelectClientId={(id) => setSelectedClientId(id)}
             onBackToDirectory={() => setActiveView('directory')}
             onViewOrderPdf={onViewOrderPdf}
-            onOpenMessageModal={isSuperAdmin ? onOpenMessageModal : undefined}
+            onOpenMessageModal={canSendMessages ? onOpenMessageModal : undefined}
           />
         </div>
       ) : (
@@ -190,7 +190,7 @@ export const BestClientsModule: React.FC<BestClientsModuleProps> = ({
                   <span>Historique des Achats</span>
                 </button>
 
-                <a
+                {canSendMessages && <a
                   href={getWhatsAppRelaunchUrl(client)}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -202,16 +202,16 @@ export const BestClientsModule: React.FC<BestClientsModuleProps> = ({
                 >
                   <MessageCircle className="w-3.5 h-3.5" />
                   <span>Relancer WhatsApp</span>
-                </a>
+                </a>}
 
-                <button
+                {canSendMessages && onOpenMessageModal && <button
                   type="button"
                   onClick={() => onOpenMessageModal(client)}
                   className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 transition-colors cursor-pointer"
                   title="Message In-App"
                 >
                   <Send className="w-3.5 h-3.5" />
-                </button>
+                </button>}
               </div>
             </div>
           ))}

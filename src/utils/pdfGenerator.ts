@@ -95,7 +95,9 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
     especes: 'Espèces',
     airtel_money: 'Airtel Money',
     moov_money: 'Moov Money',
-    virement: 'Virement bancaire'
+    virement: 'Virement bancaire',
+    cheque: 'Chèque',
+    en_compte: 'Paiement à terme'
   };
   const mobilePayment = order.mobilePayment || order.customer.mobilePayment;
   const paymentText = mobilePayment?.transactionReference
@@ -151,7 +153,7 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
   const addressY = 81;
   const paymentY = addressY + addressLines.length * 4 + 1;
   const notesY = paymentY + 5;
-  const clientBoxBottom = Math.max(91, notesLines.length ? notesY + notesLines.length * 4 : paymentY + 5) + 4;
+  const clientBoxBottom = Math.max(order.customer.secondaryPhone ? 96 : 91, notesLines.length ? notesY + notesLines.length * 4 : paymentY + 5) + 4;
 
   doc.setFillColor(241, 245, 249);
   doc.roundedRect(margin, clientBoxTop, contentWidth, clientBoxBottom - clientBoxTop, 2, 2, 'F');
@@ -166,6 +168,7 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
   doc.setFontSize(8.5);
   doc.text(text(`Contact : ${order.customer.contactName || order.customer.facilityName}`), leftColumnX, 81);
   doc.text(text(`Téléphone : ${order.customer.phone}`), leftColumnX, 86);
+  if (order.customer.secondaryPhone) doc.text(text(`2e téléphone : ${order.customer.secondaryPhone}`), leftColumnX, 91);
   doc.setFont('helvetica', 'bold');
   doc.text(text(`Réception : ${deliveryMode}`), rightColumnX, 68);
   doc.setFont('helvetica', 'normal');
@@ -538,7 +541,7 @@ export async function generateInvoiceProjectPdf(
 
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
-  doc.roundedRect(margin, 74, contentWidth, 29, 2, 2, 'FD');
+  doc.roundedRect(margin, 74, contentWidth, 35, 2, 2, 'FD');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(blue[0], blue[1], blue[2]);
@@ -549,7 +552,8 @@ export async function generateInvoiceProjectPdf(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.text(text(`Contact : ${order.customer.contactName || 'Non renseigné'} · Tél. : ${order.customer.phone || 'Non renseigné'}`), margin + 4, 95);
-  doc.text(text(`Adresse : ${order.customer.deliveryAddress || 'Non renseignée'}`), margin + 4, 100);
+  if (order.customer.secondaryPhone) doc.text(text(`2e téléphone : ${order.customer.secondaryPhone}`), margin + 4, 100);
+  doc.text(text(`Adresse : ${order.customer.deliveryAddress || 'Non renseignée'}`), margin + 4, 105);
 
   const drawTableHeader = (top: number) => {
     doc.setFillColor(blue[0], blue[1], blue[2]);
@@ -563,7 +567,7 @@ export async function generateInvoiceProjectPdf(
     doc.text('Total (FCFA)', pageWidth - margin - 4, top + 5.5, { align: 'right' });
   };
 
-  let y = 111;
+  let y = 117;
   drawTableHeader(y);
   y += 8;
   (order.items || []).forEach((item, index) => {

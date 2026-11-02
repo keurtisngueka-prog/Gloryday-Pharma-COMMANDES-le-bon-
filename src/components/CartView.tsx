@@ -17,8 +17,9 @@ import {
   TrendingDown,
   CheckCircle2
 } from 'lucide-react';
-import { CartItem, Coordinates, CustomerInfo, User } from '../types';
+import { CartItem, Coordinates, CustomerInfo, Order, User } from '../types';
 import { PhoneNumberInput } from './PhoneNumberInput';
+import { getOrderRemainingBalance } from '../utils/orderFinance';
 import { calculateCartVolumeSummary, calculateItemVolumePrice } from '../utils/volumeDiscount';
 import { 
   LIBREVILLE_ZONE_GROUPS, 
@@ -32,6 +33,7 @@ import {
 interface CartViewProps {
   items: CartItem[];
   currentUser?: User | null;
+  clientOrders?: Order[];
   onOpenAuth?: () => void;
   onUpdateQuantity: (index: number, quantity: number) => void;
   onRemoveItem: (index: number) => void;
@@ -41,17 +43,20 @@ interface CartViewProps {
   onOpenDraftsModal?: () => void;
   draftsCount?: number;
   initialCustomerInfo?: Partial<CustomerInfo>;
+  workspaceSyncStatus?: 'loading' | 'syncing' | 'synced' | 'local';
 }
 
 export const CartView: React.FC<CartViewProps> = ({
   items,
   currentUser,
+  clientOrders = [],
   onOpenAuth,
   onUpdateQuantity,
   onRemoveItem,
   onClearCart,
   onProceedToPreview,
-  onContinueShopping
+  onContinueShopping,
+  workspaceSyncStatus = 'local'
 }) => {
   const [facilityName, setFacilityName] = useState('');
   const [contactName, setContactName] = useState('');
@@ -60,7 +65,7 @@ export const CartView: React.FC<CartViewProps> = ({
   const [deliveryAddress, setDeliveryAddress] = useState('Centre-Ville, Libreville');
   const [addressDetails, setAddressDetails] = useState('');
   const [deliveryMode, setDeliveryMode] = useState<'livraison' | 'retrait'>('livraison');
-  const [paymentMethod, setPaymentMethod] = useState<'especes' | 'airtel_money' | 'moov_money' | 'virement'>('especes');
+  const [paymentMethod, setPaymentMethod] = useState<'especes' | 'airtel_money' | 'moov_money' | 'virement' | 'cheque' | 'en_compte'>('especes');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [deliveryCoordinates, setDeliveryCoordinates] = useState<Coordinates | null>(null);
@@ -116,6 +121,23 @@ export const CartView: React.FC<CartViewProps> = ({
   const baseDeliveryFee = deliveryMode === 'retrait' ? 0 : (selectedNeighborhood?.baseDeliveryFee || 0);
   const deliveryFee = itemsSubtotal >= 50000 ? 0 : baseDeliveryFee;
   const estimatedTotal = itemsSubtotal + deliveryFee;
+  const hasAccountCreditLine = Boolean(
+    currentUser?.role === 'client'
+    && currentUser.accountStatus === 'actif'
+    && Number(currentUser.creditLimit) > 0
+  );
+  const canUseAccountCredit = Boolean(
+    hasAccountCreditLine
+    && currentUser?.paymentTerms
+    && currentUser.paymentTerms !== 'comptant'
+    && currentUser.paymentTerms !== 'acompte_solde'
+  );
+  const minimumCreditOrderAmount = Math.max(0, Math.trunc(Number(currentUser?.minimumCreditOrderAmount ?? 50000) || 0));
+  const currentOutstandingBalance = currentUser
+    ? clientOrders.filter((order) => order.userId === currentUser.id && order.status !== 'Annulée')
+      .reduce((sum, order) => sum + getOrderRemainingBalance(order), 0)
+    : 0;
+  const availableCredit = Math.max(0, Math.trunc(Number(currentUser?.creditLimit) || 0) - currentOutstandingBalance);
 
   const handleNeighborhoodChange = (newId: string) => {
     setNeighborhoodId(newId);
@@ -183,6 +205,18 @@ export const CartView: React.FC<CartViewProps> = ({
       setError('La validation de commande est réservée aux comptes Établissements / Clients.');
       return;
     }
+    if (paymentMethod === 'en_compte' && !canUseAccountCredit) {
+      setError('Le paiement à terme n’est pas activé sur votre compte. Contactez Gloryday Pharma.');
+      return;
+    }
+    if (paymentMethod === 'en_compte' && estimatedTotal < minimumCreditOrderAmount) {
+      setError(`Le montant minimum pour payer à terme est de ${minimumCreditOrderAmount.toLocaleString('fr-FR')} FCFA. Il vous manque ${(minimumCreditOrderAmount - estimatedTotal).toLocaleString('fr-FR')} FCFA.`);
+      return;
+    }
+    if (paymentMethod === 'en_compte' && quoteItems.length > 0) {
+      setError('Les articles sur devis doivent être chiffrés avant de pouvoir payer à terme.');
+      return;
+    }
     if (!facilityName.trim() || !phone.trim()) {
       setError('Veuillez vérifier le nom de l\'établissement et le téléphone WhatsApp ci-dessous.');
       facilityInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -198,6 +232,7 @@ export const CartView: React.FC<CartViewProps> = ({
       facilityName: facilityName.trim(),
       contactName: contactName.trim() || facilityName.trim(),
       phone: phone.trim(),
+      secondaryPhone: currentUser?.secondaryPhone,
       deliveryAddress: fullAddress,
       coordinates: deliveryMode === 'livraison' ? deliveryCoordinates || undefined : undefined,
       neighborhoodId,
@@ -250,6 +285,17 @@ export const CartView: React.FC<CartViewProps> = ({
           </h1>
           <p className="text-xs text-[#6a6a6b] mt-0.5">
             {items.length} ligne(s) · Total estimé : <strong className="text-slate-900">{estimatedTotal.toLocaleString('fr-FR')} FCFA</strong> (sans TVA)
+          </p>
+          <p className={`mt-1 text-[10px] font-semibold ${workspaceSyncStatus === 'synced' ? 'text-emerald-700' : workspaceSyncStatus === 'local' ? 'text-amber-700' : 'text-slate-500'}`} aria-live="polite">
+            {workspaceSyncStatus === 'synced'
+              ? 'Panier et brouillons synchronisés avec votre compte.'
+              : workspaceSyncStatus === 'loading'
+                ? 'Récupération de votre panier et de vos brouillons…'
+                : workspaceSyncStatus === 'syncing'
+                  ? 'Synchronisation en cours…'
+                  : currentUser?.role === 'client'
+                    ? 'Mode local : vos données restent sur cet appareil jusqu’au retour de la connexion.'
+                    : 'Connectez-vous pour retrouver votre panier et vos brouillons sur vos autres appareils.'}
           </p>
         </div>
         <div className="flex items-center gap-2.5">
@@ -505,6 +551,7 @@ export const CartView: React.FC<CartViewProps> = ({
                   Téléphone WhatsApp *
                 </label>
                 <PhoneNumberInput id="checkout-phone" required value={phone} onChange={setPhone} placeholder="77 00 30 04" className="text-xs" />
+                {currentUser?.secondaryPhone && <p className="mt-1 text-[10px] text-slate-500">Deuxième numéro enregistré : {currentUser.secondaryPhone}</p>}
               </div>
             </div>
 
@@ -630,7 +677,63 @@ export const CartView: React.FC<CartViewProps> = ({
                   <option value="airtel_money">Airtel Money (+241 77 003 004)</option>
                   <option value="moov_money">Moov Money (+241 66 240 399)</option>
                   <option value="virement">Virement bancaire</option>
+                  <option value="cheque">Chèque</option>
+                  {canUseAccountCredit && (
+                    <option value="en_compte" disabled={estimatedTotal < minimumCreditOrderAmount || quoteItems.length > 0}>
+                      Paiement à terme · plafond {Number(currentUser?.creditLimit || 0).toLocaleString('fr-FR')} FCFA
+                    </option>
+                  )}
                 </select>
+                {hasAccountCreditLine && currentUser?.paymentTerms === 'acompte_solde' && (
+                  <p className="mt-1 text-[10px] font-medium text-blue-700">
+                    Votre compte exige un acompte. Sélectionnez un mode de règlement direct pour enregistrer la commande, puis l’équipe suivra le solde.
+                  </p>
+                )}
+                {canUseAccountCredit && estimatedTotal < minimumCreditOrderAmount && (
+                  <p className="mt-1 text-[10px] font-medium text-amber-700">
+                    Il vous manque {(minimumCreditOrderAmount - estimatedTotal).toLocaleString('fr-FR')} FCFA pour atteindre le seuil fixé par Gloryday Pharma.
+                  </p>
+                )}
+                {canUseAccountCredit && paymentMethod === 'en_compte' && estimatedTotal > availableCredit && (
+                  <p className="mt-1 text-[10px] font-medium text-rose-700">
+                    Le solde affiché dépasse le plafond disponible estimé ({availableCredit.toLocaleString('fr-FR')} FCFA). Le serveur revérifiera l’encours actuel à la validation.
+                  </p>
+                )}
+                {canUseAccountCredit && paymentMethod === 'en_compte' && estimatedTotal <= availableCredit && estimatedTotal >= minimumCreditOrderAmount && quoteItems.length === 0 && (
+                  <p className="mt-1 text-[10px] font-medium text-blue-700">
+                    Échéance prévue selon vos conditions de compte. Le plafond est revérifié à la validation et le solde sera visible dans votre espace client.
+                  </p>
+                )}
+                {paymentMethod === 'en_compte' && quoteItems.length > 0 && (
+                  <p className="mt-1 text-[10px] font-medium text-rose-700">
+                    Les commandes avec des articles sur devis ne peuvent pas être payées à terme avant validation du devis.
+                  </p>
+                )}
+                {paymentMethod === 'airtel_money' && (
+                  <p className="mt-1.5 rounded-lg bg-blue-50 p-2 text-[10px] leading-relaxed text-blue-800">
+                    Envoyez le montant au numéro Airtel Money indiqué, gardez le SMS de confirmation, puis transmettez sa référence depuis votre espace client. Le paiement restera en attente jusqu’à sa vérification par Gloryday Pharma.
+                  </p>
+                )}
+                {paymentMethod === 'moov_money' && (
+                  <p className="mt-1.5 rounded-lg bg-blue-50 p-2 text-[10px] leading-relaxed text-blue-800">
+                    Envoyez le montant au numéro Moov Money indiqué, gardez le SMS de confirmation, puis transmettez sa référence depuis votre espace client. Le paiement restera en attente jusqu’à sa vérification par Gloryday Pharma.
+                  </p>
+                )}
+                {paymentMethod === 'virement' && (
+                  <p className="mt-1.5 rounded-lg bg-amber-50 p-2 text-[10px] leading-relaxed text-amber-900">
+                    Les coordonnées bancaires sont communiquées par l’équipe commerciale. Indiquez la référence de la commande dans le libellé du virement et transmettez le justificatif ; la commande ne sera marquée payée qu’après vérification.
+                  </p>
+                )}
+                {paymentMethod === 'cheque' && (
+                  <p className="mt-1.5 rounded-lg bg-amber-50 p-2 text-[10px] leading-relaxed text-amber-900">
+                    Remettez le chèque à l’équipe Gloryday Pharma lors du retrait ou de la livraison. Le règlement sera confirmé après contrôle et encaissement ; la commande enregistrée n’est pas une facture.
+                  </p>
+                )}
+                {paymentMethod === 'especes' && (
+                  <p className="mt-1.5 rounded-lg bg-slate-50 p-2 text-[10px] leading-relaxed text-slate-700">
+                    Le règlement en espèces est remis à la réception de la commande. Le paiement sera confirmé par l’équipe après encaissement.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
@@ -661,7 +764,10 @@ export const CartView: React.FC<CartViewProps> = ({
       </div>
 
       {/* MOBILE FIXED BOTTOM CONFIRMATION BAR (Always visible without scrolling) */}
-      <div className="fixed bottom-14 left-0 right-0 z-30 lg:hidden bg-white/95 backdrop-blur-md border-t border-slate-200 px-3.5 py-2.5 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+      <div
+        className="fixed left-0 right-0 z-30 md:hidden bg-white/95 backdrop-blur-md border-t border-slate-200 px-3.5 py-2.5 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]"
+        style={{ bottom: 'calc(4rem + env(safe-area-inset-bottom, 0px))' }}
+      >
         <div className="max-w-xl mx-auto flex items-center justify-between gap-3">
           <div>
             <span className="text-[10px] font-bold uppercase text-slate-400 block leading-none">

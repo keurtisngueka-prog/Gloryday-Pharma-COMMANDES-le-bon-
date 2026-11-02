@@ -125,6 +125,55 @@ CREATE TABLE IF NOT EXISTS public.activity_logs (
     app_data JSONB
 );
 
+-- Frais de fonctionnement datés, attribués à un opérateur et annulables sans effacer l'historique.
+CREATE TABLE IF NOT EXISTS public.operating_expenses (
+    id TEXT PRIMARY KEY,
+    expense_date DATE NOT NULL,
+    category TEXT NOT NULL CHECK (category IN (
+        'transport', 'loyer', 'salaires', 'communication', 'fournitures', 'frais_bancaires', 'autre'
+    )),
+    description TEXT NOT NULL CHECK (length(trim(description)) BETWEEN 3 AND 500),
+    amount BIGINT NOT NULL CHECK (amount > 0 AND amount <= 1000000000000),
+    payment_method TEXT,
+    supplier TEXT,
+    reference TEXT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'annulee')),
+    recorded_by_id TEXT NOT NULL,
+    recorded_by_name TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    voided_at TIMESTAMPTZ,
+    voided_by_id TEXT,
+    voided_by_name TEXT,
+    void_reason TEXT,
+    app_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    CHECK (
+        (status = 'active' AND voided_at IS NULL AND void_reason IS NULL)
+        OR (status = 'annulee' AND voided_at IS NOT NULL AND length(trim(COALESCE(void_reason, ''))) BETWEEN 3 AND 500)
+    )
+);
+
+-- Historique append-only des relances de créances.
+CREATE TABLE IF NOT EXISTS public.collection_reminders (
+    id UUID PRIMARY KEY,
+    order_id TEXT NOT NULL,
+    order_reference TEXT NOT NULL,
+    client_id TEXT,
+    client_name TEXT NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    channel TEXT NOT NULL CHECK (channel IN ('telephone', 'whatsapp', 'sms', 'email', 'site', 'visite', 'autre')),
+    outcome TEXT NOT NULL CHECK (outcome IN ('client_joint', 'message_envoye', 'message_prepare', 'sans_reponse', 'promesse_paiement', 'contestation', 'autre')),
+    notes TEXT,
+    next_follow_up_date DATE,
+    recorded_by_id TEXT NOT NULL,
+    recorded_by_name TEXT NOT NULL,
+    recorded_by_role TEXT NOT NULL,
+    app_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    UNIQUE (order_id, id),
+    CHECK (length(trim(order_reference)) BETWEEN 1 AND 100),
+    CHECK (length(trim(client_name)) BETWEEN 1 AND 200),
+    CHECK (notes IS NULL OR length(notes) <= 1000)
+);
+
 CREATE OR REPLACE VIEW public.client_purchase_history_view AS
 SELECT
     COALESCE(o.client_id::text, LOWER(TRIM(o.phone))) AS client_key,
@@ -178,6 +227,18 @@ CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON public.activity_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON public.activity_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_entity ON public.activity_logs(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_operating_expenses_date ON public.operating_expenses(expense_date DESC);
+CREATE INDEX IF NOT EXISTS idx_operating_expenses_category_date ON public.operating_expenses(category, expense_date DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_reminders_order_date ON public.collection_reminders(order_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_reminders_follow_up ON public.collection_reminders(next_follow_up_date) WHERE next_follow_up_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_collection_reminders_client_date ON public.collection_reminders(client_id, occurred_at DESC);
+
+ALTER TABLE public.operating_expenses ENABLE ROW LEVEL SECURITY;
+REVOKE ALL PRIVILEGES ON TABLE public.operating_expenses FROM PUBLIC, anon, authenticated;
+GRANT ALL PRIVILEGES ON TABLE public.operating_expenses TO service_role;
+ALTER TABLE public.collection_reminders ENABLE ROW LEVEL SECURITY;
+REVOKE ALL PRIVILEGES ON TABLE public.collection_reminders FROM PUBLIC, anon, authenticated;
+GRANT ALL PRIVILEGES ON TABLE public.collection_reminders TO service_role;
 
 -- =====================================================================
 -- FIN DU SCRIPT SCHEMA.SQL GLORYDAY PHARMA

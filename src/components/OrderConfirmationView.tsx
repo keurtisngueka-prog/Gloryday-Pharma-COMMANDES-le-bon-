@@ -46,6 +46,7 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
   const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [pdfDownloadError, setPdfDownloadError] = useState(false);
+  const [paymentReferenceSubmitted, setPaymentReferenceSubmitted] = useState('');
 
   const primaryUrl = generateWhatsAppOrderUrl(order, order.pdfUrl, false);
   const secondaryUrl = generateWhatsAppOrderUrl(order, order.pdfUrl, true);
@@ -101,6 +102,22 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
   const handleOpenPdf = () => {
     setIsPdfPreviewOpen(true);
   };
+
+  const paymentReference = paymentReferenceSubmitted || order.mobilePayment?.transactionReference;
+  const paymentVerified = order.isPaid || order.mobilePayment?.status === 'verified';
+  const paymentStatusLabel = paymentVerified
+    ? 'Paiement confirmé par Gloryday Pharma'
+    : paymentReference
+      ? 'Référence reçue · vérification en attente'
+      : order.customer.paymentMethod === 'en_compte'
+        ? 'Paiement à terme · solde suivi dans votre espace client'
+        : order.customer.paymentMethod === 'especes'
+          ? 'À régler à la réception de la commande'
+          : 'En attente du règlement et de sa vérification';
+  const paymentMethodLabel = {
+    especes: 'Espèces', airtel_money: 'Airtel Money', moov_money: 'Moov Money',
+    virement: 'Virement bancaire', cheque: 'Chèque', en_compte: 'Paiement à terme'
+  }[order.customer.paymentMethod];
 
   return (
     <div className="max-w-xl mx-auto py-8 px-4 text-center">
@@ -159,6 +176,12 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
           </div>
         </div>
 
+        <div className={`rounded-xl border p-3 ${paymentVerified ? 'border-emerald-200 bg-emerald-50' : paymentReference ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`} aria-live="polite">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Règlement · {paymentMethodLabel}</div>
+          <div className={`mt-1 text-xs font-bold ${paymentVerified ? 'text-emerald-800' : paymentReference ? 'text-amber-800' : 'text-slate-700'}`}>{paymentStatusLabel}</div>
+          {paymentReference && !paymentVerified && <div className="mt-1 text-[10px] text-amber-800">Référence : {paymentReference}</div>}
+        </div>
+
         {/* Neighborhood & Delay estimation */}
         <div className="pt-2.5 border-t border-slate-100 space-y-1.5 text-xs">
           <div className="flex items-center justify-between">
@@ -183,8 +206,11 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
       {/* PDF Actions */}
       <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-left">
         <span className="text-xs font-bold text-slate-900 block mb-2">
-          Bon de commande officiel (PDF A4)
+          Bon de commande (PDF A4)
         </span>
+        <p className="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-[11px] leading-relaxed text-blue-900">
+          Ce document récapitule votre demande enregistrée. Il ne vaut pas facture. La facture sera établie par Gloryday Pharma après validation de la commande et du montant définitif.
+        </p>
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
@@ -360,6 +386,7 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
               status: 'submitted',
               amount: order.estimatedTotal
             });
+            setPaymentReferenceSubmitted(transactionId);
           }}
         />
       )}

@@ -15,6 +15,7 @@ import {
   Download
 } from 'lucide-react';
 import { Order, User, Courier, PaymentInstallment, InvoiceRecord } from '../types';
+import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
 import { getCouriers } from '../utils/courierDirectory';
 import { logAuditEvent } from '../utils/auditLogger';
 import { downloadInvoiceProjectPdf } from '../utils/pdfGenerator';
@@ -22,24 +23,52 @@ import { downloadInvoiceProjectPdf } from '../utils/pdfGenerator';
 interface OrderFinanceModalProps {
   order: Order;
   currentUser: User;
+  canViewInvoices: boolean;
+  canManageInvoices: boolean;
+  canViewPayments: boolean;
+  canManagePayments: boolean;
+  canManageCollectionDate: boolean;
+  canManageLogistics: boolean;
   onClose: () => void;
-  onUpdateOrder: (updated: Order) => void;
+  onUpdateOrder: (updated: Order) => Promise<void> | void;
 }
+
+const PAYMENT_METHOD_LABELS: Record<PaymentInstallment['paymentMethod'], string> = {
+  especes: 'Espèces',
+  airtel_money: 'Airtel Money',
+  moov_money: 'Moov Money',
+  virement: 'Virement',
+  cheque: 'Chèque',
+};
 
 export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   order,
   currentUser,
+  canViewInvoices,
+  canManageInvoices,
+  canViewPayments,
+  canManagePayments,
+  canManageCollectionDate,
+  canManageLogistics,
   onClose,
   onUpdateOrder
 }) => {
-  const [activeTab, setActiveTab] = useState<'installments' | 'invoices' | 'delivery' | 'partial'>('installments');
+  const availableTabs = [
+    ...(canViewPayments || canManageCollectionDate ? ['installments' as const] : []),
+    ...(canViewInvoices ? ['invoices' as const] : []),
+    ...(canManageLogistics ? ['delivery' as const, 'partial' as const] : []),
+  ];
+  const [activeTab, setActiveTab] = useState<'installments' | 'invoices' | 'delivery' | 'partial'>(availableTabs[0] || 'invoices');
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const couriers: Courier[] = getCouriers();
 
   // Installment State
   const [installmentAmount, setInstallmentAmount] = useState<number>(Math.round(order.estimatedTotal / 2));
   const [installmentType, setInstallmentType] = useState<'acompte' | 'solde'>('acompte');
-  const [installmentMethod, setInstallmentMethod] = useState<'especes' | 'airtel_money' | 'moov_money' | 'virement'>('airtel_money');
+  const [installmentMethod, setInstallmentMethod] = useState<'especes' | 'airtel_money' | 'moov_money' | 'virement' | 'cheque'>('airtel_money');
   const [installmentRef, setInstallmentRef] = useState('');
+  const [collectionDueDate, setCollectionDueDate] = useState(order.collectionDueDate || '');
 
   // Invoice State
   const [invoiceType, setInvoiceType] = useState<'facture' | 'avoir'>('facture');
@@ -58,11 +87,27 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   const [isPartial, setIsPartial] = useState(order.isPartialDelivery || false);
   const [partialNotes, setPartialNotes] = useState(order.partialDeliveryNotes || '');
 
-  const totalPaid = (order.installments || []).reduce((sum, inst) => sum + (inst.status === 'valide' ? inst.amount : 0), 0) + (order.isPaid && (!order.installments || order.installments.length === 0) ? order.estimatedTotal : 0);
-  const remainingDue = Math.max(0, order.estimatedTotal - totalPaid);
+  const totalPaid = getOrderPaidAmount(order);
+  const remainingDue = getOrderRemainingBalance(order);
+  const collectionOverdue = canViewPayments && isCollectionOverdue({ ...order, collectionDueDate: collectionDueDate || undefined });
 
-  const handleAddInstallment = (e: React.FormEvent) => {
+  const saveUpdatedOrder = async (updatedOrder: Order): Promise<boolean> => {
+    setIsSaving(true);
+    setSaveError('');
+    try {
+      await onUpdateOrder(updatedOrder);
+      return true;
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'L’enregistrement a échoué. Réessayez.');
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAddInstallment = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canManagePayments) return;
     if (installmentAmount <= 0) return;
 
     const newInst: PaymentInstallment = {
@@ -77,17 +122,19 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     };
 
     const updatedInstallments = [...(order.installments || []), newInst];
-    const newTotalPaid = updatedInstallments.reduce((sum, i) => sum + (i.status === 'valide' ? i.amount : 0), 0);
+    const newTotalPaid = totalPaid + newInst.amount;
     const isNowFullyPaid = newTotalPaid >= order.estimatedTotal;
 
     const updatedOrder: Order = {
       ...order,
       installments: updatedInstallments,
       amountPaid: newTotalPaid,
-      isPaid: isNowFullyPaid
+      isPaid: isNowFullyPaid,
+      collectionDueDate: isNowFullyPaid ? undefined : order.collectionDueDate,
     };
 
-    onUpdateOrder(updatedOrder);
+    if (!await saveUpdatedOrder(updatedOrder)) return;
+    if (isNowFullyPaid) setCollectionDueDate('');
 
     logAuditEvent(
       currentUser,
@@ -102,12 +149,33 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     setInstallmentRef('');
   };
 
-  const handleCreateInvoiceOrCredit = (e: React.FormEvent) => {
+  const handleSaveCollectionDueDate = async () => {
+    if (!canManageCollectionDate) return;
+    const effectiveDueDate = canViewPayments && remainingDue <= 0 ? undefined : collectionDueDate || undefined;
+    const updatedOrder: Order = { ...order, collectionDueDate: effectiveDueDate };
+    if (!await saveUpdatedOrder(updatedOrder)) return;
+    setCollectionDueDate(effectiveDueDate || '');
+    logAuditEvent(
+      currentUser,
+      'mise_a_jour_financiere',
+      'Échéance de recouvrement',
+      order.reference,
+      `Échéance de recouvrement mise à jour pour ${order.customer.facilityName}`,
+      order.collectionDueDate ? formatCollectionDueDate(order.collectionDueDate) : 'Aucune échéance',
+      collectionDueDate ? formatCollectionDueDate(collectionDueDate) : 'Échéance supprimée'
+    );
+  };
+
+  const handleCreateInvoiceOrCredit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canManageInvoices) return;
     const isFacture = invoiceType === 'facture';
-    const num = isFacture 
-      ? `FAC-2026-${order.reference.replace(/\D/g, '').slice(-4) || '0001'}`
-      : `AVOIR-2026-${Date.now().toString().slice(-4)}`;
+    const documentYear = new Date().getFullYear();
+    const orderCode = order.reference.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const sequence = String((order.invoices || []).length + 1).padStart(2, '0');
+    const num = isFacture
+      ? `FAC-${documentYear}-${orderCode}-${sequence}`
+      : `AVOIR-${documentYear}-${orderCode}-${sequence}`;
 
     const totalTTC = order.estimatedTotal;
     const totalHT = tvaRate > 0 ? Math.round(totalTTC / (1 + tvaRate)) : totalTTC;
@@ -133,7 +201,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       invoices: [...(order.invoices || []), newDoc]
     };
 
-    onUpdateOrder(updatedOrder);
+    if (!await saveUpdatedOrder(updatedOrder)) return;
 
     logAuditEvent(
       currentUser,
@@ -157,8 +225,9 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     }
   };
 
-  const handleSaveDeliveryProofAndCourier = (e: React.FormEvent) => {
+  const handleSaveDeliveryProofAndCourier = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canManageLogistics) return;
     const courierFound = couriers.find(c => c.id === selectedCourierId);
 
     const updatedOrder: Order = {
@@ -179,7 +248,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       partialDeliveryNotes: isPartial ? partialNotes.trim() : undefined
     };
 
-    onUpdateOrder(updatedOrder);
+    if (!await saveUpdatedOrder(updatedOrder)) return;
 
     logAuditEvent(
       currentUser,
@@ -203,7 +272,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
               <span>Gestion Financière & Logistique : {order.reference}</span>
             </h2>
             <p className="text-[11px] text-slate-400">
-              {order.customer.facilityName} · Total Commande : <strong className="text-white font-mono">{order.estimatedTotal.toLocaleString('fr-FR')} FCFA</strong>
+              {order.customer.facilityName}{(canViewPayments || canViewInvoices) && <> · Total Commande : <strong className="text-white font-mono">{order.estimatedTotal.toLocaleString('fr-FR')} FCFA</strong></>}
             </p>
           </div>
           <button
@@ -217,7 +286,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
         {/* Subtabs */}
         <div className="flex border-b border-slate-200 px-4 gap-2 bg-slate-50 font-semibold py-2">
-          <button
+          {availableTabs.includes('installments') && <button
             type="button"
             onClick={() => setActiveTab('installments')}
             className={`py-1 px-2.5 rounded-lg cursor-pointer ${
@@ -225,8 +294,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
             }`}
           >
             Acomptes & Soldes
-          </button>
-          <button
+          </button>}
+          {availableTabs.includes('invoices') && <button
             type="button"
             onClick={() => setActiveTab('invoices')}
             className={`py-1 px-2.5 rounded-lg cursor-pointer ${
@@ -234,8 +303,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
             }`}
           >
             Facture & Avoir
-          </button>
-          <button
+          </button>}
+          {availableTabs.includes('delivery') && <button
             type="button"
             onClick={() => setActiveTab('delivery')}
             className={`py-1 px-2.5 rounded-lg cursor-pointer ${
@@ -243,8 +312,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
             }`}
           >
             Coursier & Preuve Livraison
-          </button>
-          <button
+          </button>}
+          {availableTabs.includes('partial') && <button
             type="button"
             onClick={() => setActiveTab('partial')}
             className={`py-1 px-2.5 rounded-lg cursor-pointer ${
@@ -252,14 +321,20 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
             }`}
           >
             Livraison Partielle
-          </button>
+          </button>}
         </div>
 
         <div className="p-4 space-y-4">
+          {isSaving && <p role="status" className="text-xs font-semibold text-blue-700">Enregistrement en cours…</p>}
+          {saveError && (
+            <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+              {saveError}
+            </p>
+          )}
           {/* TAB 1: INSTALLMENTS */}
-          {activeTab === 'installments' && (
+          {activeTab === 'installments' && (canViewPayments || canManagePayments || canManageCollectionDate) && (
             <div className="space-y-3">
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between font-mono">
+              {canViewPayments && <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between font-mono">
                 <div>
                   <span className="text-[10px] text-slate-500 uppercase block">Total Encaissé</span>
                   <strong className="text-emerald-700 text-sm">{totalPaid.toLocaleString('fr-FR')} FCFA</strong>
@@ -270,10 +345,40 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                     {remainingDue.toLocaleString('fr-FR')} FCFA
                   </strong>
                 </div>
-              </div>
+              </div>}
+
+              {(canManageCollectionDate || canViewPayments) && <div className={`rounded-xl border p-3 ${collectionOverdue ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'}`}>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                  <label className="flex-1 text-[11px] font-bold text-slate-700">
+                    Date prévue de recouvrement
+                    {canManageCollectionDate ? <input
+                      type="date"
+                      value={collectionDueDate}
+                      onChange={(event) => setCollectionDueDate(event.target.value)}
+                      disabled={(canViewPayments && remainingDue <= 0) || isSaving}
+                      className={`mt-1 w-full rounded-lg border px-2.5 py-2 text-xs ${collectionOverdue ? 'border-rose-300 bg-white' : 'border-slate-300 bg-slate-50'}`}
+                    /> : <span className="mt-1 block rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs">{collectionDueDate ? formatCollectionDueDate(collectionDueDate) : 'Aucune échéance enregistrée'}</span>}
+                  </label>
+                  {canManageCollectionDate && <button
+                    type="button"
+                    onClick={() => void handleSaveCollectionDueDate()}
+                    disabled={isSaving || (canViewPayments && remainingDue <= 0) || collectionDueDate === (order.collectionDueDate || '')}
+                    className="rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    Enregistrer l’échéance
+                  </button>}
+                </div>
+                <p className={`mt-2 text-[10px] font-semibold ${collectionOverdue ? 'text-rose-700' : 'text-slate-500'}`}>
+                  {canViewPayments && remainingDue <= 0
+                    ? 'Commande soldée : aucune relance à prévoir.'
+                    : collectionOverdue
+                      ? `Échéance dépassée · reste ${remainingDue.toLocaleString('fr-FR')} FCFA à recouvrer.`
+                      : 'Le reste dû et cette date apparaîtront dans le suivi client et le tableau admin.'}
+                </p>
+              </div>}
 
               {/* History of installments */}
-              <div className="space-y-1">
+              {canViewPayments && <div className="space-y-1">
                 <span className="font-bold text-slate-700 text-[11px]">Historique des encaissements :</span>
                 {(!order.installments || order.installments.length === 0) ? (
                   <p className="text-slate-400 italic">Aucun acompte spécifique enregistré (Paiement comptant standard).</p>
@@ -281,17 +386,21 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                   order.installments.map((inst) => (
                     <div key={inst.id} className="p-2 border border-slate-200 rounded-lg flex items-center justify-between">
                       <div>
-                        <span className="font-bold uppercase text-slate-800">{inst.type}</span> · {inst.paymentMethod}
+                        <span className="font-bold uppercase text-slate-800">{inst.type}</span> · {PAYMENT_METHOD_LABELS[inst.paymentMethod]}
                         {inst.transactionReference && <span className="font-mono text-slate-500 ml-1">({inst.transactionReference})</span>}
+                        <span className="block text-[10px] text-slate-500">
+                          {new Date(inst.paidAt).toLocaleString('fr-FR', { timeZone: 'Africa/Libreville' })}
+                          {inst.validatedBy ? ` · reçu par ${inst.validatedBy}` : ''}
+                        </span>
                       </div>
                       <strong className="text-emerald-700 font-mono">+{inst.amount.toLocaleString('fr-FR')} F</strong>
                     </div>
                   ))
                 )}
-              </div>
+              </div>}
 
               {/* Add installment form */}
-              {remainingDue > 0 && (
+              {canManagePayments && remainingDue > 0 && (
                 <form onSubmit={handleAddInstallment} className="p-3 border border-slate-200 rounded-xl space-y-2 bg-slate-50/50">
                   <span className="font-bold text-slate-800">Enregistrer un versement (Acompte ou Solde) :</span>
                   <div className="grid grid-cols-2 gap-2">
@@ -331,6 +440,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                         <option value="moov_money">Moov Money</option>
                         <option value="especes">Espèces</option>
                         <option value="virement">Virement Bancaire (BGFI/UBA)</option>
+                        <option value="cheque">Chèque</option>
                       </select>
                     </div>
                     <div>
@@ -347,6 +457,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
                   <button
                     type="submit"
+                    disabled={isSaving}
                     className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl cursor-pointer shadow-xs mt-1"
                   >
                     Valider l'Encaissement
@@ -357,7 +468,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
           )}
 
           {/* TAB 2: INVOICES & AVOIRS */}
-          {activeTab === 'invoices' && (
+          {activeTab === 'invoices' && canViewInvoices && (
             <div className="space-y-3">
               <div className="space-y-1">
                 <span className="font-bold text-slate-700 text-[11px]">Documents de commande :</span>
@@ -400,7 +511,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                 </p>
               )}
 
-              <form onSubmit={handleCreateInvoiceOrCredit} className="p-3 border border-slate-200 rounded-xl space-y-2 bg-slate-50/50">
+              {canManageInvoices && <form onSubmit={handleCreateInvoiceOrCredit} className="p-3 border border-slate-200 rounded-xl space-y-2 bg-slate-50/50">
                 <span className="font-bold text-slate-800">Créer un projet de document :</span>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -443,16 +554,17 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
                 <button
                   type="submit"
+                  disabled={isSaving}
                   className="w-full py-2 bg-[#0d44e8] hover:bg-blue-700 text-white font-bold rounded-xl cursor-pointer shadow-xs mt-1"
                 >
                   Créer {invoiceType === 'facture' ? 'le projet de facture' : 'le projet d’avoir'}
                 </button>
-              </form>
+              </form>}
             </div>
           )}
 
           {/* TAB 3: COURRIER & PREUVE DE LIVRAISON */}
-          {activeTab === 'delivery' && (
+          {activeTab === 'delivery' && canManageLogistics && (
             <form onSubmit={handleSaveDeliveryProofAndCourier} className="space-y-3">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
@@ -513,6 +625,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
               <button
                 type="submit"
+                disabled={isSaving}
                 className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl cursor-pointer shadow-xs mt-2"
               >
                 Valider Preuve & Affectation Coursier
@@ -521,7 +634,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
           )}
 
           {/* TAB 4: PARTIAL DELIVERY */}
-          {activeTab === 'partial' && (
+          {activeTab === 'partial' && canManageLogistics && (
             <div className="space-y-3">
               <label className="flex items-center gap-2 p-3 border border-slate-200 rounded-xl bg-slate-50 cursor-pointer">
                 <input
@@ -556,6 +669,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
               <button
                 type="button"
                 onClick={handleSaveDeliveryProofAndCourier}
+                disabled={isSaving}
                 className="w-full py-2 bg-slate-900 hover:bg-black text-white font-bold rounded-xl cursor-pointer shadow-xs"
               >
                 Enregistrer le Statut Partiel

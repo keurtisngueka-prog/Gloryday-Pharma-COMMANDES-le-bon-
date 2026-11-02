@@ -17,7 +17,9 @@ const PAYMENT_LABELS: Record<string, string> = {
   especes: 'Espèces à la livraison',
   airtel_money: 'Airtel Money Gabon',
   moov_money: 'Moov Money Gabon',
-  virement: 'Virement bancaire'
+  virement: 'Virement bancaire',
+  cheque: 'Chèque',
+  en_compte: 'Paiement à terme'
 };
 
 export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
@@ -219,6 +221,12 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
                     <Phone className="w-3 h-3 text-slate-400" />
                     <span>Téléphone : <strong className="text-slate-800 font-mono">{order.customer.phone}</strong></span>
                   </div>
+                  {order.customer.secondaryPhone && (
+                    <div className="text-slate-600 flex items-center gap-1">
+                      <Phone className="w-3 h-3 text-slate-400" />
+                      <span>Deuxième téléphone : <strong className="text-slate-800 font-mono">{order.customer.secondaryPhone}</strong></span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-1">

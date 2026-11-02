@@ -28,15 +28,18 @@ import {
   Megaphone,
   Activity,
   FileText,
+  Receipt,
   RefreshCw,
   ArrowUpRight,
   FileSpreadsheet,
   Upload
 } from 'lucide-react';
-import { Order, OrderStatus, AdminStats, Pack, Product, User, AppRole, DeliveryStage, AppNotification, VolumeDiscountSettings, StaffPermission } from '../types';
+import { Order, OrderStatus, AdminStats, Pack, Product, User, AppRole, DeliveryStage, AppNotification, VolumeDiscountSettings, StaffPermission, PaymentTerms, ClientAccountStatus } from '../types';
 import { api } from '../api';
 import { getActiveVolumeDiscountSettings, setActiveVolumeDiscountSettings } from '../utils/volumeDiscount';
+import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
 import { ProductFormModal } from './ProductFormModal';
+import { StockReceiptModal } from './StockReceiptModal';
 import { BestClientsModule } from './BestClientsModule';
 import { DirectMessagingModal } from './DirectMessagingModal';
 import { ClientAnnouncementModal } from './ClientAnnouncementModal';
@@ -44,6 +47,9 @@ import { AdminPacksModule } from './AdminPacksModule';
 import { ClientPurchasesStatsModule } from './ClientPurchasesStatsModule';
 import { ClientPurchaseHistoryView } from './ClientPurchaseHistoryView';
 const DataExportModule = React.lazy(() => import('./DataExportModule').then(module => ({ default: module.DataExportModule })));
+const FinanceModule = React.lazy(() => import('./FinanceModule').then(module => ({ default: module.FinanceModule })));
+const ReceivablesModule = React.lazy(() => import('./ReceivablesModule').then(module => ({ default: module.ReceivablesModule })));
+const StaffMessagesModule = React.lazy(() => import('./StaffMessagesModule').then(module => ({ default: module.StaffMessagesModule })));
 import { AuditLogModule } from './AuditLogModule';
 import { StockLotsModule } from './StockLotsModule';
 import { SystemSettingsModule } from './SystemSettingsModule';
@@ -63,7 +69,7 @@ const hasValidOrderCoordinates = (order: Order): boolean => {
 const hasConfirmedOrderGps = (order: Order): boolean =>
   hasValidOrderCoordinates(order) && order.customer.coordinates?.source === 'checkout';
 
-export type AdminSubTab = 'kpi' | 'orders' | 'packs' | 'stock' | 'lots' | 'clients' | 'stats-achats' | 'logs' | 'audit' | 'settings' | 'staff' | 'export-deploy';
+export type AdminSubTab = 'kpi' | 'orders' | 'packs' | 'stock' | 'lots' | 'clients' | 'stats-achats' | 'receivables' | 'finance' | 'messages' | 'logs' | 'audit' | 'settings' | 'staff' | 'export-deploy';
 
 interface AdminDashboardProps {
   stats: AdminStats | null;
@@ -85,6 +91,7 @@ interface AdminDashboardProps {
   onRefresh: () => void;
   defaultSubTab?: AdminSubTab;
   onOpenDeliveryModal?: (order: Order) => void;
+  onOpenFinanceModal?: (order: Order) => void;
   onViewOrderPdf?: (order: Order) => void;
 }
 
@@ -108,21 +115,66 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onRefresh,
   defaultSubTab = 'kpi',
   onOpenDeliveryModal,
+  onOpenFinanceModal,
   onViewOrderPdf
 }) => {
   const role: AppRole = currentUser.role;
   const isSuperAdmin = role === 'Super-Admin';
   const hasPerm = (perm: StaffPermission) => isSuperAdmin || Boolean(currentUser.permissions?.includes(perm));
-  const isSimpleAdmin = role === 'Admin simple' || hasPerm('stats_view');
-  const isCommercial = role === 'Commercial' || hasPerm('orders_manage') || hasPerm('quotes_manage');
-  const isGestionnaire = role === 'Gestionnaire Catalogue' || isSuperAdmin || hasPerm('catalog_stock');
-  const isLogistique = role === 'Logistique' || isSuperAdmin || isSimpleAdmin || hasPerm('logistics_manage') || hasPerm('orders_view') || hasPerm('orders_manage');
-  const canManageClients = isSuperAdmin || hasPerm('clients_manage');
+  const canViewOrders = hasPerm('orders_view') || hasPerm('orders_confirm') || hasPerm('orders_cancel') || hasPerm('orders_status_manage') || hasPerm('orders_finance_view') || hasPerm('orders_finance_manage') || hasPerm('payments_manage') || hasPerm('logistics_view') || hasPerm('logistics_manage') || hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('receivables_reminders_manage') || hasPerm('finance_view');
+  const canConfirmOrders = hasPerm('orders_confirm') || hasPerm('orders_status_manage');
+  const canCancelOrders = hasPerm('orders_cancel') || hasPerm('orders_status_manage');
+  const canViewOrderDocuments = hasPerm('orders_view') || hasPerm('orders_finance_view') || hasPerm('orders_finance_manage');
+  const canViewDelivery = hasPerm('logistics_view') || hasPerm('logistics_manage');
+  const canViewOrderFinance = hasPerm('orders_finance_view') || hasPerm('orders_finance_manage') || hasPerm('payments_manage') || hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('stats_view') || hasPerm('finance_view');
+  const canManageFinance = hasPerm('orders_finance_manage');
+  const canManagePayments = hasPerm('payments_manage') || hasPerm('receivables_payments_manage');
+  const canOpenOrderFinanceModal = onOpenFinanceModal && (
+    hasPerm('orders_finance_view') || canManageFinance || hasPerm('payments_manage') ||
+    hasPerm('receivables_view') || hasPerm('receivables_payments_manage') ||
+    hasPerm('receivables_reminders_manage') || hasPerm('logistics_manage')
+  );
+  const canViewReceivables = hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('receivables_reminders_manage');
+  const canManageReceivables = canViewReceivables;
+  const canViewFinance = hasPerm('finance_view') || hasPerm('expenses_manage');
+  const canManageExpenses = hasPerm('expenses_manage');
+  const canManageCatalog = hasPerm('catalog_manage') || hasPerm('catalog_stock');
+  const canManagePacks = hasPerm('packs_manage') || hasPerm('catalog_stock');
+  const canViewCatalog = canManageCatalog || hasPerm('catalog_view');
+  const canReceiveStock = hasPerm('stock_receive') || hasPerm('catalog_stock');
+  const canAdjustStock = hasPerm('stock_adjust') || hasPerm('catalog_stock');
+  const canManageStockAvailability = hasPerm('stock_availability_manage') || hasPerm('catalog_stock');
+  const canExportStock = hasPerm('stock_export') || hasPerm('catalog_stock');
+  const canViewStock = hasPerm('stock_view') || canReceiveStock || canAdjustStock || canManageStockAvailability || canExportStock;
+  const canViewStockCosts = hasPerm('stock_costs_view') || hasPerm('stock_costs_manage') || hasPerm('catalog_stock');
+  const canManagePurchasePrice = hasPerm('stock_costs_manage') || hasPerm('catalog_stock');
+  const isGestionnaire = canManageCatalog || canViewCatalog || canViewStock || canReceiveStock || canAdjustStock || canManageStockAvailability || canViewStockCosts || hasPerm('settings_manage');
+  const canViewClients = hasPerm('clients_view') || hasPerm('clients_manage') || hasPerm('clients_credit_manage');
+  const canManageClients = hasPerm('clients_manage');
+  const canManageClientCredit = hasPerm('clients_credit_manage');
+  const canManageCampaigns = hasPerm('campaigns_manage');
   const canManageSettings = isSuperAdmin || hasPerm('settings_manage');
+  const canViewAudit = hasPerm('audit_view');
+
+  const availableSubTabs: AdminSubTab[] = [
+    ...(hasPerm('stats_view') ? ['kpi', 'stats-achats'] as AdminSubTab[] : []),
+    ...(canViewOrders ? ['orders'] as AdminSubTab[] : []),
+    ...(canManagePacks ? ['packs'] as AdminSubTab[] : []),
+    ...(isGestionnaire ? ['stock'] as AdminSubTab[] : []),
+    ...(canViewStock ? ['lots'] as AdminSubTab[] : []),
+    ...(canViewReceivables ? ['receivables'] as AdminSubTab[] : []),
+    ...(canViewFinance ? ['finance'] as AdminSubTab[] : []),
+    ...(canViewClients ? ['clients'] as AdminSubTab[] : []),
+    ...(hasPerm('messages_view') ? ['messages'] as AdminSubTab[] : []),
+    ...(canViewAudit ? ['logs', 'audit'] as AdminSubTab[] : []),
+    ...(canManageSettings ? ['settings'] as AdminSubTab[] : []),
+    ...(isSuperAdmin ? ['staff', 'export-deploy'] as AdminSubTab[] : []),
+  ];
 
   const [activeTab, setActiveTab] = useState<AdminSubTab>(defaultSubTab);
   const [searchQuery, setSearchQuery] = useState('');
   const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | 'to_confirm' | 'confirmed' | 'preparation' | 'delivered' | 'cancelled'>('all');
+  const [financialFilter, setFinancialFilter] = useState<'all' | 'outstanding' | 'overdue'>('all');
   const [stockSearchQuery, setStockSearchQuery] = useState('');
   const [cancelModalOrder, setCancelModalOrder] = useState<Order | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
@@ -130,12 +182,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [cancelOrderError, setCancelOrderError] = useState<string | null>(null);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [receivingStockProduct, setReceivingStockProduct] = useState<Product | null>(null);
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
   const [targetMessageClient, setTargetMessageClient] = useState<any | null>(null);
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
   const [selectedHistoryClientId, setSelectedHistoryClientId] = useState<string | null>(null);
   const [clientsModuleView, setClientsModuleView] = useState<'directory' | 'purchase-history'>('directory');
   const [clientDirectorySearch, setClientDirectorySearch] = useState('');
+  const [creditTermsClient, setCreditTermsClient] = useState<User | null>(null);
+  const [creditLimitDraft, setCreditLimitDraft] = useState(0);
+  const [creditMinimumDraft, setCreditMinimumDraft] = useState(50000);
+  const [creditPaymentTermsDraft, setCreditPaymentTermsDraft] = useState<PaymentTerms>('comptant');
+  const [creditAccountStatusDraft, setCreditAccountStatusDraft] = useState<ClientAccountStatus>('actif');
+  const [savingCreditTerms, setSavingCreditTerms] = useState(false);
+  const [creditTermsError, setCreditTermsError] = useState('');
   const [isRefreshingData, setIsRefreshingData] = useState(false);
   // Volume discount settings state
   const [discountSettings, setDiscountSettings] = useState<VolumeDiscountSettings>(() => getActiveVolumeDiscountSettings());
@@ -178,8 +238,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   useEffect(() => {
-    setActiveTab(defaultSubTab);
-  }, [defaultSubTab]);
+    setActiveTab(availableSubTabs.includes(defaultSubTab) ? defaultSubTab : (availableSubTabs[0] || 'orders'));
+  }, [defaultSubTab, currentUser.permissions?.join('|')]);
 
   useEffect(() => {
     // Remove a legacy GitHub token left by older dashboard builds.
@@ -209,6 +269,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setDiscountSavedMsg('Erreur lors de la sauvegarde des paliers.');
     } finally {
       setSavingDiscounts(false);
+    }
+  };
+
+  const openCreditTerms = (client: User) => {
+    setCreditTermsClient(client);
+    setCreditLimitDraft(Math.max(0, Number(client.creditLimit) || 0));
+    setCreditMinimumDraft(Math.max(0, Number(client.minimumCreditOrderAmount ?? 50000) || 0));
+    setCreditPaymentTermsDraft(client.paymentTerms || 'comptant');
+    setCreditAccountStatusDraft(client.accountStatus || 'actif');
+    setCreditTermsError('');
+  };
+
+  const handleSaveCreditTerms = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!creditTermsClient) return;
+    setSavingCreditTerms(true);
+    setCreditTermsError('');
+    try {
+      await api.updateClientCreditTerms(creditTermsClient.id, {
+        creditLimit: Math.trunc(creditLimitDraft),
+        minimumCreditOrderAmount: Math.trunc(creditMinimumDraft),
+        paymentTerms: creditPaymentTermsDraft,
+        accountStatus: creditAccountStatusDraft,
+      });
+      setCreditTermsClient(null);
+      onRefresh();
+    } catch (error) {
+      setCreditTermsError(error instanceof Error ? error.message : 'Les conditions de crédit n’ont pas pu être enregistrées.');
+    } finally {
+      setSavingCreditTerms(false);
     }
   };
 
@@ -242,13 +332,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (orderStatusFilter === 'preparation' && o.status !== 'En préparation') return false;
     if (orderStatusFilter === 'delivered' && o.status !== 'Livrée') return false;
     if (orderStatusFilter === 'cancelled' && o.status !== 'Annulée') return false;
+    if (financialFilter === 'outstanding' && (o.status === 'Annulée' || getOrderRemainingBalance(o) <= 0)) return false;
+    if (financialFilter === 'overdue' && !isCollectionOverdue(o)) return false;
 
     // Search query
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return o.reference.toLowerCase().includes(q) || 
            o.customer.facilityName.toLowerCase().includes(q) ||
-           o.customer.phone.toLowerCase().includes(q);
+           o.customer.phone.toLowerCase().includes(q) ||
+           (o.customer.secondaryPhone || '').toLowerCase().includes(q);
   });
 
   const displayedProducts = products.filter(p => {
@@ -276,6 +369,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Helper counts
   const toConfirmCount = orders.filter(o => o.status === 'À confirmer').length;
   const inPreparationCount = orders.filter(o => o.status === 'En préparation').length;
+  const outstandingOrders = orders.filter(order => order.status !== 'Annulée' && getOrderRemainingBalance(order) > 0);
+  const overdueCollectionOrders = outstandingOrders.filter(isCollectionOverdue);
+  const outstandingAmount = outstandingOrders.reduce((sum, order) => sum + getOrderRemainingBalance(order), 0);
+  const overdueAmount = overdueCollectionOrders.reduce((sum, order) => sum + getOrderRemainingBalance(order), 0);
   const inTransitCount = orders.filter(o => o.deliveryStage === 'in_transit').length;
   const outOfStockCount = products.filter(p => p.status === 'rupture').length;
   const activeDeliveryOrders = orders.filter(order =>
@@ -325,7 +422,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <div className="flex items-center gap-2 self-start md:self-center flex-wrap">
 
-            {isGestionnaire && (
+            {canManageCatalog && (
               <button
                 type="button"
                 onClick={() => { setEditingProduct(null); setIsProductModalOpen(true); }}
@@ -335,7 +432,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span>Nouveau Produit</span>
               </button>
             )}
-            {canManageClients && (
+            {canManageCampaigns && (
               <button
                 type="button"
                 onClick={() => setIsAnnouncementModalOpen(true)}
@@ -364,7 +461,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* 2. SUB-TABS NAVIGATION WITH DYNAMIC BADGES */}
       <nav aria-label="Sections du tableau de bord" className="flex gap-1.5 overflow-x-auto border-b border-slate-200 pb-1 text-xs font-bold scrollbar-none">
-        {(isSuperAdmin || isSimpleAdmin) && (
+        {hasPerm('stats_view') && (
           <button
             type="button"
             onClick={() => setActiveTab('kpi')}
@@ -376,7 +473,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>Vue d'ensemble & KPIs</span>
           </button>
         )}
-        {isLogistique && (
+        {canViewOrders && (
           <button
             type="button"
             onClick={() => setActiveTab('orders')}
@@ -396,7 +493,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             )}
           </button>
         )}
-        {isGestionnaire && (
+        {canManagePacks && (
           <button
             type="button"
             onClick={() => setActiveTab('packs')}
@@ -430,7 +527,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </span>
           </button>
         )}
-        {isGestionnaire && (
+        {canViewStock && (
           <button
             type="button"
             onClick={() => setActiveTab('lots')}
@@ -449,7 +546,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             )}
           </button>
         )}
-        {(isSuperAdmin || isSimpleAdmin || canManageClients) && (
+        {hasPerm('stats_view') && (
           <button
             type="button"
             onClick={() => setActiveTab('stats-achats')}
@@ -461,7 +558,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>Historique & Stats Achats Clients</span>
           </button>
         )}
-        {canManageClients && (
+        {canManageReceivables && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('receivables')}
+            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'receivables' ? 'bg-rose-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <CreditCard className="w-3.5 h-3.5" />
+            <span>Créances & Recouvrement</span>
+          </button>
+        )}
+        {canViewFinance && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('finance')}
+            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'finance' ? 'bg-emerald-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Receipt className="w-3.5 h-3.5" />
+            <span>Finances & Dépenses</span>
+          </button>
+        )}
+        {canViewClients && (
           <button
             type="button"
             onClick={() => setActiveTab('clients')}
@@ -473,7 +594,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>Cliniques & Contacts ({clients.length})</span>
           </button>
         )}
-        {isSuperAdmin && (
+        {hasPerm('messages_view') && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('messages')}
+            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'messages' ? 'bg-indigo-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <MessageCircle className="w-3.5 h-3.5" />
+            <span>Messages du site</span>
+          </button>
+        )}
+        {canViewAudit && (
           <button
             type="button"
             onClick={() => setActiveTab('logs')}
@@ -486,7 +619,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Flux temps réel actif" />
           </button>
         )}
-        {isSuperAdmin && (
+        {canViewAudit && (
           <button
             type="button"
             onClick={() => setActiveTab('audit')}
@@ -536,8 +669,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )}
       </nav>
 
+      {availableSubTabs.length === 0 && !canManageCampaigns && (
+        <div role="status" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Aucun accès opérationnel n’est attribué à ce compte. Demandez au Super Admin de régler vos droits.
+        </div>
+      )}
+
       {/* 3. TAB 1: EXECUTIVE KPIS */}
-      {activeTab === 'kpi' && (isSuperAdmin || isSimpleAdmin) && stats && (
+      {activeTab === 'kpi' && hasPerm('stats_view') && stats && (
         <div key="tab-kpi" className="dashboard-tab-enter space-y-5">
           <div className="admin-dashboard-kpis grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs relative overflow-hidden">
@@ -719,7 +858,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* 4. TAB 2: ORDERS & LOGISTIC STAGES */}
-      {activeTab === 'orders' && isLogistique && (
+      {activeTab === 'orders' && canViewOrders && (
         <div key="tab-orders" className="dashboard-tab-enter bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
           {/* Top Filters & Search */}
           <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -793,6 +932,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </button>
           </div>
 
+          {canViewOrderFinance && <div className="px-4 py-3 border-b border-rose-100 bg-rose-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <p className="text-[11px] font-extrabold uppercase tracking-wide text-slate-600">Suivi des règlements</p>
+              <p className="mt-0.5 text-[11px] text-slate-600">
+                {outstandingOrders.length} commande(s) à recouvrer · {outstandingAmount.toLocaleString('fr-FR')} FCFA dus
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setFinancialFilter('all')}
+                aria-pressed={financialFilter === 'all'}
+                className={`rounded-lg px-2.5 py-1.5 font-bold transition-colors ${financialFilter === 'all' ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'}`}
+              >
+                Toutes
+              </button>
+              <button
+                type="button"
+                onClick={() => setFinancialFilter('outstanding')}
+                aria-pressed={financialFilter === 'outstanding'}
+                className={`rounded-lg px-2.5 py-1.5 font-bold transition-colors ${financialFilter === 'outstanding' ? 'bg-amber-700 text-white' : 'border border-amber-200 bg-white text-amber-800 hover:bg-amber-50'}`}
+              >
+                À recouvrer ({outstandingOrders.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFinancialFilter('overdue')}
+                aria-pressed={financialFilter === 'overdue'}
+                className={`rounded-lg px-2.5 py-1.5 font-bold transition-colors ${financialFilter === 'overdue' ? 'bg-rose-700 text-white' : 'border border-rose-200 bg-white text-rose-800 hover:bg-rose-100'}`}
+              >
+                En retard ({overdueCollectionOrders.length}) · {overdueAmount.toLocaleString('fr-FR')} F
+              </button>
+            </div>
+          </div>}
+
           {/* Compact dispatch overview: one courier per delivery, with reusable couriers across orders. */}
           <section className="p-4 sm:p-5 border-b border-slate-100 bg-white" aria-label="Organisation des livreurs">
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 mb-3">
@@ -861,7 +1035,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 Aucune commande ne correspond à ces critères.
               </div>
             ) : (
-              filteredOrders.map((order) => (
+              filteredOrders.map((order) => {
+                const paidAmount = getOrderPaidAmount(order);
+                const remainingBalance = getOrderRemainingBalance(order);
+                const collectionOverdue = isCollectionOverdue(order);
+                return (
                 <div key={order.id} className="dashboard-row-interactive p-4 sm:p-5 flex flex-col xl:flex-row xl:items-center justify-between gap-4 text-xs">
                   <div className="space-y-1.5 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -887,7 +1065,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       )}
 
                       {/* Payment Checkbox toggle */}
-                      {(isSuperAdmin || isSimpleAdmin) && (
+                      {canManagePayments && (
                         <label className="flex items-center gap-1.5 cursor-pointer font-bold ml-1 bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded transition-colors">
                           <input
                             type="checkbox"
@@ -895,8 +1073,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             onChange={(e) => onUpdatePayment(order.id, e.target.checked)}
                             className="rounded text-[#0d44e8]"
                           />
-                          <span className={order.isPaid ? 'text-emerald-700' : 'text-slate-500'}>
-                            {order.isPaid ? '✓ Payée' : 'Non payée'}
+                          <span className={order.isPaid ? 'text-emerald-700' : paidAmount > 0 ? 'text-amber-700' : 'text-slate-500'}>
+                            {order.isPaid ? '✓ Soldée' : paidAmount > 0 ? 'Acompte reçu' : 'Non payée'}
                           </span>
                         </label>
                       )}
@@ -912,6 +1090,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                     <div className="text-slate-800">
                       <strong className="text-sm font-bold">{order.customer.facilityName}</strong> · Contact : {order.customer.contactName || 'Réception'} ({order.customer.phone})
+                      {order.customer.secondaryPhone && <span className="text-slate-500"> · 2e tél. : {order.customer.secondaryPhone}</span>}
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                       <div className="flex items-start gap-2">
@@ -932,8 +1111,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
                       </div>
                       <div className="mt-2 border-t border-slate-200 pt-2 text-[10px] text-slate-500">
-                        {order.items.length} article(s) · <strong className="text-slate-900">{order.estimatedTotal.toLocaleString('fr-FR')} FCFA</strong>
+                        {order.items.length} article(s) {canViewOrderFinance && <>· <strong className="text-slate-900">{order.estimatedTotal.toLocaleString('fr-FR')} FCFA</strong></>}
                       </div>
+                      {canViewOrderFinance && order.status !== 'Annulée' && (
+                        <div className={`mt-2 rounded-lg border px-2.5 py-2 text-[10px] ${collectionOverdue ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-slate-200 bg-white text-slate-600'}`}>
+                          <span>Encaissé : <strong>{paidAmount.toLocaleString('fr-FR')} FCFA</strong></span>
+                          <span aria-hidden="true"> · </span>
+                          <span>Reste dû : <strong className={remainingBalance > 0 ? collectionOverdue ? 'text-rose-800' : 'text-amber-800' : 'text-emerald-700'}>{remainingBalance.toLocaleString('fr-FR')} FCFA</strong></span>
+                          {order.collectionDueDate && remainingBalance > 0 && (
+                            <span className="block mt-0.5 font-semibold">
+                              {collectionOverdue ? 'Échéance dépassée : ' : 'À recouvrer avant le '}{formatCollectionDueDate(order.collectionDueDate)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Mobile Payment details banner if present */}
@@ -962,7 +1153,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                   {/* Operational & Logistic Action Controls */}
                   <div className="flex items-center gap-1.5 self-end xl:self-center flex-wrap">
-                    {onViewOrderPdf && (
+                    {canOpenOrderFinanceModal && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenFinanceModal(order)}
+                        className="py-1.5 px-3 rounded-xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-bold border border-emerald-200 flex items-center gap-1 cursor-pointer transition-colors"
+                        title="Ouvrir les rubriques de commande autorisées pour votre compte"
+                      >
+                        <Receipt className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>Facture / Avoir</span>
+                      </button>
+                    )}
+                    {onViewOrderPdf && canViewOrderDocuments && (
                       <button
                         type="button"
                         onClick={() => onViewOrderPdf(order)}
@@ -975,12 +1177,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     )}
 
                     {/* Delivery Modal Opener */}
-                    {onOpenDeliveryModal && (
+                    {onOpenDeliveryModal && canViewDelivery && (
                       <button
                         type="button"
                         onClick={() => onOpenDeliveryModal(order)}
                         className="py-1.5 px-3 rounded-xl bg-purple-50 text-purple-800 hover:bg-purple-100 font-bold border border-purple-200 flex items-center gap-1 cursor-pointer transition-colors"
-                        title="Gérer les étapes de livraison et affecter le coursier"
+                        title={hasPerm('logistics_manage') ? 'Gérer les étapes de livraison et affecter le coursier' : 'Consulter les étapes et la position de livraison'}
                       >
                         <Truck className="w-3.5 h-3.5 text-purple-600" />
                         <span>{hasConfirmedOrderGps(order) ? 'Voir carte GPS' : order.deliveryStage ? `Étape : ${order.deliveryStage}` : 'Localisation & livraison'}</span>
@@ -988,7 +1190,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     )}
 
                     {/* Status Transitions */}
-                    {order.status === 'À confirmer' && (isSuperAdmin || isSimpleAdmin || isCommercial) && (
+                    {order.status === 'À confirmer' && canConfirmOrders && (
                       <button
                         type="button"
                         onClick={() => onUpdateStatus(order.id, 'Confirmée')}
@@ -998,7 +1200,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </button>
                     )}
 
-                    {order.status === 'Confirmée' && (isSuperAdmin || isSimpleAdmin) && (
+                    {order.status === 'Confirmée' && canConfirmOrders && (
                       <button
                         type="button"
                         onClick={() => onUpdateStatus(order.id, 'En préparation')}
@@ -1009,23 +1211,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     )}
 
                     {/* WhatsApp Client Manual Backup */}
-                    <a
+                    {hasPerm('messages_send') && <a
                       href={generateWhatsAppMessageForStage(
                         order, 
                         order.deliveryStage || (order.status === 'Livrée' ? 'delivered' : order.status === 'En préparation' ? 'preparation' : 'confirmed')
                       ).directUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="py-1.5 px-3 rounded-xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-bold border border-emerald-300 flex items-center gap-1 transition-colors cursor-pointer"
+                      className="py-1.5 px-3 rounded-xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-bold border border-emerald-300 items-center gap-1 transition-colors cursor-pointer flex"
                       title="Envoyer la notification WhatsApp personnalisée au client"
                     >
                       <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
                       <span>WhatsApp Client</span>
-                    </a>
+                    </a>}
 
                     {order.status !== 'Livrée' && order.status !== 'Annulée' &&
-                      (((isSuperAdmin || isSimpleAdmin) && !(order.status === 'En préparation' && ['picked_up', 'in_transit', 'delivered'].includes(order.deliveryStage || 'preparation'))) ||
-                        (isCommercial && ['À confirmer', 'Confirmée'].includes(order.status))) && (
+                      canCancelOrders && (
                       <button
                         type="button"
                         onClick={() => {
@@ -1040,20 +1241,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     )}
                   </div>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
       )}
 
-      {activeTab === 'packs' && isGestionnaire && (
+      {activeTab === 'packs' && canManagePacks && (
         <div key="tab-packs" className="dashboard-tab-enter space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/70 p-4">
             <div>
               <h2 className="font-black text-slate-900 text-sm">Packs médicaux & campagnes clients</h2>
               <p className="mt-1 text-xs text-slate-600">Gérez les packs du catalogue ou créez une annonce visible dans l’application client.</p>
             </div>
-            {canManageClients && (
+            {canManageCampaigns && (
               <button
                 type="button"
                 onClick={() => setIsAnnouncementModalOpen(true)}
@@ -1079,7 +1281,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {activeTab === 'stock' && isGestionnaire && (
         <div key="tab-stock" className="dashboard-tab-enter space-y-5">
           {/* Volume Discount Configuration Panel */}
-          <form onSubmit={handleSaveVolumeDiscounts} className="bg-white rounded-3xl border border-blue-200 p-5 shadow-2xs space-y-4">
+          {canManageSettings && <form onSubmit={handleSaveVolumeDiscounts} className="bg-white rounded-3xl border border-blue-200 p-5 shadow-2xs space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="font-black text-slate-900 text-sm sm:text-base flex items-center gap-2">
@@ -1210,7 +1412,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               </div>
             </div>
-          </form>
+          </form>}
 
           {/* Products & Real-Time Stock Sync Table */}
           <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
@@ -1222,18 +1424,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <p className="text-xs text-slate-500 mt-0.5">
                   Modifiez la quantité en stock ici : si Stock &gt; 0, le produit passe immédiatement en <strong>validation directe</strong> côté client. Si Stock = 0, la commande est <strong>convertie en demande de devis</strong>.
                 </p>
+                <p className="mt-1 text-[10px] font-semibold text-emerald-800">
+                  Réception + ajoute les unités reçues au stock. Correction applique le solde compté et crée une trace.
+                </p>
               </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100">
+              {canManageCatalog && canAdjustStock && <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100">
                 <Upload className="h-3.5 w-3.5" /> Importer Excel / CSV
                 <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcelFileSelected} />
-              </label>
-              <button type="button" onClick={() => void handleProductExport('xlsx')} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50">
+              </label>}
+              {canExportStock && <button type="button" onClick={() => void handleProductExport('xlsx')} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50">
                 <FileSpreadsheet className="h-3.5 w-3.5" /> Exporter Excel
-              </button>
-              <button type="button" onClick={() => void handleProductExport('csv')} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50">
+              </button>}
+              {canExportStock && <button type="button" onClick={() => void handleProductExport('csv')} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50">
                 <Download className="h-3.5 w-3.5" /> CSV
-              </button>
+              </button>}
               <div className="relative w-full max-w-xs">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
                 <input
@@ -1267,8 +1472,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <h4 className="font-bold text-slate-900 truncate">{p.name}</h4>
                         <div className="flex flex-wrap items-center gap-2 mt-0.5">
                           <span className="text-[11px] text-slate-500">{p.category} · {p.variants.length} variante(s)</span>
+                          {canViewStockCosts && <span className="text-[11px] font-semibold text-amber-800">Achat {Number(p.purchasePrice || 0).toLocaleString('fr-FR')} FCFA · marge estimée {Math.max(0, Number(p.variants[0]?.price || 0) - Number(p.purchasePrice || 0)).toLocaleString('fr-FR')} FCFA</span>}
                           {/* Live Client-Side Visibility Status Indicator */}
-                          {p.status === 'rupture' ? (
+                          {canViewStock && (p.status === 'rupture' ? (
                             <span className="px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">
                               🔴 Bloqué (Rupture) côté client
                             </span>
@@ -1284,7 +1490,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">
                               🟠 Stock 0 · Converti auto. en devis côté client
                             </span>
-                          )}
+                          ))}
                           {lastSavedStockId === p.id && (
                             <span className="text-[10px] font-extrabold text-emerald-700">
                               ✓ Synchronisé côté client !
@@ -1295,9 +1501,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 self-end sm:self-center shrink-0">
+                      {canReceiveStock && <button
+                        type="button"
+                        onClick={() => setReceivingStockProduct(p)}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-black text-emerald-800 transition hover:-translate-y-0.5 hover:bg-emerald-100 hover:shadow-sm"
+                        title="Ajouter une réception au stock actuel et l'enregistrer dans l'historique"
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Réception +
+                      </button>}
                       {/* Direct Stock Quantity Editor */}
+                      {canAdjustStock && <>
                       <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-                        <span className="text-[10px] font-bold text-slate-500 px-1.5">Stock :</span>
+                        <span className="text-[10px] font-bold text-slate-500 px-1.5">Solde compté :</span>
                         <input
                           type="number"
                           min={0}
@@ -1309,9 +1524,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           type="button"
                           disabled={savingStockId === p.id}
                           onClick={() => void handleInlineStockSave(p, draftQty)}
-                          className="px-2.5 py-1 rounded-lg bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-[11px] cursor-pointer disabled:opacity-50"
+                          className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] cursor-pointer disabled:opacity-50"
                         >
-                          {savingStockId === p.id ? '...' : 'Valider stock'}
+                          {savingStockId === p.id ? '...' : 'Corriger'}
                         </button>
                       </div>
 
@@ -1326,14 +1541,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       >
                         {p.status === 'disponible' ? '✓ Autorisé' : '⚠️ Rupture'}
                       </button>
-                      <button
+                      </>}
+                      {canManageCatalog && <button
                         type="button"
                         onClick={() => { setEditingProduct(p); setIsProductModalOpen(true); }}
                         className="p-1.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 cursor-pointer"
                         title="Modifier la fiche complète"
                       >
                         <Edit className="w-4 h-4" />
-                      </button>
+                      </button>}
                     </div>
                   </div>
                 );
@@ -1344,17 +1560,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* 5B. TAB: STOCK LOTS & RESTOCK AVAILABILITY */}
-      {activeTab === 'lots' && isGestionnaire && (
+      {activeTab === 'lots' && canViewStock && (
         <StockLotsModule
           products={products}
           onToggleProductStock={onToggleProductStock}
           actorName={currentUser.contactName || currentUser.facilityName}
           actorRole={role}
+          canToggleStock={canManageStockAvailability}
+          canExportStock={canExportStock}
         />
       )}
 
       {/* 6. TAB 4: CLIENT PURCHASES STATS */}
-      {activeTab === 'stats-achats' && (isSuperAdmin || isSimpleAdmin || canManageClients) && (
+      {activeTab === 'stats-achats' && hasPerm('stats_view') && (
         <ClientPurchasesStatsModule
           orders={orders}
           clients={clients}
@@ -1364,8 +1582,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         />
       )}
 
+      {activeTab === 'finance' && canViewFinance && (
+        <React.Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">Ouverture des finances…</div>}>
+          <FinanceModule orders={orders} products={products} canManageExpenses={canManageExpenses} />
+        </React.Suspense>
+      )}
+
+      {activeTab === 'receivables' && canManageReceivables && (
+        <React.Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">Ouverture du suivi des créances…</div>}>
+          <ReceivablesModule
+            orders={orders}
+            clients={clients}
+            canRecordPayments={canManagePayments}
+            canRecordReminders={hasPerm('receivables_reminders_manage')}
+            canViewPaymentHistory={hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('payments_manage')}
+            onOpenFinanceModal={onOpenFinanceModal}
+          />
+        </React.Suspense>
+      )}
+
+      {activeTab === 'messages' && hasPerm('messages_view') && (
+        <React.Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Chargement des messages…</div>}>
+          <StaffMessagesModule currentUser={currentUser} />
+        </React.Suspense>
+      )}
+
       {/* 7. TAB 5: CLIENTS & CONTACTS */}
-      {activeTab === 'clients' && canManageClients && (
+      {activeTab === 'clients' && canViewClients && (
         <div key="tab-clients" className="dashboard-tab-enter bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
           <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -1399,14 +1642,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <span>Historique des achats</span>
                 </button>
               </div>
-              <button
+              {canManageCampaigns && <button
                 type="button"
                 onClick={() => setIsAnnouncementModalOpen(true)}
                 className="py-2 px-3 rounded-xl bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs flex items-center gap-2 cursor-pointer"
               >
                 <Megaphone className="w-4 h-4" />
                 <span>Informer tous les clients</span>
-              </button>
+              </button>}
             </div>
           </div>
           {clientsModuleView === 'purchase-history' ? (
@@ -1416,13 +1659,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               selectedClientId={selectedHistoryClientId}
               onSelectClientId={setSelectedHistoryClientId}
               onBackToDirectory={() => setClientsModuleView('directory')}
-              onViewOrderPdf={onViewOrderPdf}
-              onOpenDeliveryModal={onOpenDeliveryModal}
-              onUpdatePayment={onUpdatePayment}
-              onOpenMessageModal={(client) => {
+              onViewOrderPdf={canViewOrderDocuments ? onViewOrderPdf : undefined}
+              onOpenDeliveryModal={canViewDelivery ? onOpenDeliveryModal : undefined}
+              onUpdatePayment={canManagePayments ? onUpdatePayment : undefined}
+              onOpenMessageModal={hasPerm('messages_send') ? (client) => {
                 setTargetMessageClient(client);
                 setIsMessageModalOpen(true);
-              }}
+              } : undefined}
             />
           ) : (
           <>
@@ -1443,7 +1686,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {clients.filter((client) => {
               const query = clientDirectorySearch.trim().toLowerCase();
               if (!query) return true;
-              return [client.facilityName, client.contactName, client.phone, client.deliveryAddress]
+              return [client.facilityName, client.contactName, client.phone, client.secondaryPhone, client.deliveryAddress]
                 .some((value) => String(value || '').toLowerCase().includes(query));
             }).map((c) => {
               const clientOrdersCount = typeof c.totalOrdersCount === 'number'
@@ -1454,7 +1697,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 : orders.filter(o => o.customer.phone === c.phone && o.status !== 'Annulée').reduce((sum, o) => sum + o.estimatedTotal, 0);
               const clientUnpaid = typeof c.unpaidAmount === 'number'
                 ? c.unpaidAmount
-                : orders.filter(o => o.customer.phone === c.phone && o.status !== 'Annulée' && !o.isPaid).reduce((sum, o) => sum + o.estimatedTotal, 0);
+                : orders.filter(o => o.customer.phone === c.phone && o.status !== 'Annulée').reduce((sum, o) => sum + getOrderRemainingBalance(o), 0);
 
               return (
                 <div key={c.id} className="dashboard-row-interactive p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
@@ -1462,23 +1705,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="flex flex-wrap items-center gap-2">
                       <h4 className="font-bold text-slate-900 text-sm">{c.facilityName}</h4>
                       <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold text-[11px] tabular-nums">
-                        {clientOrdersCount} commande{clientOrdersCount > 1 ? 's' : ''}
+                    {clientOrdersCount} commande{clientOrdersCount > 1 ? 's' : ''}
                       </span>
-                      <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/80 font-extrabold text-[11px] tabular-nums">
+                      {canViewOrderFinance && <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/80 font-extrabold text-[11px] tabular-nums">
                         {clientTotalSpent.toLocaleString('fr-FR')} FCFA
-                      </span>
-                      {clientUnpaid > 0 && (
+                      </span>}
+                      {canViewOrderFinance && clientUnpaid > 0 && (
                         <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200/80 font-bold text-[11px] tabular-nums">
                           Reste à régler : {clientUnpaid.toLocaleString('fr-FR')} FCFA
                         </span>
                       )}
+                      {canViewReceivables && Number(c.creditLimit) > 0 && (
+                        <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200/80 font-bold text-[11px] tabular-nums">
+                          Plafond : {Number(c.creditLimit).toLocaleString('fr-FR')} FCFA
+                        </span>
+                      )}
                     </div>
                     <div className="text-slate-500 mt-1">
-                      {c.contactName || 'Réception'} · <span className="font-mono">{c.phone}</span> · {c.deliveryAddress || 'Libreville'}
+                      {c.contactName || 'Réception'} · <span className="font-mono">{c.phone}</span>{c.secondaryPhone && <> · 2e tél. <span className="font-mono">{c.secondaryPhone}</span></>} · {c.deliveryAddress || 'Libreville'}
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    <button
+                    {c.hasAccount && canManageClientCredit && (
+                      <button
+                        type="button"
+                        onClick={() => openCreditTerms(c as User)}
+                        className="py-1.5 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                      >
+                        <CreditCard className="w-3.5 h-3.5" />
+                        <span>Conditions de paiement</span>
+                      </button>
+                    )}
+                    {hasPerm('stats_view') && <button
                       type="button"
                       onClick={() => {
                         setSelectedHistoryClientId(c.id || c.phone);
@@ -1488,15 +1746,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     >
                       <FileText className="w-3.5 h-3.5 text-emerald-400" />
                       <span>Historique des achats</span>
-                    </button>
-                    <button
+                    </button>}
+                    {hasPerm('messages_send') && <button
                       type="button"
                       onClick={() => { setTargetMessageClient(c); setIsMessageModalOpen(true); }}
                       className="py-1.5 px-3 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold flex items-center gap-1 cursor-pointer shadow-xs transition-colors"
                     >
                       <MessageCircle className="w-3.5 h-3.5" />
                       <span>Message Direct</span>
-                    </button>
+                    </button>}
                   </div>
                 </div>
               );
@@ -1508,12 +1766,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* 7A. TAB: REAL-TIME COLLABORATOR LOGS (SUPER-ADMIN) */}
-      {activeTab === 'logs' && isSuperAdmin && (
-        <StaffLogsRealtimeModule />
+      {activeTab === 'logs' && canViewAudit && (
+        <StaffLogsRealtimeModule canClearLogs={isSuperAdmin} />
       )}
 
       {/* 7B. TAB: AUDIT LOGS */}
-      {activeTab === 'audit' && isSuperAdmin && (
+      {activeTab === 'audit' && canViewAudit && (
         <AuditLogModule orders={orders} />
       )}
 
@@ -1535,6 +1793,66 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* MODALS */}
+      {creditTermsClient && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" role="presentation">
+          <form onSubmit={handleSaveCreditTerms} className="w-full max-w-lg space-y-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6" role="dialog" aria-modal="true" aria-labelledby="credit-terms-title">
+            <header className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-wider text-indigo-700">Compte client B2B</p>
+                <h2 id="credit-terms-title" className="mt-1 text-lg font-black text-slate-900">Conditions de paiement</h2>
+                <p className="mt-1 text-xs text-slate-500">{creditTermsClient.facilityName} · {creditTermsClient.phone}</p>
+              </div>
+              <button type="button" onClick={() => setCreditTermsClient(null)} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100" aria-label="Fermer">
+                <XCircle className="h-5 w-5" />
+              </button>
+            </header>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-bold text-slate-700">
+                Plafond d’encours (FCFA)
+                <input type="number" min={0} max={1_000_000_000} step={50000} value={creditLimitDraft} onChange={(event) => setCreditLimitDraft(Math.max(0, Number(event.target.value) || 0))} className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 font-mono text-sm" />
+              </label>
+              <label className="text-xs font-bold text-slate-700">
+                Minimum par commande à terme (FCFA)
+                <input type="number" min={0} max={1_000_000_000} step={5000} value={creditMinimumDraft} onChange={(event) => setCreditMinimumDraft(Math.max(0, Number(event.target.value) || 0))} className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 font-mono text-sm" />
+                <span className="mt-1 block text-[10px] font-medium text-slate-500">Le panier client indique le montant restant pour atteindre ce seuil.</span>
+              </label>
+              <label className="text-xs font-bold text-slate-700">
+                Délai de règlement
+                <select value={creditPaymentTermsDraft} onChange={(event) => setCreditPaymentTermsDraft(event.target.value as PaymentTerms)} className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm">
+                  <option value="comptant">Comptant</option>
+                  <option value="15_jours">À 15 jours</option>
+                  <option value="30_jours">À 30 jours</option>
+                  <option value="60_jours">À 60 jours</option>
+                  <option value="acompte_solde">Acompte puis solde (à suivre manuellement)</option>
+                </select>
+              </label>
+              <label className="text-xs font-bold text-slate-700">
+                Autorisation du compte
+                <select value={creditAccountStatusDraft} onChange={(event) => setCreditAccountStatusDraft(event.target.value as ClientAccountStatus)} className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm">
+                  <option value="actif">Actif</option>
+                  <option value="en_attente">En attente</option>
+                  <option value="suspendu">Suspendu</option>
+                  <option value="bloque">Bloqué</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-xs text-amber-900">
+              Encours actuel : <strong>{Math.max(0, Number(creditTermsClient.outstandingBalance) || 0).toLocaleString('fr-FR')} FCFA</strong> · le serveur revérifie le plafond avant chaque commande à terme.
+            </div>
+            {creditTermsError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-semibold text-rose-800">{creditTermsError}</p>}
+
+            <footer className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setCreditTermsClient(null)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50">Annuler</button>
+              <button type="submit" disabled={savingCreditTerms || (creditLimitDraft > 0 && creditMinimumDraft > creditLimitDraft)} className="rounded-xl bg-indigo-700 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50">
+                {savingCreditTerms ? 'Enregistrement…' : 'Enregistrer les conditions'}
+              </button>
+            </footer>
+          </form>
+        </div>
+      )}
+
       {excelImportPreview && (
         <CatalogExcelImportModal
           preview={excelImportPreview}
@@ -1552,6 +1870,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           onClose={() => { setIsProductModalOpen(false); setEditingProduct(null); }}
           onSuccess={(prod: Product) => { onProductSaved(prod); setIsProductModalOpen(false); }}
           initialProduct={editingProduct || undefined}
+          canManageStock={canAdjustStock}
+          canManagePurchasePrice={canManagePurchasePrice}
+        />
+      )}
+      {receivingStockProduct && (
+        <StockReceiptModal
+          product={receivingStockProduct}
+          onClose={() => setReceivingStockProduct(null)}
+          onProductUpdated={(updatedProduct) => {
+            onProductSaved(updatedProduct);
+            setReceivingStockProduct(updatedProduct);
+          }}
         />
       )}
 
@@ -1560,7 +1890,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           isOpen={true}
           onClose={() => { setIsMessageModalOpen(false); setTargetMessageClient(null); }}
           targetClient={targetMessageClient}
-          onSuccess={() => { setIsMessageModalOpen(false); setTargetMessageClient(null); onRefresh(); }}
+          onSuccess={() => { setIsMessageModalOpen(false); setTargetMessageClient(null); }}
         />
       )}
 

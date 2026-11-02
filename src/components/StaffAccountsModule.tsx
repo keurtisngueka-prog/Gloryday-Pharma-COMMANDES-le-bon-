@@ -2,6 +2,7 @@ import React, { FormEvent, useEffect, useState } from 'react';
 import { Check, Edit, LoaderCircle, Plus, ShieldCheck, UserRoundX, Users, Activity, Clock } from 'lucide-react';
 import { api, type StaffAccountSummary, type StaffRole } from '../api';
 import { StaffPermission } from '../types';
+import { STAFF_PERMISSION_GROUPS, getDefaultStaffPermissions, normalizeStaffPermissions } from '../permissions';
 
 const ROLE_DETAILS: Record<StaffRole, string> = {
   'Admin simple': 'Tableau de bord, commandes et clients ; sans réglages système ni export SQL',
@@ -10,9 +11,18 @@ const ROLE_DETAILS: Record<StaffRole, string> = {
   Logistique: 'Préparation et suivi des livraisons',
 };
 
-const PERMISSION_LABELS: { id: StaffPermission; label: string; desc: string }[] = [
-  { id: 'catalog_stock', label: 'Catalogue & Stocks', desc: 'Modifier produits, quantités en stock et remises volume' },
+const LEGACY_PERMISSION_LABELS: { id: StaffPermission; label: string; desc: string }[] = [
+  { id: 'catalog_view', label: 'Consulter le catalogue', desc: 'Voir les fiches produits sans pouvoir les modifier' },
+  { id: 'catalog_manage', label: 'Modifier le catalogue', desc: 'Créer, modifier ou retirer un produit, gérer les packs et les remises' },
+  { id: 'stock_view', label: 'Consulter les stocks', desc: 'Voir les quantités internes, les mouvements et les alertes' },
+  { id: 'stock_receive', label: 'Réceptionner du stock', desc: 'Ajouter une réception fournisseur avec lot, date et justificatif' },
+  { id: 'stock_adjust', label: 'Corriger le stock', desc: 'Enregistrer un inventaire ou corriger une quantité avec un motif' },
+  { id: 'stock_batches_manage', label: 'Ancien droit stock (compatibilité)', desc: 'Ancien réglage conservé pour convertir les droits déjà attribués.' },
+  { id: 'stock_costs_view', label: 'Voir coûts & marges', desc: 'Accéder aux prix d’achat, prix de revient et marges confidentiels' },
+  { id: 'stock_export', label: 'Exporter les données de stock', desc: 'Télécharger produits, lots, mouvements et inventaires' },
+  { id: 'catalog_stock', label: 'Accès global historique catalogue & stock', desc: 'Droit global conservé pour les anciens comptes ; active toutes les fonctions catalogue et stock' },
   { id: 'orders_view', label: 'Voir Commandes', desc: 'Consulter les bons de commande reçus' },
+  { id: 'orders_status_manage', label: 'Ancien droit commandes (compatibilité)', desc: 'Ancien accès combiné conservé pour convertir les droits déjà attribués.' },
   { id: 'orders_manage', label: 'Valider Commandes & Paiements', desc: 'Confirmer, annuler ou pointer les paiements' },
   { id: 'quotes_manage', label: 'Gérer les Devis / Proforma', desc: 'Traiter les demandes de devis et articles stock 0' },
   { id: 'clients_manage', label: 'Cliniques & Relances', desc: 'Voir le répertoire clients et envoyer des messages' },
@@ -21,19 +31,15 @@ const PERMISSION_LABELS: { id: StaffPermission; label: string; desc: string }[] 
   { id: 'settings_manage', label: 'Paramètres Système', desc: 'Configurer Mobile Money et seuils de remise' },
 ];
 
+const PERMISSION_LABELS = STAFF_PERMISSION_GROUPS.flatMap(group => group.permissions.map(permission => ({
+  id: permission.id,
+  label: permission.label,
+  desc: permission.description,
+  group: group.title,
+})));
+
 function getDefaultPermissionsForRole(role: StaffRole): StaffPermission[] {
-  switch (role) {
-    case 'Admin simple':
-      return ['orders_view', 'orders_manage', 'clients_manage', 'logistics_manage', 'stats_view'];
-    case 'Commercial':
-      return ['orders_view', 'orders_manage', 'quotes_manage', 'clients_manage'];
-    case 'Gestionnaire Catalogue':
-      return ['catalog_stock', 'orders_view'];
-    case 'Logistique':
-      return ['orders_view', 'logistics_manage'];
-    default:
-      return ['orders_view'];
-  }
+  return getDefaultStaffPermissions(role);
 }
 
 function formatLastSeen(iso?: string): string {
@@ -100,9 +106,7 @@ export const StaffAccountsModule: React.FC = () => {
       identifier: account.identifier,
       name: account.name,
       role: account.role,
-      permissions: account.permissions && account.permissions.length > 0
-        ? account.permissions
-        : getDefaultPermissionsForRole(account.role),
+      permissions: normalizeStaffPermissions(account.permissions, account.role),
     });
     setPassword('');
     setPasswordConfirmation('');
@@ -124,7 +128,15 @@ export const StaffAccountsModule: React.FC = () => {
       const next = exists
         ? prev.permissions.filter(p => p !== perm)
         : [...prev.permissions, perm];
-      return { ...prev, permissions: next };
+      return { ...prev, permissions: normalizeStaffPermissions(next, prev.role) };
+    });
+  };
+
+  const togglePermissionGroup = (permissions: StaffPermission[], enable: boolean) => {
+    setForm(prev => {
+      const next = new Set(prev.permissions);
+      permissions.forEach(permission => enable ? next.add(permission) : next.delete(permission));
+      return { ...prev, permissions: Array.from(next) };
     });
   };
 
@@ -144,7 +156,7 @@ export const StaffAccountsModule: React.FC = () => {
       setError('Le nouveau mot de passe doit contenir entre 8 et 85 caractères.');
       return;
     }
-    if (form.permissions.length === 0) {
+    if (form.permissions.length === 0 && !editing) {
       setError('Sélectionnez au moins un droit d’accès pour ce collaborateur.');
       return;
     }
@@ -286,29 +298,52 @@ export const StaffAccountsModule: React.FC = () => {
                 {form.permissions.length} droit(s) actif(s)
               </span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {PERMISSION_LABELS.map((item) => {
-                const checked = form.permissions.includes(item.id);
+            <div className="space-y-3">
+              {STAFF_PERMISSION_GROUPS.map((group) => {
+                const groupPermissions = group.permissions.map(permission => permission.id);
+                const enabledCount = groupPermissions.filter(permission => form.permissions.includes(permission)).length;
+                const allEnabled = enabledCount === groupPermissions.length;
                 return (
-                  <label
-                    key={item.id}
-                    className={`flex items-start gap-2.5 p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                      checked
-                        ? 'bg-white border-purple-400 shadow-2xs'
-                        : 'bg-white/60 border-slate-200 opacity-75 hover:opacity-100'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => togglePermission(item.id)}
-                      className="mt-0.5 rounded text-purple-700 focus:ring-purple-500"
-                    />
-                    <div className="min-w-0">
-                      <span className="font-bold text-slate-900 block">{item.label}</span>
-                      <span className="text-[11px] text-slate-500 block leading-snug">{item.desc}</span>
+                  <section key={group.id} className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-xs font-black text-slate-800">
+                        {group.title} <span className="ml-1 font-semibold text-slate-400">{enabledCount}/{groupPermissions.length}</span>
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => togglePermissionGroup(groupPermissions, !allEnabled)}
+                        className="rounded-lg px-2 py-1 text-[10px] font-bold text-purple-700 hover:bg-purple-50"
+                      >
+                        {allEnabled ? 'Tout retirer' : 'Tout activer'}
+                      </button>
                     </div>
-                  </label>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {group.permissions.map((item) => {
+                        const checked = form.permissions.includes(item.id);
+                        return (
+                          <label
+                            key={item.id}
+                            className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-2.5 text-xs transition-all ${
+                              checked
+                                ? 'border-purple-400 bg-purple-50/50 shadow-2xs'
+                                : 'border-slate-200 bg-white opacity-80 hover:opacity-100'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePermission(item.id)}
+                              className="mt-0.5 rounded text-purple-700 focus:ring-purple-500"
+                            />
+                            <div className="min-w-0">
+                              <span className="block font-bold text-slate-900">{item.label}</span>
+                              <span className="block text-[11px] leading-snug text-slate-500">{item.description}</span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </section>
                 );
               })}
             </div>
@@ -423,7 +458,7 @@ export const StaffAccountsModule: React.FC = () => {
                       {/* Granular Permission Badges */}
                       <div className="flex flex-wrap gap-1 pt-1">
                         {perms.map((pId) => {
-                          const found = PERMISSION_LABELS.find(item => item.id === pId);
+                          const found = PERMISSION_LABELS.find(item => item.id === pId) || LEGACY_PERMISSION_LABELS.find(item => item.id === pId);
                           return (
                             <span
                               key={pId}

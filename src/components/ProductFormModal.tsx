@@ -23,6 +23,8 @@ interface ProductFormModalProps {
   onClose: () => void;
   onSuccess: (product: Product) => void;
   initialProduct?: Product | null;
+  canManageStock?: boolean;
+  canManagePurchasePrice?: boolean;
 }
 
 const MAX_IMAGE_DIMENSION = 1000;
@@ -101,7 +103,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
-  initialProduct
+  initialProduct,
+  canManageStock = true,
+  canManagePurchasePrice = true
 }) => {
   const [name, setName] = useState(initialProduct?.name || '');
   const [category, setCategory] = useState(initialProduct?.category || 'Consommables médicaux');
@@ -424,7 +428,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         setPdfNoticeUrl(cleanPdfUrl);
       }
 
-      const productPayload = {
+      const productPayload: Partial<Product> = {
         name: name.trim(),
         category,
         subcategory: category === 'Consommables médicaux' ? subcategory : undefined,
@@ -438,11 +442,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         isPromotion,
         discountPercentage: isPromotion ? Number(discountPercentage) || 0 : undefined,
         originalPrice: isPromotion ? Number(originalPrice) || 0 : undefined,
-        quantityAvailable: Number(quantityAvailable) || 0,
-        stockQuantity: Number(quantityAvailable) || 0,
         alertThreshold: Number(alertThreshold) || 10,
         lowStockAlertThreshold: Number(alertThreshold) || 10,
-        purchasePrice: Number(purchasePrice) || 0
+        ...(canManagePurchasePrice ? { purchasePrice: Number(purchasePrice) || 0 } : {})
       };
 
       let result: Product;
@@ -996,28 +998,33 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           </div>
 
           {/* Stock Réel, Quantité Disponible, Seuil d'Alerte & Prix d'Achat */}
-          <div className="p-3.5 rounded-xl bg-emerald-50/40 border border-emerald-200/80 space-y-3">
+          {(canManageStock || canManagePurchasePrice) && <div className="p-3.5 rounded-xl bg-emerald-50/40 border border-emerald-200/80 space-y-3">
             <span className="font-bold text-xs text-emerald-950 uppercase block">
               Stock Réel, Seuil d'Alerte & Marge B2B
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              <div>
+              {canManageStock && <div>
                 <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                  Quantité disponible *
+                  Stock actuel
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  required
-                  placeholder="Saisir le stock réel"
-                  value={quantityAvailable}
-                  onChange={(e) => setQuantityAvailable(parseInt(e.target.value, 10) || 0)}
-                  className="w-full p-2 rounded-lg border border-slate-300 font-mono text-xs bg-white"
-                />
-                <p className="mt-1 text-[10px] text-slate-500">Un stock nul ou non renseigné bloque les commandes.</p>
-              </div>
+                {initialProduct ? (
+                  <input
+                    type="number"
+                    value={quantityAvailable}
+                    readOnly
+                    className="w-full rounded-lg border border-slate-300 bg-slate-100 p-2 font-mono text-xs text-slate-500"
+                  />
+                ) : (
+                  <p className="rounded-lg border border-emerald-200 bg-white p-2 font-mono text-xs font-bold text-emerald-800">
+                    0 — enregistrez la réception après la création du produit
+                  </p>
+                )}
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Les entrées de stock sont enregistrées séparément avec leur opérateur, motif et numéro de lot.
+                </p>
+              </div>}
 
-              <div>
+              {canManageStock && <div>
                 <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
                   Seuil d'alerte rupture *
                 </label>
@@ -1030,9 +1037,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   onChange={(e) => setAlertThreshold(parseInt(e.target.value, 10) || 10)}
                   className="w-full p-2 rounded-lg border border-slate-300 font-mono text-xs bg-white"
                 />
-              </div>
+              </div>}
 
-              <div>
+              {canManagePurchasePrice && <div>
                 <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
                   Prix d'achat unitaire (FCFA)
                 </label>
@@ -1044,12 +1051,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   onChange={(e) => setPurchasePrice(parseInt(e.target.value, 10) || 0)}
                   className="w-full p-2 rounded-lg border border-slate-300 font-mono text-xs bg-white"
                 />
-              </div>
+              </div>}
             </div>
             <p className="text-[10px] text-slate-500">
               Lorsque le stock disponible descend en dessous du seuil d'alerte, un indicateur d'urgence s'affiche dans le back-office.
             </p>
-          </div>
+          </div>}
 
           {/* Variants */}
           <div className="pt-2 border-t border-slate-100">

@@ -17,6 +17,7 @@ import {
   X
 } from 'lucide-react';
 import { Order, OrderStatus } from '../types';
+import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
 
 interface ClientPurchaseHistoryViewProps {
   clients: any[];
@@ -59,6 +60,7 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
         facilityType: string;
         contactName: string;
         phone: string;
+        secondaryPhone?: string;
         deliveryAddress: string;
         avatarUrl?: string;
         orders: Order[];
@@ -77,6 +79,7 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
         facilityType: c.facilityType || 'Clinique',
         contactName: c.contactName || 'Responsable Achats',
         phone: c.phone || '',
+        secondaryPhone: c.secondaryPhone || undefined,
         deliveryAddress: c.deliveryAddress || 'Libreville',
         avatarUrl: c.avatarUrl || undefined,
         orders: [],
@@ -108,6 +111,7 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
           facilityType: ord.customer?.facilityType || 'Clinique',
           contactName: ord.customer?.contactName || 'Responsable',
           phone: ord.customer?.phone || '',
+          secondaryPhone: ord.customer?.secondaryPhone || undefined,
           deliveryAddress: ord.customer?.deliveryAddress || 'Libreville',
           orders: [],
           rawClient: {
@@ -115,6 +119,7 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
             facilityName: ord.customer?.facilityName || 'Établissement Client',
             contactName: ord.customer?.contactName || 'Responsable',
             phone: ord.customer?.phone || '',
+            secondaryPhone: ord.customer?.secondaryPhone || undefined,
             deliveryAddress: ord.customer?.deliveryAddress || 'Libreville'
           }
         };
@@ -134,12 +139,8 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
           (sum, o) => sum + (o.estimatedTotal || 0),
           0
         );
-        const paidAmount = validOrders
-          .filter((o) => o.isPaid)
-          .reduce((sum, o) => sum + (o.estimatedTotal || 0), 0);
-        const unpaidAmount = validOrders
-          .filter((o) => !o.isPaid)
-          .reduce((sum, o) => sum + (o.estimatedTotal || 0), 0);
+        const paidAmount = validOrders.reduce((sum, order) => sum + getOrderPaidAmount(order), 0);
+        const unpaidAmount = validOrders.reduce((sum, order) => sum + getOrderRemainingBalance(order), 0);
         const averageBasket =
           validOrders.length > 0 ? Math.round(totalSpent / validOrders.length) : 0;
 
@@ -212,8 +213,8 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
     if (!activeClient) return [];
     return activeClient.orders.filter((ord) => {
       if (statusFilter !== 'all' && ord.status !== statusFilter) return false;
-      if (paymentFilter === 'paid' && !ord.isPaid) return false;
-      if (paymentFilter === 'unpaid' && ord.isPaid) return false;
+      if (paymentFilter === 'paid' && (ord.status === 'Annulée' || getOrderRemainingBalance(ord) > 0)) return false;
+      if (paymentFilter === 'unpaid' && (ord.status === 'Annulée' || getOrderRemainingBalance(ord) <= 0)) return false;
       if (orderSearchQuery.trim()) {
         const q = orderSearchQuery.toLowerCase();
         const matchRef = ord.reference.toLowerCase().includes(q);
@@ -234,10 +235,14 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
       'Établissement',
       'Contact',
       'Téléphone',
+      'Téléphone secondaire',
       'Référence Commande',
       'Date & Heure',
       'Statut Commande',
       'Règlement',
+      'Montant encaissé (FCFA)',
+      'Reste dû (FCFA)',
+      'Échéance recouvrement',
       'Mode Livraison',
       'Article Commandé',
       'Conditionnement',
@@ -253,10 +258,14 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
           activeClient.facilityName,
           activeClient.contactName,
           activeClient.phone,
+          activeClient.secondaryPhone || '',
           ord.reference,
           new Date(ord.createdAt).toLocaleString('fr-FR'),
           ord.status,
-          ord.isPaid ? 'Payée' : 'En attente',
+          ord.status === 'Annulée' ? 'Annulée' : getOrderRemainingBalance(ord) <= 0 ? 'Soldée' : getOrderPaidAmount(ord) > 0 ? 'Acompte reçu' : 'En attente',
+          String(getOrderPaidAmount(ord)),
+          String(getOrderRemainingBalance(ord)),
+          ord.collectionDueDate ? formatCollectionDueDate(ord.collectionDueDate) : '',
           ord.customer.deliveryMode === 'retrait' ? 'Retrait dépôt' : 'Livraison',
           '-',
           '-',
@@ -271,10 +280,14 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
             activeClient.facilityName,
             activeClient.contactName,
             activeClient.phone,
+            activeClient.secondaryPhone || '',
             ord.reference,
             new Date(ord.createdAt).toLocaleString('fr-FR'),
             ord.status,
-            ord.isPaid ? 'Payée' : 'En attente',
+            ord.status === 'Annulée' ? 'Annulée' : getOrderRemainingBalance(ord) <= 0 ? 'Soldée' : getOrderPaidAmount(ord) > 0 ? 'Acompte reçu' : 'En attente',
+            String(getOrderPaidAmount(ord)),
+            String(getOrderRemainingBalance(ord)),
+            ord.collectionDueDate ? formatCollectionDueDate(ord.collectionDueDate) : '',
             ord.customer.deliveryMode === 'retrait' ? 'Retrait dépôt' : 'Livraison',
             item.productName,
             item.variant || 'Standard',
@@ -677,18 +690,20 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
                       <span className="text-slate-400" aria-hidden="true">·</span>
                       <span
                         className={`font-bold flex items-center gap-1 ${
-                          ord.isPaid ? 'text-emerald-700' : 'text-amber-700'
+                          ord.status === 'Annulée' ? 'text-rose-700' : getOrderRemainingBalance(ord) <= 0 ? 'text-emerald-700' : 'text-amber-700'
                         }`}
                       >
-                        {ord.isPaid ? (
+                        {ord.status === 'Annulée' ? (
+                          <span>Commande annulée</span>
+                        ) : getOrderRemainingBalance(ord) <= 0 ? (
                           <>
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Payée</span>
+                            <span>Soldée</span>
                           </>
                         ) : (
                           <>
                             <Clock className="w-3.5 h-3.5" />
-                            <span>En attente de règlement</span>
+                            <span>{getOrderPaidAmount(ord) > 0 ? 'Acompte reçu' : 'En attente de règlement'}</span>
                           </>
                         )}
                       </span>
@@ -698,6 +713,16 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
                       <span className="text-sm sm:text-base font-black text-slate-900 font-mono tabular-nums">
                         {(ord.estimatedTotal || 0).toLocaleString('fr-FR')} FCFA
                       </span>
+                      {ord.status !== 'Annulée' && getOrderRemainingBalance(ord) > 0 && (
+                        <div className={`mt-1 text-[10px] font-bold ${isCollectionOverdue(ord) ? 'text-rose-700' : 'text-amber-700'}`}>
+                          Versé : {getOrderPaidAmount(ord).toLocaleString('fr-FR')} FCFA · Reste dû : {getOrderRemainingBalance(ord).toLocaleString('fr-FR')} FCFA
+                          {ord.collectionDueDate && (
+                            <span className="block">
+                              {isCollectionOverdue(ord) ? 'Échéance dépassée · ' : 'À régler avant le '}{formatCollectionDueDate(ord.collectionDueDate)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -757,7 +782,7 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
                         <CreditCard className="w-3.5 h-3.5 text-slate-400" />
                         Paiement :{' '}
                         <strong className="text-slate-700">
-                          {ord.customer.paymentMethod}
+                          {{ especes: 'Espèces', airtel_money: 'Airtel Money', moov_money: 'Moov Money', virement: 'Virement', cheque: 'Chèque', en_compte: 'À terme' }[ord.customer.paymentMethod] || ord.customer.paymentMethod}
                         </strong>
                       </span>
                       {ord.courier?.name && (
@@ -799,14 +824,14 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
                           type="button"
                           onClick={() => void onUpdatePayment(ord.id, !ord.isPaid)}
                           className={`py-1.5 px-3 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer ${
-                            ord.isPaid
+                            getOrderRemainingBalance(ord) <= 0
                               ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800'
                               : 'bg-amber-50 hover:bg-amber-100 text-amber-800'
                           }`}
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           <span>
-                            {ord.isPaid ? 'Marquer non payée' : 'Valider paiement'}
+                            {getOrderRemainingBalance(ord) <= 0 ? 'Marquer non soldée' : 'Marquer soldée'}
                           </span>
                         </button>
                       )}

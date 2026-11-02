@@ -115,12 +115,13 @@ export interface CustomerInfo {
   facilityTypeOther?: string;
   contactName: string;
   phone: string;
+  secondaryPhone?: string;
   deliveryAddress: string;
   neighborhoodId?: string;
   neighborhoodName?: string;
   notes?: string;
   deliveryMode: 'livraison' | 'retrait';
-  paymentMethod: 'especes' | 'airtel_money' | 'moov_money' | 'virement';
+  paymentMethod: 'especes' | 'airtel_money' | 'moov_money' | 'virement' | 'cheque' | 'en_compte';
   mobilePayment?: MobilePaymentDetails;
   coordinates?: Coordinates;
   googleMapsUrl?: string;
@@ -163,11 +164,37 @@ export interface PaymentInstallment {
   id: string;
   type: 'acompte' | 'solde';
   amount: number;
-  paymentMethod: 'especes' | 'airtel_money' | 'moov_money' | 'virement';
+  paymentMethod: 'especes' | 'airtel_money' | 'moov_money' | 'virement' | 'cheque';
   transactionReference?: string;
   status: 'en_attente' | 'valide' | 'rejete';
   paidAt: string;
   validatedBy?: string;
+}
+
+export type CollectionReminderChannel = 'telephone' | 'whatsapp' | 'sms' | 'email' | 'site' | 'visite' | 'autre';
+export type CollectionReminderOutcome =
+  | 'client_joint'
+  | 'message_envoye'
+  | 'message_prepare'
+  | 'sans_reponse'
+  | 'promesse_paiement'
+  | 'contestation'
+  | 'autre';
+
+export interface CollectionReminder {
+  id: string;
+  orderId: string;
+  orderReference: string;
+  clientId?: string;
+  clientName: string;
+  occurredAt: string;
+  channel: CollectionReminderChannel;
+  outcome: CollectionReminderOutcome;
+  notes?: string;
+  nextFollowUpDate?: string;
+  recordedById: string;
+  recordedByName: string;
+  recordedByRole: AppRole;
 }
 
 export interface InvoiceRecord {
@@ -243,6 +270,7 @@ export interface Order {
   cancellationReason?: string;
   isPaid: boolean;
   amountPaid?: number;
+  collectionDueDate?: string;
   installments?: PaymentInstallment[];
   invoices?: InvoiceRecord[];
   deliveryProof?: DeliveryProof;
@@ -281,7 +309,7 @@ export interface WhatsAppNotificationLog {
 export type JobTitle = 'directeur' | 'docteur' | 'charge_commandes' | 'pharmacien' | 'autre';
 export type DirectorApprovalStatus = 'pending' | 'approved' | 'rejected';
 export type ClientAccountStatus = 'actif' | 'en_attente' | 'suspendu' | 'bloque';
-export type PaymentTerms = 'comptant' | '15_jours' | '30_jours' | '60_jours';
+export type PaymentTerms = 'comptant' | '15_jours' | '30_jours' | '60_jours' | 'acompte_solde';
 
 export interface HealthcareStructure {
   id: string;
@@ -314,6 +342,7 @@ export interface StockMovement {
   productId: string;
   productName: string;
   lotNumber?: string;
+  reference?: string;
   type: 'entree' | 'sortie_commande' | 'perte_casse' | 'ajustement' | 'retour';
   quantity: number;
   previousQuantity: number;
@@ -321,6 +350,36 @@ export interface StockMovement {
   reason: string;
   date: string;
   performedBy: string;
+  performedById?: string;
+  performedByRole?: AppRole;
+}
+
+export type OperatingExpenseCategory =
+  | 'transport'
+  | 'loyer'
+  | 'salaires'
+  | 'communication'
+  | 'fournitures'
+  | 'frais_bancaires'
+  | 'autre';
+
+export interface OperatingExpense {
+  id: string;
+  date: string;
+  category: OperatingExpenseCategory;
+  description: string;
+  amount: number;
+  paymentMethod?: string;
+  supplier?: string;
+  reference?: string;
+  status: 'active' | 'annulee';
+  recordedById: string;
+  recordedByName: string;
+  createdAt: string;
+  voidedAt?: string;
+  voidedById?: string;
+  voidedByName?: string;
+  voidReason?: string;
 }
 
 export interface Supplier {
@@ -348,6 +407,7 @@ export interface PurchaseOrder {
 export interface User {
   id: string;
   phone: string;
+  secondaryPhone?: string;
   facilityName: string;
   contactName?: string;
   facilityType?: FacilityType;
@@ -362,6 +422,7 @@ export interface User {
   structureId?: string;
   accountStatus?: ClientAccountStatus;
   creditLimit?: number;
+  minimumCreditOrderAmount?: number;
   outstandingBalance?: number;
   paymentTerms?: PaymentTerms;
   notes?: string;
@@ -461,13 +522,47 @@ export interface ClientPurchaseStats {
 }
 
 export type StaffPermission =
+  /** Legacy aggregate grant. Expanded to individual catalogue/stock permissions on load. */
   | 'catalog_stock'
+  | 'catalog_view'
+  | 'catalog_manage'
+  | 'packs_manage'
+  | 'stock_view'
+  | 'stock_receive'
+  | 'stock_adjust'
+  | 'stock_availability_manage'
+  /** Legacy name retained for existing saved staff accounts. */
+  | 'stock_batches_manage'
+  | 'stock_costs_view'
+  | 'stock_costs_manage'
+  | 'stock_export'
   | 'orders_view'
+  /** Legacy aggregate grant. Expanded to individual order/finance permissions on load. */
   | 'orders_manage'
+  | 'orders_confirm'
+  | 'orders_cancel'
+  /** Legacy combined status grant. */
+  | 'orders_status_manage'
+  | 'orders_finance_view'
+  | 'orders_finance_manage'
+  | 'payments_manage'
+  | 'quotes_view'
   | 'quotes_manage'
+  | 'clients_view'
   | 'clients_manage'
+  | 'clients_credit_manage'
+  | 'messages_view'
+  | 'messages_send'
+  | 'campaigns_manage'
+  | 'logistics_view'
   | 'logistics_manage'
+  | 'receivables_view'
+  | 'receivables_payments_manage'
+  | 'receivables_reminders_manage'
+  | 'finance_view'
+  | 'expenses_manage'
   | 'stats_view'
+  | 'audit_view'
   | 'settings_manage';
 
 export interface VolumeDiscountSettings {
@@ -487,7 +582,7 @@ export interface StaffActivityStats {
   lastLoginAt?: string;
 }
 
-export type StaffLogCategory = 'stock_price' | 'orders' | 'access' | 'system';
+export type StaffLogCategory = 'stock_price' | 'orders' | 'finance' | 'access' | 'system';
 
 export type StaffLogSeverity = 'info' | 'warning' | 'critical';
 
@@ -505,7 +600,7 @@ export interface StaffActivityLog {
   category: StaffLogCategory;
   severity: StaffLogSeverity;
   actionLabel: string;
-  targetType: 'product' | 'order' | 'staff' | 'settings' | 'quote';
+  targetType: 'product' | 'order' | 'staff' | 'settings' | 'quote' | 'expense';
   targetId?: string;
   targetLabel: string;
   previousValue?: string;

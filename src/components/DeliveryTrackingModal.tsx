@@ -38,6 +38,7 @@ interface DeliveryTrackingModalProps {
     options?: { courier?: CourierInfo; deliveryProof?: DeliveryProof }
   ) => Promise<void>;
   isAdmin?: boolean;
+  canSendMessages?: boolean;
 }
 
 export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
@@ -46,6 +47,7 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
   onClose,
   onUpdateStage,
   isAdmin = false,
+  canSendMessages = false,
 }) => {
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [copiedMsg, setCopiedMsg] = useState(false);
@@ -757,12 +759,12 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
           </div>
 
           {/* Automated WhatsApp Notifications Section (RESERVED STRICTLY FOR STAFF & ADMINS) */}
-          {isAdmin && (
+          {(isAdmin || canSendMessages) && (
             <div className="p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200/90 space-y-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <span className="text-xs font-black text-emerald-950 uppercase tracking-wider flex items-center gap-1.5">
                   <MessageCircle className="w-4 h-4 text-emerald-600" />
-                  Notification WhatsApp ({stages[currentStageIndex]?.label})
+                  {canSendMessages ? `Notification WhatsApp (${stages[currentStageIndex]?.label})` : 'Communication au coursier'}
                 </span>
                 <div className="flex items-center gap-1.5">
                   <span className="inline-flex items-center gap-1 text-[10px] text-emerald-900 font-extrabold bg-emerald-100/90 px-2 py-0.5 rounded-md border border-emerald-300">
@@ -780,12 +782,12 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                   <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                   <span>Message prêt à envoyer :</span>
                 </div>
-                Aucun message ne part automatiquement et aucun envoi n’est archivé. Ouvrez WhatsApp ci-dessous puis envoyez le message manuellement si nécessaire.
+                  Aucun message ne part automatiquement. Les actions autorisées ouvrent WhatsApp pour un envoi manuel.
               </div>
 
               {/* Action buttons (Backup manuel pour la logistique) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                <a
+                {canSendMessages && <a
                   href={generateWhatsAppMessageForStage(order, currentStage).directUrl}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -793,9 +795,9 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                 >
                   <Send className="w-3.5 h-3.5" />
                   <span>Renvoyer Manuellement (WhatsApp)</span>
-                </a>
+                </a>}
 
-                <a
+                {isAdmin && <a
                   href={generateCourierMissionWhatsApp(order, trackingLink).directUrl}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -803,11 +805,11 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                 >
                   <Truck className="w-3.5 h-3.5 text-blue-400" />
                   <span>Ordre de Mission Coursier (+ Lien GPS)</span>
-                </a>
+                </a>}
               </div>
 
               {/* Toggle Preview, Copy & Audit Logs */}
-              <div className="pt-1 flex items-center justify-between text-xs border-t border-emerald-200/60 flex-wrap gap-2">
+              {canSendMessages && <div className="pt-1 flex items-center justify-between text-xs border-t border-emerald-200/60 flex-wrap gap-2">
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
@@ -845,17 +847,17 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                   {copiedMsg ? <Check className="w-3.5 h-3.5 text-emerald-700" /> : <Copy className="w-3.5 h-3.5" />}
                   <span>{copiedMsg ? 'Texte copié !' : 'Copier le texte'}</span>
                 </button>
-              </div>
+              </div>}
 
               {/* Expandable Preview */}
-              {showMsgPreview && (
+              {canSendMessages && showMsgPreview && (
                 <div className="p-3 rounded-xl bg-white border border-emerald-200 text-[11px] font-mono text-slate-800 whitespace-pre-wrap leading-relaxed shadow-inner">
                   {generateWhatsAppMessageForStage(order, currentStage).messageText}
                 </div>
               )}
 
               {/* Expandable Audit Log */}
-              {showLogs && order.whatsappLogs && order.whatsappLogs.length > 0 && (
+              {canSendMessages && showLogs && order.whatsappLogs && order.whatsappLogs.length > 0 && (
                 <div className="p-3 rounded-xl bg-white border border-slate-200 space-y-2 text-xs">
                   <div className="font-extrabold text-slate-800 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
                     <History className="w-3.5 h-3.5 text-[#0d44e8]" />

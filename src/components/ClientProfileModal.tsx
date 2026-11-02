@@ -33,6 +33,7 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
     : detectNeighborhoodFromAddress(user.deliveryAddress || '')?.id || '';
   const [facilityName, setFacilityName] = useState(user.facilityName || '');
   const [contactName, setContactName] = useState(user.contactName || '');
+  const [secondaryPhone, setSecondaryPhone] = useState(user.secondaryPhone || '');
   const [facilityType, setFacilityType] = useState<FacilityType>(user.facilityType || 'Clinique');
   const [facilityTypeOther, setFacilityTypeOther] = useState(user.facilityTypeOther || '');
   const [neighborhoodId, setNeighborhoodId] = useState(initialNeighborhood);
@@ -95,6 +96,7 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
       const profileData: Parameters<typeof api.updateClientProfile>[0] = {
         facilityName: facilityName.trim(),
         contactName: contactName.trim(),
+        secondaryPhone: secondaryPhone.trim(),
         facilityType,
         facilityTypeOther: facilityType === 'Autre' ? facilityTypeOther.trim() : '',
         neighborhoodId,
@@ -209,6 +211,11 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
               <span className="mb-1.5 block text-xs font-bold text-slate-700">Téléphone de connexion</span>
               <input value={user.phone} readOnly className="w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-500" />
               <span className="mt-1 block text-[11px] text-slate-500">Le numéro sert à vous connecter. Pour le modifier, contactez l’équipe Gloryday Pharma.</span>
+            </label>
+            <label className="block sm:col-span-2">
+              <span className="mb-1.5 block text-xs font-bold text-slate-700">Deuxième numéro de téléphone (facultatif)</span>
+              <input type="tel" inputMode="tel" maxLength={32} value={secondaryPhone} onChange={(event) => setSecondaryPhone(event.target.value)} placeholder="Ex. +241 06 12 34 56" className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+              <span className="mt-1 block text-[11px] text-slate-500">L’équipe peut l’utiliser si le numéro principal ne répond pas.</span>
             </label>
           </div>
 

@@ -17,6 +17,7 @@ import {
   Pause,
   Play,
   Database,
+  Receipt,
   Copy,
   Check,
   X
@@ -85,7 +86,7 @@ CREATE POLICY "activity_logs_admin_select_policy"
     )
   );`;
 
-export const StaffLogsRealtimeModule: React.FC = () => {
+export const StaffLogsRealtimeModule: React.FC<{ canClearLogs?: boolean }> = ({ canClearLogs = false }) => {
   const [logs, setLogs] = useState<StaffActivityLog[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -141,15 +142,17 @@ export const StaffLogsRealtimeModule: React.FC = () => {
   const counts = useMemo(() => {
     let stockPrice = 0;
     let orders = 0;
+    let finance = 0;
     let access = 0;
     let critical = 0;
     for (const log of logs) {
       if (log.category === 'stock_price') stockPrice += 1;
       else if (log.category === 'orders') orders += 1;
+      else if (log.category === 'finance') finance += 1;
       else if (log.category === 'access') access += 1;
       if (log.severity === 'critical' || log.severity === 'warning') critical += 1;
     }
-    return { total: logs.length, stockPrice, orders, access, critical };
+    return { total: logs.length, stockPrice, orders, finance, access, critical };
   }, [logs]);
 
   const filteredLogs = useMemo(() => {
@@ -232,6 +235,13 @@ export const StaffLogsRealtimeModule: React.FC = () => {
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
             <ShoppingCart className="w-3 h-3 text-blue-600" />
             <span>Commandes</span>
+          </span>
+        );
+      case 'finance':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+            <Receipt className="w-3 h-3 text-emerald-600" />
+            <span>Finances</span>
           </span>
         );
       case 'access':
@@ -354,7 +364,7 @@ export const StaffLogsRealtimeModule: React.FC = () => {
             <span>Exporter CSV</span>
           </button>
 
-          {!confirmClear ? (
+          {canClearLogs && (!confirmClear ? (
             <button
               type="button"
               onClick={() => setConfirmClear(true)}
@@ -381,12 +391,12 @@ export const StaffLogsRealtimeModule: React.FC = () => {
                 Non
               </button>
             </div>
-          )}
+          ))}
         </div>
       </div>
 
       {/* KPI Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
         <button
           type="button"
           onClick={() => setCategoryFilter('all')}
@@ -468,6 +478,26 @@ export const StaffLogsRealtimeModule: React.FC = () => {
           <p className="text-2xl font-black font-mono tabular-nums mt-1">{counts.access}</p>
           <p className={`text-[11px] mt-0.5 ${categoryFilter === 'access' ? 'text-purple-100' : 'text-slate-500'}`}>
             Sessions collaborateurs & permissions attribuées
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setCategoryFilter('finance')}
+          className={`text-left p-3.5 rounded-2xl border transition-all cursor-pointer ${
+            categoryFilter === 'finance'
+              ? 'bg-emerald-800 text-white border-emerald-800'
+              : 'bg-white text-slate-900 border-slate-200 hover:border-emerald-300'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className={`text-[11px] font-bold uppercase tracking-wider ${categoryFilter === 'finance' ? 'text-emerald-100' : 'text-emerald-800'}`}>
+              Finances
+            </span>
+            <Receipt className={`w-4 h-4 ${categoryFilter === 'finance' ? 'text-white' : 'text-emerald-600'}`} />
+          </div>
+          <p className="text-2xl font-black font-mono tabular-nums mt-1">{counts.finance}</p>
+          <p className={`text-[11px] mt-0.5 ${categoryFilter === 'finance' ? 'text-emerald-100' : 'text-slate-500'}`}>
+            Dépenses et annulations enregistrées
           </p>
         </button>
       </div>

@@ -18,6 +18,8 @@ import { matchesProductSearch } from '../utils/search';
 interface StockLotsModuleProps {
   products: Product[];
   onToggleProductStock: (productId: string, currentStatus: 'disponible' | 'rupture') => Promise<void>;
+  canToggleStock?: boolean;
+  canExportStock?: boolean;
   actorName?: string;
   actorRole?: string;
 }
@@ -25,6 +27,8 @@ interface StockLotsModuleProps {
 export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
   products,
   onToggleProductStock,
+  canToggleStock = true,
+  canExportStock = true,
   actorName = 'Gestionnaire Catalogue',
   actorRole = 'Super-Admin'
 }) => {
@@ -67,7 +71,7 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
       await onToggleProductStock(product.id, product.status);
       recordAuditLog({
         category: 'stock',
-        action: nextStatus === 'disponible' ? 'Réapprovisionnement Article' : 'Signalement Rupture Stock',
+        action: nextStatus === 'disponible' ? 'Activation de disponibilité' : 'Signalement Rupture Stock',
         actorName,
         actorRole,
         targetReference: product.id.toUpperCase(),
@@ -93,6 +97,9 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
 
   return (
     <div className="space-y-5">
+      <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-xs text-blue-900">
+        Changer l’état du catalogue ne modifie pas la quantité. Pour ajouter des unités, utilisez <strong>Réception +</strong> dans l’onglet Catalogue &amp; Stock.
+      </div>
       {/* 1. STOCK AVAILABILITY KPIS */}
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
@@ -139,7 +146,7 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
             </p>
           </div>
 
-          {outOfStockProducts.length > 0 && (
+          {canExportStock && outOfStockProducts.length > 0 && (
             <button
               type="button"
               onClick={handleCopyOutOfStockList}
@@ -287,7 +294,7 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
                             ? 'bg-slate-100 text-slate-700'
                             : 'bg-emerald-100 text-emerald-800'
                     }`}>{stockLabel}</span>
-                    <button
+                    {canToggleStock && <button
                       type="button"
                       disabled={updatingId === product.id}
                       onClick={() => handleToggle(product)}
@@ -305,10 +312,10 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
                       ) : (
                         <>
                           <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
-                          <span>En Rupture (Réapprovisionner)</span>
+                          <span>Réactiver la disponibilité</span>
                         </>
                       )}
-                    </button>
+                    </button>}
                   </div>
                 </div>
               );

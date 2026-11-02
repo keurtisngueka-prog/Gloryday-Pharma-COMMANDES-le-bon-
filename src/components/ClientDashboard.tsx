@@ -1,10 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useCallback, useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Building2, 
   Package, 
   TrendingUp, 
   Clock, 
   RotateCcw, 
+  RefreshCw,
   FileText, 
   MessageCircle, 
   Truck, 
@@ -24,6 +25,7 @@ import {
   UserRound
 } from 'lucide-react';
 import { Order, OrderStatus, User, MobilePaymentDetails } from '../types';
+import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
 import { generateInternalPurchaseOrderPdf } from '../utils/pdfGenerator';
 import { 
   computeDeliveryTimeWindow, 
@@ -39,7 +41,7 @@ interface ClientDashboardProps {
   currentUser: User | null;
   onReorder: (order: Order) => void;
   onOpenAuth: () => void;
-  onRefreshOrders: () => void;
+  onRefreshOrders: () => Promise<void>;
   onViewOrderPdf: (order: Order) => void;
   onTrackDelivery?: (order: Order) => void;
   onProfileUpdated?: (user: User) => void;
@@ -172,7 +174,12 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   onProfileUpdated
 }) => {
   const [selectedPaymentOrder, setSelectedPaymentOrder] = useState<Order | null>(null);
+  const [selectedActiveDeliveryId, setSelectedActiveDeliveryId] = useState('');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isRefreshingOrders, setIsRefreshingOrders] = useState(false);
+  const [ordersRefreshError, setOrdersRefreshError] = useState<string | null>(null);
+  const ordersRefreshInFlight = useRef(false);
+  const lastOrdersRefreshAt = useRef(Date.now());
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_progress' | 'delivered' | 'unpaid'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('calendar');
@@ -191,11 +198,44 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [scheduleFeedback, setScheduleFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  const refreshOrders = useCallback(async () => {
+    if (currentUser?.role !== 'client' || ordersRefreshInFlight.current) return;
+    ordersRefreshInFlight.current = true;
+    setIsRefreshingOrders(true);
+    setOrdersRefreshError(null);
+    try {
+      await onRefreshOrders();
+      lastOrdersRefreshAt.current = Date.now();
+    } catch (error) {
+      setOrdersRefreshError(error instanceof Error ? error.message : 'Impossible d’actualiser vos commandes. Vérifiez votre connexion et réessayez.');
+    } finally {
+      ordersRefreshInFlight.current = false;
+      setIsRefreshingOrders(false);
+    }
+  }, [currentUser?.role, onRefreshOrders]);
+
+  useEffect(() => {
+    if (currentUser?.role !== 'client') return;
+    const refreshIfStale = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastOrdersRefreshAt.current >= 30_000) {
+        void refreshOrders();
+      }
+    };
+    window.addEventListener('focus', refreshIfStale);
+    document.addEventListener('visibilitychange', refreshIfStale);
+    return () => {
+      window.removeEventListener('focus', refreshIfStale);
+      document.removeEventListener('visibilitychange', refreshIfStale);
+    };
+  }, [currentUser?.role, refreshOrders]);
+
   const nonCancelledOrders = orders.filter(o => o.status !== 'Annulée');
   const totalOrdered = nonCancelledOrders.reduce((sum, o) => sum + o.estimatedTotal, 0);
   const pendingOrders = orders.filter(o => o.status === 'À confirmer' || o.status === 'Confirmée' || o.status === 'En préparation');
   const deliveredOrders = orders.filter(o => o.status === 'Livrée');
-  const unpaidOrders = orders.filter(o => !o.isPaid && o.status !== 'Annulée');
+  const unpaidOrders = orders.filter(o => getOrderRemainingBalance(o) > 0 && o.status !== 'Annulée');
+  const totalOutstanding = unpaidOrders.reduce((sum, order) => sum + getOrderRemainingBalance(order), 0);
+  const overdueOrders = unpaidOrders.filter(isCollectionOverdue);
 
   // Resolve delivery schedules for all orders
   const resolvedSchedules = useMemo(
@@ -208,7 +248,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     return resolvedSchedules.filter(({ order }) => {
       if (statusFilter === 'in_progress' && (order.status === 'Livrée' || order.status === 'Annulée')) return false;
       if (statusFilter === 'delivered' && order.status !== 'Livrée') return false;
-      if (statusFilter === 'unpaid' && (order.isPaid || order.status === 'Annulée')) return false;
+      if (statusFilter === 'unpaid' && (getOrderRemainingBalance(order) <= 0 || order.status === 'Annulée')) return false;
 
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -296,10 +336,13 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
   }, [filteredSchedules]);
 
-  // Find active ongoing order for direct delivery spotlight
-  const activeDeliveryOrder = orders.find(
-    o => o.status === 'Confirmée' || o.status === 'En préparation'
-  ) || null;
+  // Let the customer switch between all active deliveries in the spotlight.
+  const activeDeliveryOrders = orders
+    .filter(order => order.status === 'Confirmée' || order.status === 'En préparation')
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const activeDeliveryOrder = activeDeliveryOrders.find(order => order.id === selectedActiveDeliveryId)
+    || activeDeliveryOrders[0]
+    || null;
 
   const deliverySteps = [
     { key: 'preparation', label: '1. Colisage & Validation', desc: 'En préparation au dépôt' },
@@ -318,7 +361,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const handleSaveMobilePayment = async (details: MobilePaymentDetails) => {
     if (!selectedPaymentOrder) return;
     await api.updateOrderMobilePayment(selectedPaymentOrder.id, details);
-    onRefreshOrders();
+    await refreshOrders();
   };
 
   const handleStartEditSchedule = (item: ResolvedOrderSchedule) => {
@@ -342,7 +385,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         type: 'success',
         message: 'Date et créneau de livraison prévus mis à jour avec succès.'
       });
-      onRefreshOrders();
+      void refreshOrders();
     } catch (error) {
       setScheduleFeedback({
         type: 'error',
@@ -465,16 +508,32 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 </a>
               </>
             )}
-            <button
-              type="button"
-              onClick={onRefreshOrders}
-              className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-xs cursor-pointer whitespace-nowrap shrink-0"
-            >
-              Actualiser
-            </button>
+            {currentUser?.role === 'client' && (
+              <button
+                type="button"
+                onClick={() => void refreshOrders()}
+                disabled={isRefreshingOrders}
+                aria-label="Actualiser mes commandes"
+                className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-xs cursor-pointer whitespace-nowrap shrink-0 disabled:cursor-wait disabled:opacity-70"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingOrders ? 'animate-spin' : ''}`} />
+                  {isRefreshingOrders ? 'Actualisation…' : 'Actualiser'}
+                </span>
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {ordersRefreshError && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-900">
+          <span>{ordersRefreshError}</span>
+          <button type="button" onClick={() => void refreshOrders()} disabled={isRefreshingOrders} className="rounded-lg border border-rose-300 bg-white px-3 py-1.5 font-bold disabled:opacity-60">
+            Réessayer
+          </button>
+        </div>
+      )}
 
       {/* 2. MODERN HEALTHCARE KPI METRICS */}
       <div className="client-dashboard-kpis grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -535,7 +594,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           </div>
           <div className="text-2xl font-black text-amber-800 tabular-nums">{unpaidOrders.length}</div>
           <div className="text-[11px] text-amber-700 mt-1">
-            {unpaidOrders.length === 0 ? 'Toutes vos commandes sont réglées' : 'Airtel Money, Moov ou Espèces'}
+            {unpaidOrders.length === 0
+              ? 'Toutes vos commandes sont réglées'
+              : `${totalOutstanding.toLocaleString('fr-FR')} FCFA à régler${overdueOrders.length ? ` · ${overdueOrders.length} en retard` : ''}`}
           </div>
         </div>
       </div>
@@ -565,6 +626,24 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
+              {activeDeliveryOrders.length > 1 && activeDeliveryOrder && (
+                <label className="sr-only" htmlFor="client-active-delivery-select">Choisir la commande à suivre</label>
+              )}
+              {activeDeliveryOrders.length > 1 && activeDeliveryOrder && (
+                <select
+                  id="client-active-delivery-select"
+                  value={activeDeliveryOrder.id}
+                  onChange={event => setSelectedActiveDeliveryId(event.target.value)}
+                  className="max-w-[180px] rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700"
+                  aria-label="Choisir la commande à suivre"
+                >
+                  {activeDeliveryOrders.map(order => (
+                    <option key={order.id} value={order.id}>
+                      {order.reference} · {order.status}
+                    </option>
+                  ))}
+                </select>
+              )}
               {onTrackDelivery && (
                 <button
                   type="button"
@@ -1193,6 +1272,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 const isMobilePayment = order.customer.paymentMethod === 'airtel_money' || 
                                        order.customer.paymentMethod === 'moov_money' || 
                                        !!mp;
+                const paidAmount = getOrderPaidAmount(order);
+                const remainingBalance = getOrderRemainingBalance(order);
+                const collectionOverdue = isCollectionOverdue(order);
                 const paymentVerified = Boolean(order.isPaid || mp?.status === 'verified');
 
                 return (
@@ -1213,11 +1295,13 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                           {order.status}
                         </span>
                         <span aria-hidden="true" className="text-slate-300">·</span>
-                        {order.isPaid ? (
+                        {remainingBalance <= 0 ? (
                           <span className="font-bold text-emerald-700 flex items-center gap-1">
                             <Check className="w-3 h-3 text-emerald-600" />
                             <span>Payée</span>
                           </span>
+                        ) : paidAmount > 0 ? (
+                          <span className="font-bold text-amber-800">Acompte reçu</span>
                         ) : (
                           <span className="font-medium text-amber-800">
                             En attente de paiement
@@ -1270,6 +1354,16 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                       <div className="text-[11px] text-slate-400 line-clamp-1">
                         {order.items.map(i => `${i.quantity}x ${i.productName}`).join(', ')}
                       </div>
+                      {order.status !== 'Annulée' && (
+                        <div className={`text-[11px] font-semibold ${collectionOverdue ? 'text-rose-700' : 'text-slate-600'}`}>
+                          Versé : {paidAmount.toLocaleString('fr-FR')} FCFA · Reste à payer : {remainingBalance.toLocaleString('fr-FR')} FCFA
+                          {order.collectionDueDate && remainingBalance > 0 && (
+                            <span className="block mt-0.5">
+                              {collectionOverdue ? 'Échéance dépassée le ' : 'À régler avant le '}{formatCollectionDueDate(order.collectionDueDate)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Actions buttons */}

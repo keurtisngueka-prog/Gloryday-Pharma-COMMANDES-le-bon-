@@ -242,9 +242,9 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 <span className="w-2 h-2 rounded-full bg-purple-600 animate-pulse"></span>
               </div>
 
-              {(hasPermission('quotes_manage') || hasPermission('clients_manage')) && (
+              {(hasPermission('quotes_view') || hasPermission('quotes_manage') || hasPermission('clients_view') || hasPermission('clients_manage') || hasPermission('clients_credit_manage')) && (
                 <>
-                  {hasPermission('quotes_manage') && <>
+                  {(hasPermission('quotes_view') || hasPermission('quotes_manage')) && <>
                   <button
                     type="button"
                     onClick={() => handleNav('commercial-quotes')}
@@ -259,7 +259,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                     <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
                   </>}
-                  {hasPermission('clients_manage') && <>
+                  {(hasPermission('clients_view') || hasPermission('clients_manage') || hasPermission('clients_credit_manage')) && <>
                   <button
                     type="button"
                     onClick={() => handleNav('clients-list')}
@@ -351,8 +351,9 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 </>
               )}
 
-              {role === 'Admin simple' && (
+              {role === 'Admin simple' && (hasPermission('stats_view') || hasPermission('settings_manage') || hasPermission('finance_view') || hasPermission('expenses_manage') || hasPermission('audit_view') || hasPermission('orders_view') || hasPermission('orders_confirm') || hasPermission('orders_cancel') || hasPermission('orders_status_manage') || hasPermission('logistics_view') || hasPermission('logistics_manage')) && (
                 <>
+                  {(hasPermission('stats_view') || hasPermission('settings_manage') || hasPermission('finance_view') || hasPermission('expenses_manage') || hasPermission('audit_view')) && (
                   <button
                     type="button"
                     onClick={() => handleNav('admin')}
@@ -366,6 +367,8 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                     </div>
                     <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
+                  )}
+                  {(hasPermission('orders_view') || hasPermission('orders_confirm') || hasPermission('orders_cancel') || hasPermission('orders_status_manage') || hasPermission('logistics_view') || hasPermission('logistics_manage')) && (
                   <button
                     type="button"
                     onClick={() => handleNav('admin-orders')}
@@ -379,16 +382,17 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                     </div>
                     <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
+                  )}
                 </>
               )}
 
-              {role !== 'Super-Admin' && hasPermission('catalog_stock') && (
+              {role !== 'Super-Admin' && (hasPermission('catalog_view') || hasPermission('catalog_manage') || hasPermission('packs_manage') || hasPermission('stock_view') || hasPermission('stock_receive') || hasPermission('stock_adjust') || hasPermission('stock_availability_manage') || hasPermission('stock_costs_view') || hasPermission('stock_costs_manage') || hasPermission('stock_export') || hasPermission('catalog_stock')) && (
                 <button type="button" onClick={() => handleNav('admin-catalog')} className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold ${activeTab === 'admin-catalog' ? 'bg-purple-100 text-purple-900 font-bold' : 'text-slate-700 hover:bg-white'}`}>
                   <span className="flex items-center gap-2.5"><Package className="w-4 h-4 text-purple-600" /><span>Catalogue & stocks</span></span><ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                 </button>
               )}
 
-              {role !== 'Super-Admin' && role !== 'Admin simple' && (hasPermission('orders_view') || hasPermission('orders_manage') || hasPermission('logistics_manage')) && (
+              {role !== 'Super-Admin' && (hasPermission('orders_view') || hasPermission('orders_confirm') || hasPermission('orders_cancel') || hasPermission('orders_status_manage') || hasPermission('orders_finance_view') || hasPermission('orders_finance_manage') || hasPermission('payments_manage') || hasPermission('logistics_view') || hasPermission('logistics_manage') || hasPermission('receivables_view') || hasPermission('receivables_payments_manage') || hasPermission('receivables_reminders_manage')) && (
                 <button
                   type="button"
                   onClick={() => handleNav('admin-orders')}
@@ -404,7 +408,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 </button>
               )}
 
-              {role !== 'Super-Admin' && role !== 'Admin simple' && (hasPermission('stats_view') || hasPermission('settings_manage')) && (
+              {role !== 'Super-Admin' && (hasPermission('stats_view') || hasPermission('settings_manage') || hasPermission('finance_view') || hasPermission('expenses_manage') || hasPermission('audit_view') || hasPermission('campaigns_manage')) && (
                 <button type="button" onClick={() => handleNav('admin')} className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold ${activeTab === 'admin' ? 'bg-purple-100 text-purple-900 font-bold' : 'text-slate-700 hover:bg-white'}`}>
                   <span className="flex items-center gap-2.5"><ShieldCheck className="w-4 h-4 text-purple-600" /><span>Tableau de bord</span></span><ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                 </button>
@@ -430,7 +434,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 </div>
               </div>
 
-              {onOpenCreateProduct && (role === 'Super-Admin' || role === 'Gestionnaire Catalogue') && (
+              {onOpenCreateProduct && hasPermission('catalog_manage') && (
                 <button
                   type="button"
                   onClick={() => { onOpenCreateProduct(); onClose(); }}

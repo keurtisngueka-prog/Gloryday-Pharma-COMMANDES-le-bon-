@@ -43,6 +43,18 @@ export const getStoredDrafts = (userPhone?: string): OrderDraft[] => {
   }
 };
 
+/** Replace the local draft cache after loading the signed-in client's server workspace. */
+export const replaceStoredDrafts = (drafts: OrderDraft[], userPhone?: string): void => {
+  if (!userPhone?.trim()) return;
+  try {
+    const safeDrafts = Array.isArray(drafts) ? drafts.slice(0, 50) : [];
+    localStorage.setItem(getDraftsStorageKey(userPhone), JSON.stringify(safeDrafts));
+    notifyDraftsChange();
+  } catch (err) {
+    console.error('Error updating stored drafts', err);
+  }
+};
+
 /**
  * Calculate total items and amount for a list of cart items
  */

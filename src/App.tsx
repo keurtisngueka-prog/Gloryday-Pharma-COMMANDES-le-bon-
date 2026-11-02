@@ -21,6 +21,7 @@ import {
   Order, 
   OrderDraft,
   User, 
+  StaffPermission,
   AppNotification, 
   AdminStats, 
   OrderStatus,
@@ -35,10 +36,11 @@ import { matchesProductSearch, scoreProductSearch } from './utils/search';
 import { createPushSubscription, getExistingPushSubscription, getPushSupportStatus } from './utils/pushNotifications';
 import type { PushNotificationStatus } from './utils/pushNotifications';
 import { generateOrderPdf } from './utils/pdfGenerator';
-import { getStoredDrafts, deleteDraft } from './utils/draftsStorage';
+import { getStoredDrafts, replaceStoredDrafts, deleteDraft } from './utils/draftsStorage';
 import { CATEGORIES, CONSUMABLE_SUBCATEGORIES, MEDICAL_SPECIALTIES } from './data/initialProducts';
 import { getProductSpecialty } from './utils/specialties';
 import { setActiveVolumeDiscountSettings } from './utils/volumeDiscount';
+import { userHasPermission } from './permissions';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -48,6 +50,8 @@ import { AuthModal } from './components/AuthModal';
 import { ProductCard } from './components/ProductCard';
 import { ProductDetailModal } from './components/ProductDetailModal';
 import { DeliveryTrackingModal } from './components/DeliveryTrackingModal';
+import { OrderFinanceModal } from './components/OrderFinanceModal';
+import { DirectMessagingModal } from './components/DirectMessagingModal';
 import { OrderPreviewModal } from './components/OrderPreviewModal';
 import { OrderConfirmationView } from './components/OrderConfirmationView';
 import { OrderPdfDocumentModal } from './components/OrderPdfDocumentModal';
@@ -87,6 +91,29 @@ export const ADMIN_TABS: AppTab[] = [
   'admin-deploy'
 ];
 
+const canReadStaffOrders = (user: User) => user.role === 'client' || [
+  'orders_view', 'orders_confirm', 'orders_cancel', 'orders_status_manage', 'orders_finance_view', 'orders_finance_manage',
+  'payments_manage', 'logistics_view', 'logistics_manage', 'receivables_view',
+  'receivables_payments_manage', 'receivables_reminders_manage', 'finance_view',
+].some(permission => userHasPermission(user, permission as StaffPermission));
+
+const canReadStaffClients = (user: User) => ['clients_view', 'clients_manage', 'clients_credit_manage']
+  .some(permission => userHasPermission(user, permission as StaffPermission));
+
+const getStaffLandingTab = (user: User): AppTab => {
+  if (user.role === 'Super-Admin') return 'admin';
+  if (user.role === 'client') return 'dashboard';
+  if (['catalog_view', 'catalog_manage', 'packs_manage', 'stock_view', 'stock_receive', 'stock_adjust', 'stock_availability_manage', 'stock_costs_view', 'stock_costs_manage']
+    .some(permission => userHasPermission(user, permission as StaffPermission))) return 'admin-catalog';
+  if (userHasPermission(user, 'quotes_view') || userHasPermission(user, 'quotes_manage')) return 'commercial-quotes';
+  if (userHasPermission(user, 'campaigns_manage')) return 'admin';
+  if (['stats_view', 'finance_view', 'expenses_manage', 'settings_manage', 'audit_view', 'receivables_view']
+    .some(permission => userHasPermission(user, permission as StaffPermission))) return 'admin';
+  if (canReadStaffClients(user)) return 'clients-list';
+  if (canReadStaffOrders(user)) return 'admin-orders';
+  return 'catalog';
+};
+
 const getTabFromHash = (): AppTab => {
   if (typeof window === 'undefined') return 'catalog';
   const raw = window.location.hash.replace(/^#\/?/, '').trim().toLowerCase();
@@ -116,6 +143,8 @@ export default function App() {
 
   // Core Data
   const [products, setProducts] = useState<Product[]>([]);
+  const [isCatalogLoading, setIsCatalogLoading] = useState(true);
+  const [catalogLoadError, setCatalogLoadError] = useState<string | null>(null);
   const [packs, setPacks] = useState<Pack[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [clients, setClients] = useState<any[]>([]);
@@ -128,6 +157,8 @@ export default function App() {
 
   // Global Product Creation Modal State
   const [isGlobalProductModalOpen, setIsGlobalProductModalOpen] = useState(false);
+  const [isGlobalMessageModalOpen, setIsGlobalMessageModalOpen] = useState(false);
+  const [globalMessageTarget, setGlobalMessageTarget] = useState<any | null>(null);
 
   // Cart Storage Partitioning Helpers (Strict Account Isolation)
   const getCartStorageKey = (user: User | null): string => {
@@ -152,6 +183,10 @@ export default function App() {
   const [cartItems, setCartItems] = useState<CartItem[]>(() => {
     return loadCartForUser(currentUser);
   });
+  const [clientWorkspaceReadyUserId, setClientWorkspaceReadyUserId] = useState<string | null>(null);
+  const [workspaceSyncStatus, setWorkspaceSyncStatus] = useState<'loading' | 'syncing' | 'synced' | 'local'>('local');
+  const [draftsRevision, setDraftsRevision] = useState(0);
+  const workspaceSyncQueueRef = useRef<Promise<unknown>>(Promise.resolve());
 
   useEffect(() => {
     try {
@@ -205,6 +240,7 @@ export default function App() {
   const [isPreparingConfirmedPdf, setIsPreparingConfirmedPdf] = useState(false);
   const [activeDeliveryOrder, setActiveDeliveryOrder] = useState<Order | null>(null);
   const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
+  const [activeFinanceOrder, setActiveFinanceOrder] = useState<Order | null>(null);
   const [pendingCustomerInfo, setPendingCustomerInfo] = useState<CustomerInfo | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const orderSubmissionInFlightRef = useRef(false);
@@ -273,6 +309,7 @@ export default function App() {
   useEffect(() => {
     const updateCount = () => {
       setDraftsCount(getStoredDrafts(currentUser?.phone).length);
+      setDraftsRevision(revision => revision + 1);
     };
     updateCount();
     window.addEventListener('storage', updateCount);
@@ -282,6 +319,82 @@ export default function App() {
       window.removeEventListener('gloryday_drafts_updated', updateCount);
     };
   }, [currentUser]);
+
+  // Load the signed-in client's cloud workspace, while preserving changes made
+  // locally during the request and keeping the local cache available offline.
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'client') {
+      setClientWorkspaceReadyUserId(null);
+      setWorkspaceSyncStatus('local');
+      return;
+    }
+
+    let cancelled = false;
+    const user = currentUser;
+    const localCartAtStart = loadCartForUser(user);
+    const localDraftsAtStart = getStoredDrafts(user.phone);
+    setClientWorkspaceReadyUserId(null);
+    setWorkspaceSyncStatus('loading');
+
+    void api.getClientWorkspace().then(remote => {
+      if (cancelled) return;
+      const latestLocalCart = loadCartForUser(user);
+      const localCartChangedDuringLoad = JSON.stringify(latestLocalCart) !== JSON.stringify(localCartAtStart);
+      const cartToRestore = localCartChangedDuringLoad
+        ? latestLocalCart
+        : (Array.isArray(remote.cartItems) && remote.cartItems.length > 0 ? remote.cartItems : latestLocalCart);
+
+      const latestLocalDrafts = getStoredDrafts(user.phone);
+      const localDraftsChangedDuringLoad = JSON.stringify(latestLocalDrafts) !== JSON.stringify(localDraftsAtStart);
+      const localDrafts = localDraftsChangedDuringLoad ? latestLocalDrafts : localDraftsAtStart;
+      const draftsById = new Map<string, OrderDraft>();
+      for (const draft of [...(Array.isArray(remote.drafts) ? remote.drafts : []), ...localDrafts]) {
+        const previous = draftsById.get(draft.id);
+        if (!previous || Date.parse(draft.updatedAt) >= Date.parse(previous.updatedAt)) {
+          draftsById.set(draft.id, draft);
+        }
+      }
+      const draftsToRestore = [...draftsById.values()]
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+        .slice(0, 50);
+
+      setCartItems(cartToRestore);
+      replaceStoredDrafts(draftsToRestore, user.phone);
+      setDraftsCount(draftsToRestore.length);
+      setClientWorkspaceReadyUserId(user.id);
+      setWorkspaceSyncStatus('synced');
+    }).catch(error => {
+      console.warn('Synchronisation de l’espace client indisponible ; le cache local reste actif.', error);
+      if (!cancelled) {
+        setClientWorkspaceReadyUserId(user.id);
+        setWorkspaceSyncStatus('local');
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [currentUser?.id, currentUser?.phone, currentUser?.role]);
+
+  // Debounced snapshots avoid a network request for every keystroke or tap.
+  // Writes are serialized so an older request cannot finish after a newer one.
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'client' || clientWorkspaceReadyUserId !== currentUser.id) return;
+    const user = currentUser;
+    setWorkspaceSyncStatus('syncing');
+    const timer = window.setTimeout(() => {
+      const drafts = getStoredDrafts(user.phone);
+      workspaceSyncQueueRef.current = workspaceSyncQueueRef.current
+        .catch(() => undefined)
+        .then(() => api.saveClientWorkspace(cartItems, drafts))
+        .then(() => {
+          if (currentUser?.id === user.id) setWorkspaceSyncStatus('synced');
+        })
+        .catch(error => {
+          console.warn('Enregistrement cloud du panier et des brouillons impossible.', error);
+          if (currentUser?.id === user.id) setWorkspaceSyncStatus('local');
+        });
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [cartItems, draftsRevision, currentUser?.id, currentUser?.phone, currentUser?.role, clientWorkspaceReadyUserId]);
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -336,13 +449,24 @@ export default function App() {
   }, [currentUser?.id]);
 
   // Initial Data Load
+  const refreshProductCatalog = async () => {
+    setIsCatalogLoading(true);
+    setCatalogLoadError(null);
+    try {
+      setProducts(await api.getProducts());
+    } catch (error) {
+      console.error('Chargement du catalogue impossible', error);
+      setCatalogLoadError('Le catalogue ne peut pas être chargé pour le moment. Vérifiez votre connexion puis réessayez.');
+    } finally {
+      setIsCatalogLoading(false);
+    }
+  };
+
   const loadInitialData = async () => {
     const generation = authGeneration.current;
     // Load the public catalogue independently so a slow session, pack, or
     // discount request cannot leave the customer looking at an empty catalogue.
-    void api.getProducts().then(setProducts).catch((error) => {
-      console.error('Chargement du catalogue impossible', error);
-    });
+    void refreshProductCatalog();
 
     const [packsResult, authResult, discountResult] = await Promise.allSettled([
       api.getPacks(),
@@ -375,21 +499,22 @@ export default function App() {
 
     setCurrentUser(authData.user);
     setCartItems(loadCartForUser(authData.user));
-    try {
-      const userOrders = await api.getOrders(authData.user.phone);
-      if (generation !== authGeneration.current) return;
-      setOrders(userOrders);
-    } catch (error) {
-      console.warn('Chargement des commandes impossible', error);
+    if (canReadStaffOrders(authData.user)) {
+      try {
+        const userOrders = await api.getOrders(authData.role === 'client' ? authData.user.phone : undefined);
+        if (generation !== authGeneration.current) return;
+        setOrders(userOrders);
+      } catch (error) {
+        console.warn('Chargement des commandes impossible', error);
+      }
     }
-    const perms = authData.user.permissions || [];
-    if (authData.role === 'Super-Admin' || authData.role === 'Admin simple' || perms.includes('stats_view')) {
+    if (userHasPermission(authData.user, 'stats_view')) {
       api.getAdminStats().then(setAdminStats).catch(() => {});
     }
-    if (authData.role === 'Super-Admin' || authData.role === 'Admin simple' || authData.role === 'Commercial' || perms.includes('clients_manage')) {
+    if (canReadStaffClients(authData.user)) {
       api.getClients().then(setClients).catch(() => {});
     }
-    if (authData.role === 'Super-Admin' || authData.role === 'Commercial' || perms.includes('quotes_manage')) {
+    if (userHasPermission(authData.user, 'quotes_view') || userHasPermission(authData.user, 'quotes_manage')) {
       api.getQuotes().then(setQuotes).catch(() => {});
     }
   };
@@ -424,12 +549,14 @@ export default function App() {
               .sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp))
               .slice(0, 30);
           });
-          if (currentUser?.role === 'Super-Admin' || currentUser?.role === 'Admin simple') {
+          if (currentUser && userHasPermission(currentUser, 'stats_view')) {
             api.getAdminStats().then(setAdminStats).catch(() => {});
           }
-          api.getOrders(currentUser ? currentUser.phone : undefined)
-            .then(data => { if (generation === authGeneration.current) setOrders(data); })
-            .catch(() => {});
+          if (currentUser && canReadStaffOrders(currentUser)) {
+            api.getOrders(currentUser.role === 'client' ? currentUser.phone : undefined)
+              .then(data => { if (generation === authGeneration.current) setOrders(data); })
+              .catch(() => {});
+          }
         }
       } catch (e) {
         // quiet polling failure
@@ -454,29 +581,16 @@ export default function App() {
     const userCart = loadCartForUser(user);
     setCartItems(userCart);
 
-    if (user.role === 'Super-Admin') {
-      if (!ADMIN_TABS.includes(activeTab)) {
-        setActiveTab('admin');
-      }
-      api.getAdminStats().then(setAdminStats).catch(() => {});
-      api.getOrders().then(data => { if (generation === authGeneration.current) setOrders(data); }).catch(() => {});
-      api.getClients().then(setClients).catch(() => {});
+    setActiveTab(getStaffLandingTab(user));
+    if (userHasPermission(user, 'stats_view')) api.getAdminStats().then(setAdminStats).catch(() => {});
+    if (canReadStaffOrders(user)) {
+      api.getOrders(user.role === 'client' ? user.phone : undefined)
+        .then(data => { if (generation === authGeneration.current) setOrders(data); })
+        .catch(() => {});
+    }
+    if (canReadStaffClients(user)) api.getClients().then(setClients).catch(() => {});
+    if (userHasPermission(user, 'quotes_view') || userHasPermission(user, 'quotes_manage')) {
       api.getQuotes().then(setQuotes).catch(() => {});
-    } else if (user.role === 'Admin simple') {
-      setActiveTab('admin');
-      api.getAdminStats().then(setAdminStats).catch(() => {});
-      api.getOrders().then(data => { if (generation === authGeneration.current) setOrders(data); }).catch(() => {});
-      api.getClients().then(setClients).catch(() => {});
-    } else if (user.role === 'Logistique') {
-      setActiveTab('admin-orders');
-      api.getOrders().then(data => { if (generation === authGeneration.current) setOrders(data); }).catch(() => {});
-    } else if (user.role === 'Commercial') {
-      setActiveTab('commercial-quotes');
-      api.getQuotes().then(setQuotes).catch(() => {});
-      api.getClients().then(setClients).catch(() => {});
-    } else {
-      setActiveTab('dashboard');
-      api.getOrders(user.phone).then(data => { if (generation === authGeneration.current) setOrders(data); }).catch(() => {});
     }
   };
 
@@ -774,9 +888,7 @@ export default function App() {
         : order
     ));
 
-    const canViewAdminStats = currentUser?.role === 'Super-Admin' ||
-      currentUser?.role === 'Admin simple' ||
-      Boolean(currentUser?.permissions?.includes('stats_view'));
+    const canViewAdminStats = userHasPermission(currentUser, 'stats_view');
     if (canViewAdminStats) {
       void api.getAdminStats().then(setAdminStats).catch((error) => {
         console.warn('Actualisation des statistiques après changement de commande impossible :', error);
@@ -793,6 +905,25 @@ export default function App() {
     await api.updateOrderPayment(orderId, isPaid);
     const updated = await api.getOrders();
     setOrders(updated);
+  };
+
+  const handleAdminUpdateFinance = async (updatedOrder: Order) => {
+    const previousOrder = activeFinanceOrder?.id === updatedOrder.id
+      ? activeFinanceOrder
+      : orders.find(order => order.id === updatedOrder.id);
+    const sameValue = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+    const patch: Parameters<typeof api.updateOrderFinance>[1] = {};
+    if (!previousOrder || !sameValue(previousOrder.invoices || [], updatedOrder.invoices || [])) patch.invoices = updatedOrder.invoices || [];
+    if (!previousOrder || !sameValue(previousOrder.installments || [], updatedOrder.installments || [])) patch.installments = updatedOrder.installments || [];
+    if (!previousOrder || !sameValue(previousOrder.collectionDueDate, updatedOrder.collectionDueDate)) patch.collectionDueDate = updatedOrder.collectionDueDate || null;
+    if (!previousOrder || !sameValue(previousOrder.courier, updatedOrder.courier)) patch.courier = updatedOrder.courier || null;
+    if (!previousOrder || !sameValue(previousOrder.deliveryProof, updatedOrder.deliveryProof)) patch.deliveryProof = updatedOrder.deliveryProof || null;
+    if (!previousOrder || !sameValue(previousOrder.isPartialDelivery, updatedOrder.isPartialDelivery)) patch.isPartialDelivery = updatedOrder.isPartialDelivery;
+    if (!previousOrder || !sameValue(previousOrder.partialDeliveryNotes, updatedOrder.partialDeliveryNotes)) patch.partialDeliveryNotes = updatedOrder.partialDeliveryNotes || '';
+    if (Object.keys(patch).length === 0) return;
+    const savedOrder = await api.updateOrderFinance(updatedOrder.id, patch);
+    setOrders(prev => prev.map(order => order.id === savedOrder.id ? savedOrder : order));
+    setActiveFinanceOrder(current => current?.id === savedOrder.id ? savedOrder : current);
   };
 
   const handleAdminCreatePack = async (packData: Omit<Pack, 'id'>) => {
@@ -942,7 +1073,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <React.Suspense fallback={<div className="mx-auto w-full max-w-7xl px-3 py-12 text-center text-sm font-bold text-slate-500">Chargement de la page…</div>}>
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 md:pb-12">
+      <main className={`flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 pt-4 sm:pt-6 ${activeTab === 'cart' ? 'pb-40 md:pb-12' : 'pb-24 md:pb-12'}`}>
         {/* VIEW 1: ORDER CONFIRMATION VIEW */}
         {confirmedOrder ? (
           <OrderConfirmationView
@@ -999,6 +1130,8 @@ export default function App() {
               <CartView
                 items={cartItems}
                 currentUser={currentUser}
+                clientOrders={orders}
+                workspaceSyncStatus={workspaceSyncStatus}
                 onOpenAuth={() => setIsAuthModalOpen(true)}
                 onUpdateQuantity={handleUpdateCartQuantity}
                 onRemoveItem={handleRemoveCartItem}
@@ -1018,7 +1151,10 @@ export default function App() {
                 currentUser={currentUser}
                 onReorder={handleReorder}
                 onOpenAuth={() => setIsAuthModalOpen(true)}
-                onRefreshOrders={() => api.getOrders(currentUser ? currentUser.phone : undefined).then(setOrders)}
+                onRefreshOrders={async () => {
+                  const freshOrders = await api.getOrders(currentUser?.phone);
+                  setOrders(freshOrders);
+                }}
                 onViewOrderPdf={handleViewOrderPdf}
                 onTrackDelivery={(order: Order) => {
                   setActiveDeliveryOrder(order);
@@ -1029,7 +1165,7 @@ export default function App() {
             )}
 
             {/* VIEW 5: COMMERCIAL QUOTES TAB */}
-            {activeTab === 'commercial-quotes' && (
+            {activeTab === 'commercial-quotes' && currentUser && (userHasPermission(currentUser, 'quotes_view') || userHasPermission(currentUser, 'quotes_manage')) && (
               <CommercialQuotesModule
                 quotes={quotes}
                 assignedClients={clients}
@@ -1047,7 +1183,7 @@ export default function App() {
             )}
 
             {/* VIEW 6: BEST CLIENTS & RELANCES */}
-            {activeTab === 'clients-list' && (
+            {activeTab === 'clients-list' && currentUser && (userHasPermission(currentUser, 'clients_view') || userHasPermission(currentUser, 'clients_manage') || userHasPermission(currentUser, 'clients_credit_manage')) && (
               <div className="space-y-4">
                 <div>
                   <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
@@ -1061,9 +1197,12 @@ export default function App() {
                   clients={clients}
                   orders={orders}
                   commercials={[]}
-                  isSuperAdmin={currentUser?.role === 'Super-Admin'}
+                  canSendMessages={userHasPermission(currentUser, 'messages_send')}
                   onRefreshClients={() => api.getClients().then(setClients)}
-                  onOpenMessageModal={() => {}}
+                  onOpenMessageModal={(client) => {
+                    setGlobalMessageTarget(client);
+                    setIsGlobalMessageModalOpen(true);
+                  }}
                   onViewOrderPdf={handleViewOrderPdf}
                 />
               </div>
@@ -1091,13 +1230,13 @@ export default function App() {
                     onUpdateProductStock={handleAdminUpdateProductStock}
                     onRefresh={() => {
                       api.getProducts().then(setProducts).catch(() => {});
-                      if (currentUser.role === 'Super-Admin' || currentUser.role === 'Admin simple' || currentUser.permissions?.includes('stats_view')) {
+                      if (userHasPermission(currentUser, 'stats_view')) {
                         api.getAdminStats().then(setAdminStats).catch(() => {});
                       }
-                      if (currentUser.role === 'Super-Admin' || currentUser.role === 'Admin simple' || currentUser.permissions?.includes('clients_manage')) {
+                      if (canReadStaffClients(currentUser)) {
                         api.getClients().then(setClients).catch(() => {});
                       }
-                      api.getOrders().then(setOrders).catch(() => {});
+                      if (canReadStaffOrders(currentUser)) api.getOrders().then(setOrders).catch(() => {});
                     }}
                     defaultSubTab={
                       activeTab === 'admin-catalog'
@@ -1112,6 +1251,7 @@ export default function App() {
                     }
                     notifications={notifications}
                     onViewOrderPdf={handleViewOrderPdf}
+                    onOpenFinanceModal={(order: Order) => setActiveFinanceOrder(order)}
                     onOpenDeliveryModal={(order: Order) => {
                       setActiveDeliveryOrder(order);
                       setIsDeliveryModalOpen(true);
@@ -1344,7 +1484,29 @@ export default function App() {
                 </div>
 
                 {/* Product Grid: 2 COLUMNS ON MOBILE (grid-cols-2) and 3/4 COLUMNS ON DESKTOP */}
-                {filteredProducts.length === 0 ? (
+                {catalogLoadError && products.length > 0 && (
+                  <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900">
+                    <span>La dernière actualisation a échoué. Les produits déjà chargés restent visibles.</span>
+                    <button type="button" onClick={() => void refreshProductCatalog()} disabled={isCatalogLoading} className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-bold disabled:opacity-60">
+                      Réessayer
+                    </button>
+                  </div>
+                )}
+                {isCatalogLoading && products.length === 0 ? (
+                  <div role="status" aria-live="polite" className="rounded-2xl border border-slate-200 bg-slate-50 p-10 text-center text-sm font-semibold text-slate-600">
+                    <span className="mx-auto mb-3 block h-6 w-6 animate-spin rounded-full border-2 border-blue-200 border-t-[#0d44e8]" />
+                    Chargement des produits…
+                  </div>
+                ) : catalogLoadError && products.length === 0 ? (
+                  <div role="alert" className="mx-auto max-w-md rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center">
+                    <AlertCircle className="mx-auto mb-2 h-8 w-8 text-rose-600" />
+                    <h3 className="text-sm font-bold text-rose-900">Le catalogue est momentanément indisponible</h3>
+                    <p className="mt-1 text-xs text-rose-800">{catalogLoadError}</p>
+                    <button type="button" onClick={() => void refreshProductCatalog()} disabled={isCatalogLoading} className="mt-3 rounded-xl bg-[#0d44e8] px-4 py-2 text-xs font-bold text-white disabled:opacity-60">
+                      {isCatalogLoading ? 'Chargement…' : 'Réessayer'}
+                    </button>
+                  </div>
+                ) : filteredProducts.length === 0 ? (
                   <div className="bg-slate-50 rounded-2xl border border-slate-200 p-8 text-center max-w-sm mx-auto">
                     <AlertCircle className="w-8 h-8 text-slate-400 mx-auto mb-2" />
                     <h3 className="font-bold text-slate-800 text-xs sm:text-sm">Aucun article trouvé</h3>
@@ -1488,10 +1650,10 @@ export default function App() {
             setActiveTab('catalog');
             setOnlyPromotions(true);
           } else if (n.type === 'order_created' || n.type === 'status_changed') {
-            if (currentUser?.role === 'Super-Admin' || currentUser?.role === 'Admin simple' || currentUser?.role === 'Logistique') {
+            if (currentUser?.role !== 'client' && currentUser && canReadStaffOrders(currentUser)) {
               setActiveTab('admin-orders');
             } else {
-              setActiveTab('dashboard');
+              setActiveTab(currentUser ? getStaffLandingTab(currentUser) : 'catalog');
             }
           } else if (n.type === 'password_recovery' && currentUser?.role === 'Super-Admin') {
             setActiveTab('clients-list');
@@ -1503,7 +1665,18 @@ export default function App() {
         isOpen={isGlobalProductModalOpen}
         onClose={() => setIsGlobalProductModalOpen(false)}
         onSuccess={handleAdminProductSaved}
+        canManageStock={userHasPermission(currentUser, 'stock_adjust')}
+        canManagePurchasePrice={userHasPermission(currentUser, 'stock_costs_manage')}
       />
+
+      {isGlobalMessageModalOpen && globalMessageTarget && (
+        <DirectMessagingModal
+          isOpen={true}
+          targetClient={globalMessageTarget}
+          onClose={() => { setIsGlobalMessageModalOpen(false); setGlobalMessageTarget(null); }}
+          onSuccess={() => { setIsGlobalMessageModalOpen(false); setGlobalMessageTarget(null); }}
+        />
+      )}
 
       {/* Interactive Delivery Tracking Modal */}
       {isDeliveryModalOpen && activeDeliveryOrder && (
@@ -1515,7 +1688,26 @@ export default function App() {
             setActiveDeliveryOrder(null);
           }}
           onUpdateStage={handleUpdateDeliveryStage}
-          isAdmin={Boolean(currentUser && (currentUser.role === 'Super-Admin' || currentUser.role === 'Admin simple' || currentUser.role === 'Logistique'))}
+          isAdmin={userHasPermission(currentUser, 'logistics_manage')}
+          canSendMessages={userHasPermission(currentUser, 'messages_send')}
+        />
+      )}
+
+      {activeFinanceOrder && currentUser && (
+        <OrderFinanceModal
+          order={activeFinanceOrder}
+          currentUser={currentUser}
+          canViewInvoices={userHasPermission(currentUser, 'orders_finance_view') || userHasPermission(currentUser, 'orders_finance_manage')}
+          canManageInvoices={userHasPermission(currentUser, 'orders_finance_manage')}
+          canViewPayments={[
+            'orders_finance_view', 'payments_manage', 'receivables_view',
+            'receivables_payments_manage',
+          ].some(permission => userHasPermission(currentUser, permission as StaffPermission))}
+          canManagePayments={userHasPermission(currentUser, 'payments_manage') || userHasPermission(currentUser, 'receivables_payments_manage')}
+          canManageCollectionDate={userHasPermission(currentUser, 'receivables_reminders_manage')}
+          canManageLogistics={userHasPermission(currentUser, 'logistics_manage')}
+          onClose={() => setActiveFinanceOrder(null)}
+          onUpdateOrder={handleAdminUpdateFinance}
         />
       )}
 

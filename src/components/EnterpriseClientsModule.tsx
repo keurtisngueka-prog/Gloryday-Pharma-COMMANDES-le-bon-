@@ -57,6 +57,7 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
   // Edit Credit / Terms Modal
   const [isEditTermsOpen, setIsEditTermsOpen] = useState(false);
   const [creditLimitInput, setCreditLimitInput] = useState<number>(500000);
+  const [minimumCreditOrderAmountInput, setMinimumCreditOrderAmountInput] = useState<number>(50000);
   const [paymentTermsInput, setPaymentTermsInput] = useState<PaymentTerms>('30_jours');
   const [accountStatusInput, setAccountStatusInput] = useState<ClientAccountStatus>('actif');
 
@@ -147,7 +148,8 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
 
   const handleOpenEditTerms = (client: User) => {
     setSelectedClient(client);
-    setCreditLimitInput(client.creditLimit || 500000);
+    setCreditLimitInput(client.creditLimit ?? 0);
+    setMinimumCreditOrderAmountInput(client.minimumCreditOrderAmount ?? 50000);
     setPaymentTermsInput(client.paymentTerms || '30_jours');
     setAccountStatusInput(client.accountStatus || 'actif');
     setIsEditTermsOpen(true);
@@ -158,11 +160,12 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
     if (!selectedClient) return;
 
     const previousStatus = selectedClient.accountStatus || 'actif';
-    const previousLimit = selectedClient.creditLimit || 500000;
+    const previousLimit = selectedClient.creditLimit ?? 0;
 
     const updated: User = {
       ...selectedClient,
       creditLimit: Number(creditLimitInput),
+      minimumCreditOrderAmount: Number(minimumCreditOrderAmountInput),
       paymentTerms: paymentTermsInput,
       accountStatus: accountStatusInput
     };
@@ -174,9 +177,9 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
       'statut_client',
       'Client B2B',
       selectedClient.id,
-      `Mise à jour des conditions B2B pour ${selectedClient.facilityName} : Statut=${accountStatusInput}, Plafond=${creditLimitInput.toLocaleString('fr-FR')} FCFA (${paymentTermsInput})`,
+      `Mise à jour des conditions B2B pour ${selectedClient.facilityName} : Statut=${accountStatusInput}, Plafond=${creditLimitInput.toLocaleString('fr-FR')} FCFA, minimum commande à terme=${minimumCreditOrderAmountInput.toLocaleString('fr-FR')} FCFA (${paymentTermsInput})`,
       `Statut:${previousStatus} / Plafond:${previousLimit}`,
-      `Statut:${accountStatusInput} / Plafond:${creditLimitInput}`
+      `Statut:${accountStatusInput} / Plafond:${creditLimitInput} / Minimum:${minimumCreditOrderAmountInput}`
     );
 
     setIsEditTermsOpen(false);
@@ -351,7 +354,7 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
               <tbody className="divide-y divide-slate-100">
                 {filteredClients.map((client) => {
                   const status = client.accountStatus || 'actif';
-                  const creditLimit = client.creditLimit || 500000;
+                  const creditLimit = Math.max(0, Number(client.creditLimit) || 0);
                   const outstanding = client.outstandingBalance || 0;
                   const terms = client.paymentTerms || '30_jours';
 
@@ -666,11 +669,27 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
                 </label>
                 <input
                   type="number"
+                  min={0}
                   step={50000}
                   value={creditLimitInput}
                   onChange={(e) => setCreditLimitInput(Number(e.target.value))}
                   className="w-full p-2 border border-slate-300 rounded-xl font-mono"
                 />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 uppercase mb-1">
+                  Minimum d’achat pour payer à terme (FCFA)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={5000}
+                  value={minimumCreditOrderAmountInput}
+                  onChange={(e) => setMinimumCreditOrderAmountInput(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-full p-2 border border-slate-300 rounded-xl font-mono"
+                />
+                <p className="mt-1 text-[10px] text-slate-500">Le client verra le montant qui lui manque pour atteindre ce seuil.</p>
               </div>
 
               <div>

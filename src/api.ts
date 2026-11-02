@@ -6,6 +6,7 @@ import {
   AppNotification, 
   AdminStats, 
   CartItem, 
+  OrderDraft,
   MediaItem, 
   CommercialQuote, 
   DirectMessage,
@@ -18,7 +19,13 @@ import {
   StaffPermission,
   VolumeDiscountSettings,
   StaffActivityStats,
-  StaffActivityLog
+  StaffActivityLog,
+  StockMovement,
+  OperatingExpense,
+  OperatingExpenseCategory,
+  CollectionReminder,
+  CollectionReminderChannel,
+  CollectionReminderOutcome
 } from './types';
 import type { PushSubscriptionPayload } from './utils/pushNotifications';
 
@@ -197,9 +204,32 @@ export const api = {
   async updateProductStock(id: string, quantityAvailable: number, status?: 'disponible' | 'rupture'): Promise<Product> {
     const res = await request<{ success: boolean; product: Product }>(`/api/products/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status: status || 'disponible', quantityAvailable })
+      body: JSON.stringify({
+        status: status || 'disponible',
+        quantityAvailable,
+        reason: 'Ajustement manuel du stock depuis le tableau Catalogue & Stock'
+      })
     });
     return res.product;
+  },
+
+  async getStockMovements(productId?: string): Promise<StockMovement[]> {
+    const query = productId ? `?productId=${encodeURIComponent(productId)}` : '';
+    const result = await request<{ movements: StockMovement[] }>(`/api/admin/stock/movements${query}`);
+    return result.movements;
+  },
+
+  async receiveProductStock(input: {
+    productId: string;
+    quantity: number;
+    reason: string;
+    movementId: string;
+    lotNumber?: string;
+  }): Promise<{ product: Product; movement: StockMovement }> {
+    return request('/api/admin/stock/receive', {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
   },
 
   async getVolumeDiscountSettings(): Promise<VolumeDiscountSettings> {
@@ -285,7 +315,7 @@ export const api = {
   },
 
   async updateClientProfile(profileData: Partial<Pick<User,
-    'facilityName' | 'contactName' | 'facilityType' | 'facilityTypeOther' |
+    'facilityName' | 'contactName' | 'secondaryPhone' | 'facilityType' | 'facilityTypeOther' |
     'neighborhoodId' | 'deliveryInstructions'
   >> & { avatarUrl?: string | null }): Promise<{ user: User }> {
     return request<{ user: User }>('/api/auth/profile', {
@@ -374,6 +404,17 @@ export const api = {
     } catch { return null; }
   },
 
+  async getClientWorkspace(): Promise<{ cartItems: CartItem[]; drafts: OrderDraft[]; updatedAt: string }> {
+    return request('/api/client/workspace');
+  },
+
+  async saveClientWorkspace(cartItems: CartItem[], drafts: OrderDraft[]): Promise<{ cartItems: CartItem[]; drafts: OrderDraft[]; updatedAt: string }> {
+    return request('/api/client/workspace', {
+      method: 'PUT',
+      body: JSON.stringify({ cartItems, drafts })
+    });
+  },
+
   async logout(): Promise<void> {
     try {
       await request('/api/auth/logout', { method: 'POST', body: '{}' });
@@ -385,6 +426,13 @@ export const api = {
 
   async getClients(): Promise<any[]> {
     return request<any[]>('/api/clients');
+  },
+
+  async updateClientCreditTerms(clientId: string, terms: Pick<User, 'creditLimit' | 'minimumCreditOrderAmount' | 'paymentTerms' | 'accountStatus'>): Promise<User> {
+    return request<User>(`/api/clients/${encodeURIComponent(clientId)}/credit-terms`, {
+      method: 'PATCH',
+      body: JSON.stringify(terms)
+    });
   },
 
   async assignClientToCommercial(clientId: string, commercialId: string): Promise<any> {
@@ -510,6 +558,19 @@ export const api = {
     });
   },
 
+  async updateOrderFinance(orderId: string, patch: Partial<Pick<Order,
+    'installments' | 'invoices' | 'isPartialDelivery' | 'partialDeliveryNotes'
+  >> & {
+    courier?: Order['courier'] | null;
+    deliveryProof?: Order['deliveryProof'] | null;
+    collectionDueDate?: string | null;
+  }): Promise<Order> {
+    return request<Order>(`/api/orders/${encodeURIComponent(orderId)}/finance`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch)
+    });
+  },
+
   async updateOrderMobilePayment(orderId: string, mobilePayment: import('./types').MobilePaymentDetails): Promise<Order> {
     return request<Order>(`/api/orders/${orderId}/mobile-payment`, {
       method: 'PATCH',
@@ -526,6 +587,49 @@ export const api = {
 
   async getAdminStats(): Promise<AdminStats> {
     return request<AdminStats>('/api/admin/stats');
+  },
+
+  async getOperatingExpenses(): Promise<OperatingExpense[]> {
+    return request<OperatingExpense[]>('/api/admin/expenses');
+  },
+
+  async createOperatingExpense(input: {
+    date: string;
+    category: OperatingExpenseCategory;
+    description: string;
+    amount: number;
+    paymentMethod?: string;
+    supplier?: string;
+    reference?: string;
+  }): Promise<OperatingExpense> {
+    return request<OperatingExpense>('/api/admin/expenses', {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  },
+
+  async voidOperatingExpense(id: string, reason: string): Promise<OperatingExpense> {
+    return request<OperatingExpense>(`/api/admin/expenses/${encodeURIComponent(id)}/void`, {
+      method: 'PATCH',
+      body: JSON.stringify({ reason })
+    });
+  },
+
+  async getCollectionReminders(): Promise<CollectionReminder[]> {
+    return request<CollectionReminder[]>('/api/admin/collection-reminders');
+  },
+
+  async addCollectionReminder(orderId: string, input: {
+    id: string;
+    channel: CollectionReminderChannel;
+    outcome: CollectionReminderOutcome;
+    notes?: string;
+    nextFollowUpDate?: string;
+  }): Promise<CollectionReminder> {
+    return request<CollectionReminder>(`/api/orders/${encodeURIComponent(orderId)}/collection-reminders`, {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
   },
 
   async getEvents(since = 0): Promise<AppNotification[]> {

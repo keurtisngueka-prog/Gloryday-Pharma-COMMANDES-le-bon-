@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { LEGACY_DEMO_PRODUCT_IDS, LEGACY_DEMO_PACK_IDS } from '../data/initialProducts.js';
 import type {
   AppNotification,
+  CartItem,
   CommercialQuote,
   DirectMessage,
   Order,
@@ -13,8 +14,18 @@ import type {
   DeliveryLocationPoint,
   StaffPermission,
   VolumeDiscountSettings,
-  StaffActivityLog
+  StaffActivityLog,
+  StockMovement,
+  OperatingExpense,
+  CollectionReminder,
+  OrderDraft
 } from '../types.js';
+
+export interface ClientWorkspace {
+  cartItems: CartItem[];
+  drafts: OrderDraft[];
+  updatedAt: string;
+}
 
 export interface StoredUserAccount {
   user: User;
@@ -41,11 +52,14 @@ export interface PersistentServerStore {
   products: Product[];
   packs: Pack[];
   orders: Order[];
+  stockMovements?: StockMovement[];
   accounts: StoredUserAccount[];
   staffAccounts: ManagedStaffAccount[];
   quotes: CommercialQuote[];
   messages: DirectMessage[];
   notifications: AppNotification[];
+  expenses?: OperatingExpense[];
+  collectionReminders?: CollectionReminder[];
   volumeDiscounts?: VolumeDiscountSettings;
   staffLogs?: StaffActivityLog[];
 }
@@ -76,6 +90,26 @@ function mergeById<T>(remote: T[], local: T[], keyOf: (item: T) => string): T[] 
 
 function assertNoError(context: string, error: { message?: string } | null): void {
   if (error) throw new Error(`Supabase (${context}) : ${error.message || 'erreur inconnue'}`);
+}
+
+function stockMovementFromRow(value: unknown): StockMovement {
+  const row = dataObject(value);
+  return {
+    id: String(row.id || ''),
+    productId: String(row.product_id || ''),
+    productName: String(row.product_name || ''),
+    type: row.movement_type as StockMovement['type'],
+    quantity: numberOr(row.quantity),
+    previousQuantity: numberOr(row.previous_quantity),
+    newQuantity: numberOr(row.new_quantity),
+    reason: String(row.reason || ''),
+    lotNumber: row.lot_number ? String(row.lot_number) : undefined,
+    reference: row.reference ? String(row.reference) : undefined,
+    date: String(row.created_at || new Date().toISOString()),
+    performedBy: String(row.performed_by || ''),
+    performedById: row.performed_by_id ? String(row.performed_by_id) : undefined,
+    performedByRole: row.performed_by_role as StockMovement['performedByRole'],
+  };
 }
 
 export function createSupabaseStorePersistence(): SupabaseStorePersistence | null {
@@ -118,12 +152,189 @@ export function createSupabaseStorePersistence(): SupabaseStorePersistence | nul
 
 export class SupabaseStorePersistence {
   private baseline: PersistentServerStore | null = null;
+  private collectionRemindersTableAvailable = true;
   private readonly profileIds = new Map<string, string>();
   private readonly client: SupabaseClient;
   private queue: Promise<void> = Promise.resolve();
 
   constructor(client: SupabaseClient) {
     this.client = client;
+  }
+
+  async getClientWorkspace(appUserId: string): Promise<ClientWorkspace | null> {
+    const { data, error } = await this.client
+      .from('app_client_workspaces')
+      .select('cart_data, drafts_data, updated_at')
+      .eq('app_user_id', appUserId)
+      .maybeSingle();
+    assertNoError('lecture de l’espace client', error);
+    if (!data) return null;
+    return {
+      cartItems: Array.isArray(data.cart_data) ? data.cart_data as CartItem[] : [],
+      drafts: Array.isArray(data.drafts_data) ? data.drafts_data as OrderDraft[] : [],
+      updatedAt: typeof data.updated_at === 'string' ? data.updated_at : new Date(0).toISOString(),
+    };
+  }
+
+  async saveClientWorkspace(appUserId: string, cartItems: CartItem[], drafts: OrderDraft[]): Promise<ClientWorkspace> {
+    const updatedAt = new Date().toISOString();
+    const { data, error } = await this.client
+      .from('app_client_workspaces')
+      .upsert({
+        app_user_id: appUserId,
+        cart_data: cartItems,
+        drafts_data: drafts,
+        updated_at: updatedAt,
+      }, { onConflict: 'app_user_id' })
+      .select('cart_data, drafts_data, updated_at')
+      .single();
+    assertNoError('sauvegarde de l’espace client', error);
+    return {
+      cartItems: Array.isArray(data?.cart_data) ? data.cart_data as CartItem[] : cartItems,
+      drafts: Array.isArray(data?.drafts_data) ? data.drafts_data as OrderDraft[] : drafts,
+      updatedAt: typeof data?.updated_at === 'string' ? data.updated_at : updatedAt,
+    };
+  }
+
+  async hasAtomicClientCreditGuard(): Promise<boolean> {
+    const { data, error } = await this.client
+      .from('app_runtime_settings')
+      .select('setting_value')
+      .eq('setting_key', 'client_credit_guard_version')
+      .maybeSingle();
+    if (this.isMissingTableError(error, 'app_runtime_settings')) return false;
+    assertNoError('vérification du contrôle atomique du crédit client', error);
+    return Number(dataObject(data).setting_value && dataObject(dataObject(data).setting_value).version) >= 1;
+  }
+
+  async listStockMovements(productId?: string): Promise<StockMovement[]> {
+    let query = this.client.from('stock_movements').select('*');
+    if (productId) query = query.eq('product_id', productId);
+    const { data, error } = await query.order('created_at', { ascending: false }).limit(200);
+    assertNoError('lecture des mouvements de stock', error);
+    return rows(data).map(stockMovementFromRow);
+  }
+
+  async receiveProductStock(input: {
+    product: Product;
+    movement: StockMovement;
+  }): Promise<{ movement: StockMovement; quantity: number; status: 'disponible' | 'rupture' }> {
+    const operation = this.queue.then(async () => {
+      if (!this.baseline) throw new Error('Supabase doit être initialisé avant une réception de stock.');
+      const { data, error } = await this.client.rpc('app_receive_product_stock', {
+        p_movement_id: input.movement.id,
+        p_product_id: input.product.id,
+        p_quantity: input.movement.quantity,
+        p_reason: input.movement.reason,
+        p_lot_number: input.movement.lotNumber || null,
+        p_performed_by_id: input.movement.performedById || 'system',
+        p_performed_by: input.movement.performedBy,
+        p_performed_by_role: input.movement.performedByRole || 'Super-Admin',
+      });
+      assertNoError('réception atomique du stock', error);
+      const payload = dataObject(data);
+      const movement = stockMovementFromRow(payload.movement);
+      const quantity = numberOr(payload.quantityAvailable, movement.newQuantity);
+      const status: 'disponible' | 'rupture' = payload.status === 'rupture' ? 'rupture' : 'disponible';
+      this.syncProductStockBaseline(input.product, quantity, status);
+      return { movement, quantity, status };
+    });
+    this.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  async adjustProductStock(input: {
+    product: Product;
+    movement: StockMovement;
+    targetQuantity: number;
+    status: 'disponible' | 'rupture';
+  }): Promise<{ movement: StockMovement | null; quantity: number; status: 'disponible' | 'rupture' }> {
+    const operation = this.queue.then(async () => {
+      if (!this.baseline) throw new Error('Supabase doit être initialisé avant un ajustement de stock.');
+      const { data, error } = await this.client.rpc('app_adjust_product_stock', {
+        p_movement_id: input.movement.id,
+        p_product_id: input.product.id,
+        p_target_quantity: input.targetQuantity,
+        p_status: input.status,
+        p_reason: input.movement.reason,
+        p_performed_by_id: input.movement.performedById || 'system',
+        p_performed_by: input.movement.performedBy,
+        p_performed_by_role: input.movement.performedByRole || 'Super-Admin',
+      });
+      assertNoError('ajustement atomique du stock', error);
+      const payload = dataObject(data);
+      const quantity = numberOr(payload.quantityAvailable, input.targetQuantity);
+      const status: 'disponible' | 'rupture' = payload.status === 'rupture' ? 'rupture' : 'disponible';
+      this.syncProductStockBaseline(input.product, quantity, status);
+      const movement = payload.movement ? stockMovementFromRow(payload.movement) : null;
+      return { movement, quantity, status };
+    });
+    this.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  async cancelOrderAndRestoreStock(input: {
+    order: Order;
+    reason: string;
+    actor: { id: string; name: string; role: AppRole };
+    store: PersistentServerStore;
+  }): Promise<{ order: Order; cancelled: boolean }> {
+    const operation = this.queue.then(async () => {
+      if (!this.baseline) throw new Error('Supabase doit être initialisé avant une annulation de commande.');
+      const { data, error } = await this.client.rpc('app_cancel_order_and_restore_stock', {
+        p_order_id: input.order.id,
+        p_reason: input.reason,
+        p_performed_by_id: input.actor.id,
+        p_performed_by: input.actor.name,
+        p_performed_by_role: input.actor.role,
+      });
+      assertNoError('annulation atomique et restitution du stock', error);
+
+      const payload = dataObject(data);
+      const stocks = rows(payload.stocks).map((row) => ({
+        productId: String(row.productId || ''),
+        quantity: Math.max(0, Math.trunc(numberOr(row.quantity))),
+        status: row.status === 'rupture' ? 'rupture' as const : 'disponible' as const,
+      })).filter((stock) => stock.productId);
+
+      for (const stock of stocks) {
+        const product = input.store.products.find((item) => item.id === stock.productId);
+        if (product) {
+          product.quantityAvailable = stock.quantity;
+          product.stockQuantity = stock.quantity;
+          product.status = stock.status;
+          product.hasPhysicalStock = stock.quantity > 0 && stock.status !== 'rupture';
+        }
+        this.syncProductStockBaseline(
+          product || ({ id: stock.productId } as Product),
+          stock.quantity,
+          stock.status,
+        );
+      }
+
+      const updatedOrder: Order = {
+        ...input.order,
+        status: 'Annulée',
+        cancellationReason: input.reason,
+        stockReserved: false,
+      };
+      const storeOrderIndex = input.store.orders.findIndex((item) => item.id === input.order.id);
+      if (storeOrderIndex >= 0) input.store.orders[storeOrderIndex] = updatedOrder;
+      const baselineOrderIndex = this.baseline.orders.findIndex((item) => item.id === input.order.id);
+      if (baselineOrderIndex >= 0) this.baseline.orders[baselineOrderIndex] = clone(updatedOrder);
+      else this.baseline.orders.unshift(clone(updatedOrder));
+
+      return { order: updatedOrder, cancelled: payload.cancelled !== false };
+    });
+    this.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  private syncProductStockBaseline(product: Product, quantity: number, status: 'disponible' | 'rupture'): void {
+    if (!this.baseline) return;
+    this.baseline.products = this.baseline.products.map((current) => current.id === product.id
+      ? { ...current, quantityAvailable: quantity, stockQuantity: quantity, status, hasPhysicalStock: quantity > 0 && status !== 'rupture' }
+      : current);
   }
 
   async createProductMediaUploadUrl(kind: 'image' | 'pdf', contentType: string): Promise<{
@@ -159,7 +370,7 @@ export class SupabaseStorePersistence {
   }
 
   async hydrate(local: PersistentServerStore): Promise<PersistentServerStore> {
-    const [productsResult, variantsResult, packsResult, ordersResult, itemsResult, usersResult, quotesResult, messagesResult, notificationsResult, staffAccountsResult, activityLogsResult, runtimeSettingsResult] = await Promise.all([
+    const [productsResult, variantsResult, packsResult, ordersResult, itemsResult, usersResult, quotesResult, messagesResult, notificationsResult, expensesResult, collectionRemindersResult, staffAccountsResult, activityLogsResult, runtimeSettingsResult] = await Promise.all([
       this.client.from('products').select('*').order('created_at', { ascending: true }),
       this.client.from('product_variants').select('*').order('id', { ascending: true }),
       this.client.from('packs').select('*').order('created_at', { ascending: true }),
@@ -169,6 +380,8 @@ export class SupabaseStorePersistence {
       this.client.from('quotes').select('*').order('created_at', { ascending: true }),
       this.client.from('direct_messages').select('*').order('created_at', { ascending: true }),
       this.client.from('notifications').select('*').order('created_at', { ascending: true }),
+      this.client.from('operating_expenses').select('*').order('expense_date', { ascending: false }),
+      this.client.from('collection_reminders').select('*').order('occurred_at', { ascending: false }).limit(10000),
       this.client.from('app_staff_accounts').select('*'),
       this.client.from('activity_logs').select('*').limit(500),
       this.client.from('app_runtime_settings').select('*'),
@@ -183,6 +396,15 @@ export class SupabaseStorePersistence {
     assertNoError('lecture des devis', quotesResult.error);
     assertNoError('lecture des messages', messagesResult.error);
     assertNoError('lecture des notifications', notificationsResult.error);
+    const expensesTableMissing = this.isMissingTableError(expensesResult.error, 'operating_expenses');
+    if (expensesResult.error && !expensesTableMissing) {
+      assertNoError('lecture des dépenses de fonctionnement', expensesResult.error);
+    }
+    const collectionRemindersTableMissing = this.isMissingTableError(collectionRemindersResult.error, 'collection_reminders');
+    this.collectionRemindersTableAvailable = !collectionRemindersTableMissing;
+    if (collectionRemindersResult.error && !collectionRemindersTableMissing) {
+      assertNoError('lecture des relances de créances', collectionRemindersResult.error);
+    }
     const staffTableMissing = this.isMissingTableError(staffAccountsResult.error, 'app_staff_accounts');
     if (staffAccountsResult.error && !staffTableMissing) {
       assertNoError('lecture des comptes collaborateurs', staffAccountsResult.error);
@@ -384,6 +606,49 @@ export class SupabaseStorePersistence {
       } as AppNotification;
     });
 
+    const remoteExpenses = expensesTableMissing ? [] : rows(expensesResult.data).map((row): OperatingExpense => {
+      const saved = dataObject(row.app_data);
+      return {
+        ...saved,
+        id: String(row.id),
+        date: String(row.expense_date),
+        category: row.category as OperatingExpense['category'],
+        description: String(row.description),
+        amount: numberOr(row.amount),
+        paymentMethod: row.payment_method || undefined,
+        supplier: row.supplier || undefined,
+        reference: row.reference || undefined,
+        status: row.status === 'annulee' ? 'annulee' : 'active',
+        recordedById: String(row.recorded_by_id),
+        recordedByName: String(row.recorded_by_name),
+        createdAt: String(row.created_at),
+        voidedAt: row.voided_at || undefined,
+        voidedById: row.voided_by_id || undefined,
+        voidedByName: row.voided_by_name || undefined,
+        voidReason: row.void_reason || undefined,
+      } as OperatingExpense;
+    });
+
+    const remoteCollectionReminders = collectionRemindersTableMissing ? [] : rows(collectionRemindersResult.data).map((row): CollectionReminder => {
+      const saved = dataObject(row.app_data);
+      return {
+        ...saved,
+        id: String(row.id),
+        orderId: String(row.order_id),
+        orderReference: String(row.order_reference),
+        clientId: row.client_id || undefined,
+        clientName: String(row.client_name),
+        occurredAt: String(row.occurred_at),
+        channel: row.channel as CollectionReminder['channel'],
+        outcome: row.outcome as CollectionReminder['outcome'],
+        notes: row.notes || undefined,
+        nextFollowUpDate: row.next_follow_up_date || undefined,
+        recordedById: String(row.recorded_by_id),
+        recordedByName: String(row.recorded_by_name),
+        recordedByRole: row.recorded_by_role as CollectionReminder['recordedByRole'],
+      } as CollectionReminder;
+    });
+
     const remoteActivityLogs = rows(activityLogsResult.data).map((row): StaffActivityLog => {
       const saved = dataObject(row.app_data);
       const detailsObj = row.details && typeof row.details === 'object' && !Array.isArray(row.details)
@@ -412,7 +677,7 @@ export class SupabaseStorePersistence {
         category: (row.category || detailsObj.category || saved.category || 'system') as StaffActivityLog['category'],
         severity: (row.severity || detailsObj.severity || saved.severity || 'info') as StaffActivityLog['severity'],
         actionLabel: String(row.action_label || detailsObj.actionLabel || saved.actionLabel || actionType),
-        targetType: (['product', 'order', 'staff', 'settings', 'quote'].includes(entityType) ? entityType : (detailsObj.targetType || saved.targetType || 'settings')) as StaffActivityLog['targetType'],
+        targetType: (['product', 'order', 'staff', 'settings', 'quote', 'expense'].includes(entityType) ? entityType : (detailsObj.targetType || saved.targetType || 'settings')) as StaffActivityLog['targetType'],
         targetId: String(detailsObj.targetId || saved.targetId || entityId),
         targetLabel: String(row.target_label || detailsObj.targetLabel || saved.targetLabel || entityId),
         previousValue: row.previous_value || detailsObj.previousValue || saved.previousValue || undefined,
@@ -434,11 +699,14 @@ export class SupabaseStorePersistence {
       products: mergeById(remoteProducts, local.products, (item) => item.id),
       packs: mergeById(remotePacks, local.packs, (item) => item.id),
       orders: mergeById(remoteOrders, local.orders, (item) => item.id),
+      stockMovements: local.stockMovements || [],
       accounts: mergeById(remoteAccounts, local.accounts, (item) => item.user.id),
       staffAccounts: mergeById(remoteStaffAccounts, local.staffAccounts || [], (item) => item.id),
       quotes: mergeById(remoteQuotes, local.quotes, (item) => item.id),
       messages: mergeById(remoteMessages, local.messages, (item) => item.id),
       notifications: mergeById(remoteNotifications, local.notifications, (item) => item.id),
+      expenses: mergeById(remoteExpenses, local.expenses || [], (item) => item.id),
+      collectionReminders: mergeById(remoteCollectionReminders, local.collectionReminders || [], (item) => item.id),
       volumeDiscounts: remoteVolumeDiscounts,
       staffLogs: mergedStaffLogs,
     };
@@ -453,6 +721,8 @@ export class SupabaseStorePersistence {
       quotes: remoteQuotes,
       messages: remoteMessages,
       notifications: remoteNotifications,
+      expenses: remoteExpenses,
+      collectionReminders: remoteCollectionReminders,
       staffLogs: remoteActivityLogs,
       volumeDiscounts: volumeDiscountRow?.setting_value
         ? volumeDiscountRow.setting_value as VolumeDiscountSettings
@@ -677,11 +947,207 @@ export class SupabaseStorePersistence {
       await this.persistStaffAccounts(snapshot);
       await this.persistOrders(snapshot);
       await this.persistQuotes(snapshot);
+      await this.persistExpenses(snapshot);
+      await this.persistCollectionReminders(snapshot);
       await this.persistMessages(snapshot);
       await this.persistNotifications(snapshot);
       await this.persistRuntimeSettings(snapshot);
       await this.persistActivityLogs(snapshot);
       this.baseline = clone(snapshot);
+    });
+    this.queue = operation.catch(() => undefined);
+    await operation;
+  }
+
+  async persistDirectMessage(
+    message: DirectMessage,
+    notification: AppNotification | null,
+    store: PersistentServerStore
+  ): Promise<void> {
+    const messageSnapshot = clone(message);
+    const notificationSnapshot = notification ? clone(notification) : null;
+    const operation = this.queue.then(async () => {
+      if (!this.baseline) throw new Error('Supabase doit être initialisé avant la première sauvegarde.');
+
+      const senderAccount = store.accounts.find((item) => item.user.id === messageSnapshot.senderId);
+      const senderUser = senderAccount?.user || {
+        id: messageSnapshot.senderId,
+        phone: '',
+        facilityName: 'Direction Gloryday Pharma',
+        contactName: messageSnapshot.senderName,
+        role: messageSnapshot.senderRole || 'Super-Admin',
+        createdAt: messageSnapshot.createdAt,
+      } as User;
+      const senderProfileId = this.profileIds.get(senderUser.id)
+        || await this.ensureProfile(senderUser, senderAccount?.passwordHash);
+      const recipientId = messageSnapshot.recipientId && messageSnapshot.recipientId !== 'staff'
+        ? messageSnapshot.recipientId
+        : undefined;
+      const recipientProfileId = await this.profileIdFor(recipientId, store);
+      const { error: messageError } = await this.client.from('direct_messages').upsert({
+        id: messageSnapshot.id,
+        sender_id: senderProfileId,
+        receiver_id: recipientProfileId,
+        sender_name: messageSnapshot.senderName,
+        sender_role: messageSnapshot.senderRole || senderUser.role,
+        content: messageSnapshot.content,
+        is_read: Boolean((messageSnapshot as any).isRead),
+        created_at: messageSnapshot.createdAt,
+        app_data: messageSnapshot,
+      }, { onConflict: 'id' });
+      assertNoError(`enregistrement du message ${messageSnapshot.id}`, messageError);
+
+      if (notificationSnapshot) {
+        const { error: notificationError } = await this.client.from('notifications').upsert({
+          id: notificationSnapshot.id,
+          user_id: await this.profileIdFor(notificationSnapshot.userId, store),
+          target_role: notificationSnapshot.targetRole,
+          title: notificationSnapshot.title || notificationSnapshot.orderReference || notificationSnapshot.type,
+          message: notificationSnapshot.message,
+          type: notificationSnapshot.type,
+          is_read: Boolean(notificationSnapshot.read),
+          data: notificationSnapshot,
+          created_at: notificationSnapshot.timestamp,
+        }, { onConflict: 'id' });
+        assertNoError('enregistrement de la notification du message', notificationError);
+      }
+
+      const nextBaseline = clone(this.baseline);
+      nextBaseline.messages = mergeById(nextBaseline.messages || [], [messageSnapshot], (item) => item.id);
+      if (notificationSnapshot) {
+        nextBaseline.notifications = mergeById(nextBaseline.notifications || [], [notificationSnapshot], (item) => item.id);
+      }
+      this.baseline = nextBaseline;
+    });
+    this.queue = operation.catch(() => undefined);
+    await operation;
+  }
+
+  async persistNotificationBatch(
+    notifications: AppNotification[],
+    store: PersistentServerStore
+  ): Promise<void> {
+    const notificationSnapshots = clone(notifications);
+    const operation = this.queue.then(async () => {
+      if (!this.baseline) throw new Error('Supabase doit être initialisé avant la première sauvegarde.');
+
+      const changedRows = await Promise.all(notificationSnapshots.map(async (notification) => ({
+        id: notification.id,
+        user_id: await this.profileIdFor(notification.userId, store),
+        target_role: notification.targetRole,
+        title: notification.title || notification.orderReference || notification.type,
+        message: notification.message,
+        type: notification.type,
+        is_read: Boolean(notification.read),
+        data: notification,
+        created_at: notification.timestamp,
+      })));
+
+      for (let offset = 0; offset < changedRows.length; offset += 100) {
+        const { error } = await this.client
+          .from('notifications')
+          .upsert(changedRows.slice(offset, offset + 100), { onConflict: 'id' });
+        assertNoError('enregistrement des notifications', error);
+      }
+
+      const nextBaseline = clone(this.baseline);
+      nextBaseline.notifications = mergeById(
+        nextBaseline.notifications || [],
+        notificationSnapshots,
+        (item) => item.id
+      );
+      this.baseline = nextBaseline;
+    });
+    this.queue = operation.catch(() => undefined);
+    await operation;
+  }
+
+  async persistOperatingExpense(expense: OperatingExpense, log?: StaffActivityLog): Promise<void> {
+    const snapshot = clone(expense);
+    const logSnapshot = log ? clone(log) : null;
+    const operation = this.queue.then(async () => {
+      if (!this.baseline) throw new Error('Supabase doit être initialisé avant la première sauvegarde.');
+      await this.upsertOperatingExpense(snapshot);
+      let logSaved = false;
+      if (logSnapshot) {
+        try {
+          await this.persistActivityLogs({ ...this.baseline, staffLogs: [logSnapshot] });
+          logSaved = true;
+        } catch (error) {
+          console.warn('La dépense est enregistrée, mais son entrée dans activity_logs a échoué:', error instanceof Error ? error.message : error);
+        }
+      }
+      const nextBaseline = clone(this.baseline);
+      nextBaseline.expenses = mergeById(nextBaseline.expenses || [], [snapshot], (item) => item.id);
+      if (logSnapshot && logSaved) {
+        nextBaseline.staffLogs = mergeById(nextBaseline.staffLogs || [], [logSnapshot], (item) => item.id).slice(0, 500);
+      }
+      this.baseline = nextBaseline;
+    });
+    this.queue = operation.catch(() => undefined);
+    await operation;
+  }
+
+  async listCollectionReminders(): Promise<CollectionReminder[]> {
+    const operation = this.queue.then(async () => {
+      const { data, error } = await this.client
+        .from('collection_reminders')
+        .select('*')
+        .order('occurred_at', { ascending: false })
+        .limit(10000);
+      if (this.isMissingTableError(error, 'collection_reminders')) {
+        throw new Error('Le journal des relances n’est pas encore créé dans Supabase. Appliquez la migration 20261102000005_collection_reminders.sql.');
+      }
+      assertNoError('lecture des relances de créances', error);
+      return rows(data).map((row): CollectionReminder => {
+        const saved = dataObject(row.app_data);
+        return {
+          ...saved,
+          id: String(row.id),
+          orderId: String(row.order_id),
+          orderReference: String(row.order_reference),
+          clientId: row.client_id || undefined,
+          clientName: String(row.client_name),
+          occurredAt: String(row.occurred_at),
+          channel: row.channel as CollectionReminder['channel'],
+          outcome: row.outcome as CollectionReminder['outcome'],
+          notes: row.notes || undefined,
+          nextFollowUpDate: row.next_follow_up_date || undefined,
+          recordedById: String(row.recorded_by_id),
+          recordedByName: String(row.recorded_by_name),
+          recordedByRole: row.recorded_by_role as CollectionReminder['recordedByRole'],
+        } as CollectionReminder;
+      });
+    });
+    this.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  async persistCollectionReminder(reminder: CollectionReminder, log?: StaffActivityLog): Promise<void> {
+    const snapshot = clone(reminder);
+    const logSnapshot = log ? clone(log) : null;
+    const operation = this.queue.then(async () => {
+      if (!this.baseline) throw new Error('Supabase doit être initialisé avant la première sauvegarde.');
+      await this.upsertCollectionReminder(snapshot);
+      let logSaved = false;
+      if (logSnapshot) {
+        try {
+          await this.persistActivityLogs({ ...this.baseline, staffLogs: [logSnapshot] });
+          logSaved = true;
+        } catch (error) {
+          console.warn('La relance est enregistrée, mais son entrée dans activity_logs a échoué:', error instanceof Error ? error.message : error);
+        }
+      }
+      const nextBaseline = clone(this.baseline);
+      nextBaseline.collectionReminders = mergeById(
+        nextBaseline.collectionReminders || [],
+        [snapshot],
+        (item) => item.id
+      );
+      if (logSnapshot && logSaved) {
+        nextBaseline.staffLogs = mergeById(nextBaseline.staffLogs || [], [logSnapshot], (item) => item.id).slice(0, 500);
+      }
+      this.baseline = nextBaseline;
     });
     this.queue = operation.catch(() => undefined);
     await operation;
@@ -1236,6 +1702,67 @@ export class SupabaseStorePersistence {
       }, { onConflict: 'id' });
       assertNoError(`enregistrement du devis ${quote.reference}`, error);
     }
+  }
+
+  private async persistExpenses(store: PersistentServerStore): Promise<void> {
+    const oldById = new Map((this.baseline?.expenses || []).map((item) => [item.id, item]));
+    for (const expense of store.expenses || []) {
+      const previous = oldById.get(expense.id);
+      if (previous && same(previous, expense)) continue;
+      await this.upsertOperatingExpense(expense);
+    }
+  }
+
+  private async upsertOperatingExpense(expense: OperatingExpense): Promise<void> {
+    const { error } = await this.client.from('operating_expenses').upsert({
+      id: expense.id,
+      expense_date: expense.date,
+      category: expense.category,
+      description: expense.description,
+      amount: expense.amount,
+      payment_method: expense.paymentMethod || null,
+      supplier: expense.supplier || null,
+      reference: expense.reference || null,
+      status: expense.status,
+      recorded_by_id: expense.recordedById,
+      recorded_by_name: expense.recordedByName,
+      created_at: expense.createdAt,
+      voided_at: expense.voidedAt || null,
+      voided_by_id: expense.voidedById || null,
+      voided_by_name: expense.voidedByName || null,
+      void_reason: expense.voidReason || null,
+      app_data: expense,
+    }, { onConflict: 'id' });
+    assertNoError(`enregistrement de la dépense ${expense.id}`, error);
+  }
+
+  private async persistCollectionReminders(store: PersistentServerStore): Promise<void> {
+    if (!this.collectionRemindersTableAvailable) return;
+    const oldIds = new Set((this.baseline?.collectionReminders || []).map((item) => item.id));
+    for (const reminder of store.collectionReminders || []) {
+      if (oldIds.has(reminder.id)) continue;
+      await this.upsertCollectionReminder(reminder);
+    }
+  }
+
+  private async upsertCollectionReminder(reminder: CollectionReminder): Promise<void> {
+    const { error } = await this.client.from('collection_reminders').upsert({
+      id: reminder.id,
+      order_id: reminder.orderId,
+      order_reference: reminder.orderReference,
+      client_id: reminder.clientId || null,
+      client_name: reminder.clientName,
+      occurred_at: reminder.occurredAt,
+      channel: reminder.channel,
+      outcome: reminder.outcome,
+      notes: reminder.notes || null,
+      next_follow_up_date: reminder.nextFollowUpDate || null,
+      recorded_by_id: reminder.recordedById,
+      recorded_by_name: reminder.recordedByName,
+      recorded_by_role: reminder.recordedByRole,
+      app_data: reminder,
+    }, { onConflict: 'id' });
+    assertNoError(`enregistrement de la relance ${reminder.id}`, error);
   }
 
   private async persistMessages(store: PersistentServerStore): Promise<void> {

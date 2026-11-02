@@ -11,3 +11,4 @@ coverage/
 !.env.example
 /data/
 /local-preview-data/
+/archive/reference/*.zip
