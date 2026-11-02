@@ -392,9 +392,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, new Map<string, { name: string; count: number }>()).entries()).map(([key, load]) => ({ key, ...load }));
 
   return (
-    <div className="admin-dashboard-enter max-w-6xl mx-auto pb-24 space-y-6 px-2 sm:px-0">
+    <div className="admin-dashboard-enter admin-dashboard-shell max-w-7xl mx-auto pb-24 space-y-5 px-3 sm:px-0">
       {/* 1. TOP COMMAND CENTER BANNER */}
-      <div className="bg-gradient-to-r from-slate-950 via-[#0f172a] to-slate-950 text-white rounded-3xl p-5 sm:p-6 shadow-xl border border-slate-800 relative overflow-hidden">
+      <div className="admin-dashboard-header bg-gradient-to-r from-slate-950 via-[#0f172a] to-slate-950 text-white rounded-3xl p-5 sm:p-6 shadow-xl border border-slate-800 relative overflow-hidden">
         {/* Subtle decorative glow */}
         <div className="dashboard-orb-float absolute top-0 right-0 w-96 h-96 bg-blue-600/15 rounded-full blur-3xl pointer-events-none -mr-24 -mt-24"></div>
 
@@ -460,7 +460,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* 2. SUB-TABS NAVIGATION WITH DYNAMIC BADGES */}
-      <nav aria-label="Sections du tableau de bord" className="flex gap-1.5 overflow-x-auto border-b border-slate-200 pb-1 text-xs font-bold scrollbar-none">
+      <nav aria-label="Sections du tableau de bord" className="admin-dashboard-nav flex gap-1.5 overflow-x-auto text-xs font-bold scrollbar-none">
         {hasPerm('stats_view') && (
           <button
             type="button"
@@ -678,6 +678,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* 3. TAB 1: EXECUTIVE KPIS */}
       {activeTab === 'kpi' && hasPerm('stats_view') && stats && (
         <div key="tab-kpi" className="dashboard-tab-enter space-y-5">
+          <div className="admin-dashboard-section-heading">
+            <div>
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#0d44e8]">Pilotage</p>
+              <h2 className="mt-1 text-lg font-extrabold tracking-tight text-slate-900 sm:text-xl">Activité & indicateurs</h2>
+              <p className="mt-0.5 text-xs text-slate-500">Les chiffres clés et les priorités opérationnelles de votre activité.</p>
+            </div>
+          </div>
           <div className="admin-dashboard-kpis grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs relative overflow-hidden">
               <div className="flex items-center justify-between gap-1">
@@ -692,12 +699,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="text-[10px] text-slate-600 font-bold mt-1">Commandes payées et en attente</div>
             </div>
 
-            <div
+            <button
+              type="button"
               onClick={() => {
                 setOrderStatusFilter('to_confirm');
                 setActiveTab('orders');
               }}
-              className="bg-white p-4 rounded-2xl border border-amber-200 bg-amber-50/30 shadow-2xs cursor-pointer relative overflow-hidden"
+              className="admin-dashboard-kpi-action bg-white p-4 rounded-2xl border border-amber-200 bg-amber-50/30 shadow-2xs cursor-pointer relative overflow-hidden text-left"
             >
               <div className="flex items-center justify-between gap-1">
                 <span className="text-[10px] font-bold text-amber-800 uppercase block tracking-wider">À confirmer</span>
@@ -709,14 +717,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {stats.ordersToConfirm}
               </div>
               <div className="text-[10px] text-amber-700 mt-1 font-medium">Confirmation manuelle à effectuer</div>
-            </div>
+            </button>
 
-            <div
+            <button
+              type="button"
               onClick={() => {
                 setOrderStatusFilter('preparation');
                 setActiveTab('orders');
               }}
-              className="bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/20 shadow-2xs cursor-pointer relative overflow-hidden"
+              className="admin-dashboard-kpi-action bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/20 shadow-2xs cursor-pointer relative overflow-hidden text-left"
             >
               <div className="flex items-center justify-between gap-1">
                 <span className="text-[10px] font-bold text-[#0d44e8] uppercase block tracking-wider">En cours logistique</span>
@@ -728,7 +737,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {inPreparationCount + inTransitCount}
               </div>
               <div className="text-[10px] text-blue-700 mt-1 font-medium">Colisage / En transit</div>
-            </div>
+            </button>
 
             <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs relative overflow-hidden">
               <div className="flex items-center justify-between gap-1">
@@ -756,9 +765,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="text-[10px] text-slate-500 mt-1">Par commande clinique</div>
             </div>
 
-            <div
+            <button
+              type="button"
               onClick={() => setActiveTab('lots')}
-              className="bg-white p-4 rounded-2xl border border-rose-200 bg-rose-50/30 shadow-2xs cursor-pointer relative overflow-hidden"
+              className="admin-dashboard-kpi-action bg-white p-4 rounded-2xl border border-rose-200 bg-rose-50/30 shadow-2xs cursor-pointer relative overflow-hidden text-left"
             >
               <div className="flex items-center justify-between gap-1">
                 <span className="text-[10px] font-bold text-rose-800 uppercase block tracking-wider">Alertes Stock</span>
@@ -770,7 +780,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {outOfStockCount}
               </div>
               <div className="text-[10px] text-rose-700 mt-1 font-medium">Articles en rupture</div>
-            </div>
+            </button>
           </div>
 
           <div className="dashboard-card-interactive rounded-3xl border border-slate-200/90 bg-white p-3 shadow-sm sm:p-5">
