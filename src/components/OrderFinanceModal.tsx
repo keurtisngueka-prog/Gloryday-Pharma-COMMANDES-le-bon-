@@ -165,7 +165,6 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       collectionDueDate ? formatCollectionDueDate(collectionDueDate) : 'Échéance supprimée'
     );
   };
-
   const handleCreateInvoiceOrCredit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManageInvoices) return;
