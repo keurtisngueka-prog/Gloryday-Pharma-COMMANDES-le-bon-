@@ -26,7 +26,7 @@ enabled = true
 port = 54323
 api_url = "https://kqvfoltosjrjvghaizpd.supabase.co"
 
-[inbucket]
+[local_smtp]
 enabled = false
 port = 54324
 
@@ -45,6 +45,6 @@ enable_signup = true
 enable_anonymous_sign_ins = false
 
 [auth.email]
-enable_signup = true
+enabled = true
 double_confirm_changes = true
 enable_confirmations = false
