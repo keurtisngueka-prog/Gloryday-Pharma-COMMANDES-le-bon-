@@ -7,6 +7,7 @@ interface StockReceiptModalProps {
   product: Product | null;
   onClose: () => void;
   onProductUpdated: (product: Product) => void;
+  canManagePurchasePrice?: boolean;
 }
 
 function newMovementId(): string {
@@ -31,10 +32,14 @@ const formatDate = (value: string) => {
   return Number.isNaN(date.getTime()) ? 'Date inconnue' : date.toLocaleString('fr-FR', { timeZone: 'Africa/Libreville' });
 };
 
-export const StockReceiptModal: React.FC<StockReceiptModalProps> = ({ product, onClose, onProductUpdated }) => {
+export const StockReceiptModal: React.FC<StockReceiptModalProps> = ({ product, onClose, onProductUpdated, canManagePurchasePrice = false }) => {
   const [quantity, setQuantity] = useState('');
   const [reason, setReason] = useState('');
   const [lotNumber, setLotNumber] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
+  const [supplierName, setSupplierName] = useState('');
+  const [supplierReference, setSupplierReference] = useState('');
+  const [purchasePrice, setPurchasePrice] = useState('');
   const [movementId, setMovementId] = useState(newMovementId);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -47,6 +52,10 @@ export const StockReceiptModal: React.FC<StockReceiptModalProps> = ({ product, o
     setQuantity('');
     setReason('');
     setLotNumber('');
+    setExpiryDate('');
+    setSupplierName('');
+    setSupplierReference('');
+    setPurchasePrice('');
     setMovementId(newMovementId());
     setError('');
     setSuccess('');
@@ -82,6 +91,10 @@ export const StockReceiptModal: React.FC<StockReceiptModalProps> = ({ product, o
         reason: reason.trim(),
         movementId,
         lotNumber: lotNumber.trim() || undefined,
+        expiryDate: expiryDate || undefined,
+        supplierName: supplierName.trim() || undefined,
+        supplierReference: supplierReference.trim() || undefined,
+        purchasePrice: purchasePrice === '' ? undefined : Number(purchasePrice),
       });
       onProductUpdated(result.product);
       setMovements(previous => [result.movement, ...previous.filter(item => item.id !== result.movement.id)].slice(0, 12));
@@ -89,6 +102,10 @@ export const StockReceiptModal: React.FC<StockReceiptModalProps> = ({ product, o
       setQuantity('');
       setReason('');
       setLotNumber('');
+      setExpiryDate('');
+      setSupplierName('');
+      setSupplierReference('');
+      setPurchasePrice('');
       setMovementId(newMovementId());
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'La réception n’a pas pu être enregistrée.');
@@ -159,6 +176,48 @@ export const StockReceiptModal: React.FC<StockReceiptModalProps> = ({ product, o
                 className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
               />
             </label>
+            <label className="text-xs font-bold text-slate-700">
+              Date de péremption <span className="font-medium text-slate-400">(si applicable)</span>
+              <input
+                type="date"
+                value={expiryDate}
+                onChange={event => { setExpiryDate(event.target.value); setError(''); setSuccess(''); }}
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+              />
+            </label>
+            <label className="text-xs font-bold text-slate-700">
+              Fournisseur <span className="font-medium text-slate-400">(facultatif)</span>
+              <input
+                value={supplierName}
+                onChange={event => { setSupplierName(event.target.value); setError(''); setSuccess(''); }}
+                maxLength={160}
+                placeholder="Nom du fournisseur"
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+              />
+            </label>
+            <label className="text-xs font-bold text-slate-700">
+              Référence fournisseur / facture <span className="font-medium text-slate-400">(facultatif)</span>
+              <input
+                value={supplierReference}
+                onChange={event => { setSupplierReference(event.target.value); setError(''); setSuccess(''); }}
+                maxLength={160}
+                placeholder="N° de facture ou bon fournisseur"
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+              />
+            </label>
+            {canManagePurchasePrice && <label className="text-xs font-bold text-slate-700">
+              Coût d’achat unitaire (FCFA) <span className="font-medium text-slate-400">(facultatif)</span>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                inputMode="numeric"
+                value={purchasePrice}
+                onChange={event => { setPurchasePrice(event.target.value); setError(''); setSuccess(''); }}
+                placeholder="Ex. 1250"
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+              />
+            </label>}
             <label className="text-xs font-bold text-slate-700 sm:col-span-2">
               Motif / référence fournisseur <span className="text-rose-600">*</span>
               <input

@@ -15,6 +15,7 @@ import type {
   StaffPermission,
   VolumeDiscountSettings,
   StaffActivityLog,
+  StockBatch,
   StockMovement,
   OperatingExpense,
   CollectionReminder,
@@ -53,6 +54,7 @@ export interface PersistentServerStore {
   packs: Pack[];
   orders: Order[];
   stockMovements?: StockMovement[];
+  stockBatches?: StockBatch[];
   accounts: StoredUserAccount[];
   staffAccounts: ManagedStaffAccount[];
   quotes: CommercialQuote[];
@@ -109,6 +111,32 @@ function stockMovementFromRow(value: unknown): StockMovement {
     performedBy: String(row.performed_by || ''),
     performedById: row.performed_by_id ? String(row.performed_by_id) : undefined,
     performedByRole: row.performed_by_role as StockMovement['performedByRole'],
+  };
+}
+
+function stockBatchFromRow(value: unknown): StockBatch {
+  const row = dataObject(value);
+  return {
+    id: String(row.id || ''),
+    productId: String(row.product_id || ''),
+    productName: String(row.product_name || ''),
+    lotNumber: row.lot_number ? String(row.lot_number) : '',
+    expiryDate: row.expiry_date ? String(row.expiry_date).slice(0, 10) : '',
+    quantity: numberOr(row.quantity_received),
+    initialQuantity: numberOr(row.quantity_received),
+    quantityRemaining: row.quantity_remaining == null ? undefined : numberOr(row.quantity_remaining),
+    quantityDestroyed: numberOr(row.quantity_destroyed),
+    purchasePrice: row.purchase_price == null ? undefined : numberOr(row.purchase_price),
+    supplierName: row.supplier_name ? String(row.supplier_name) : undefined,
+    supplierReference: row.supplier_reference ? String(row.supplier_reference) : undefined,
+    receivedDate: String(row.received_at || row.created_at || new Date().toISOString()),
+    receivedBy: row.received_by ? String(row.received_by) : undefined,
+    receivedById: row.received_by_id ? String(row.received_by_id) : undefined,
+    status: row.status === 'quarantaine' || row.status === 'perime' || row.status === 'detruit' ? row.status : 'disponible',
+    statusReason: row.status_reason ? String(row.status_reason) : undefined,
+    statusUpdatedAt: row.status_updated_at ? String(row.status_updated_at) : undefined,
+    statusUpdatedBy: row.status_updated_by ? String(row.status_updated_by) : undefined,
+    isArchived: row.status === 'detruit',
   };
 }
 
@@ -215,13 +243,22 @@ export class SupabaseStorePersistence {
     return rows(data).map(stockMovementFromRow);
   }
 
+  async listStockBatches(productId?: string): Promise<StockBatch[]> {
+    let query = this.client.from('stock_batches').select('*');
+    if (productId) query = query.eq('product_id', productId);
+    const { data, error } = await query.order('received_at', { ascending: false }).limit(2000);
+    assertNoError('lecture des lots de stock', error);
+    return rows(data).map(stockBatchFromRow);
+  }
+
   async receiveProductStock(input: {
     product: Product;
     movement: StockMovement;
-  }): Promise<{ movement: StockMovement; quantity: number; status: 'disponible' | 'rupture' }> {
+    batch: StockBatch;
+  }): Promise<{ movement: StockMovement; batch: StockBatch; quantity: number; status: 'disponible' | 'rupture' }> {
     const operation = this.queue.then(async () => {
       if (!this.baseline) throw new Error('Supabase doit être initialisé avant une réception de stock.');
-      const { data, error } = await this.client.rpc('app_receive_product_stock', {
+      const { data, error } = await this.client.rpc('app_receive_product_stock_with_batch', {
         p_movement_id: input.movement.id,
         p_product_id: input.product.id,
         p_quantity: input.movement.quantity,
@@ -230,14 +267,52 @@ export class SupabaseStorePersistence {
         p_performed_by_id: input.movement.performedById || 'system',
         p_performed_by: input.movement.performedBy,
         p_performed_by_role: input.movement.performedByRole || 'Super-Admin',
+        p_expiry_date: input.batch.expiryDate || null,
+        p_supplier_name: input.batch.supplierName || null,
+        p_supplier_reference: input.batch.supplierReference || null,
+        p_purchase_price: input.batch.purchasePrice ?? null,
       });
       assertNoError('réception atomique du stock', error);
       const payload = dataObject(data);
       const movement = stockMovementFromRow(payload.movement);
+      const batch = stockBatchFromRow(payload.batch);
       const quantity = numberOr(payload.quantityAvailable, movement.newQuantity);
       const status: 'disponible' | 'rupture' = payload.status === 'rupture' ? 'rupture' : 'disponible';
       this.syncProductStockBaseline(input.product, quantity, status);
-      return { movement, quantity, status };
+      return { movement, batch, quantity, status };
+    });
+    this.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  async updateStockBatchStatus(input: {
+    batchId: string;
+    targetStatus: 'disponible' | 'quarantaine' | 'detruit';
+    reason: string;
+    movementId: string;
+    performedById: string;
+    performedBy: string;
+    performedByRole: string;
+  }): Promise<{ batch: StockBatch; quantity: number; movement: StockMovement | null }> {
+    const operation = this.queue.then(async () => {
+      if (!this.baseline) throw new Error('Supabase doit être initialisé avant de modifier un lot.');
+      const { data, error } = await this.client.rpc('app_set_stock_batch_status', {
+        p_batch_id: input.batchId,
+        p_target_status: input.targetStatus,
+        p_reason: input.reason,
+        p_movement_id: input.movementId,
+        p_performed_by_id: input.performedById,
+        p_performed_by: input.performedBy,
+        p_performed_by_role: input.performedByRole,
+      });
+      assertNoError('mise à jour du statut du lot', error);
+      const payload = dataObject(data);
+      const batch = stockBatchFromRow(payload.batch);
+      const product = this.baseline.products.find(item => item.id === batch.productId);
+      const quantity = numberOr(payload.quantityAvailable, product ? numberOr(product.quantityAvailable, product.stockQuantity) : 0);
+      const movement = payload.movement ? stockMovementFromRow(payload.movement) : null;
+      if (product) this.syncProductStockBaseline(product, quantity, quantity > 0 ? 'disponible' : 'rupture');
+      return { batch, quantity, movement };
     });
     this.queue = operation.then(() => undefined, () => undefined);
     return operation;
@@ -337,7 +412,7 @@ export class SupabaseStorePersistence {
       : current);
   }
 
-  async createProductMediaUploadUrl(kind: 'image' | 'pdf', contentType: string): Promise<{
+  async createProductMediaUploadUrl(kind: 'image' | 'pdf', contentType: string, scope: 'product' | 'pack' = 'product'): Promise<{
     bucket: string;
     path: string;
     token: string;
@@ -351,7 +426,7 @@ export class SupabaseStorePersistence {
         : contentType === 'image/png'
           ? 'png'
           : 'jpg';
-    const directory = kind === 'pdf' ? 'notices' : 'products';
+    const directory = kind === 'pdf' ? 'notices' : scope === 'pack' ? 'packs' : 'products';
     const bucket = 'product-media';
     const path = `${directory}/${randomUUID()}.${extension}`;
     const storage = this.client.storage.from(bucket);
@@ -700,6 +775,7 @@ export class SupabaseStorePersistence {
       packs: mergeById(remotePacks, local.packs, (item) => item.id),
       orders: mergeById(remoteOrders, local.orders, (item) => item.id),
       stockMovements: local.stockMovements || [],
+      stockBatches: local.stockBatches || [],
       accounts: mergeById(remoteAccounts, local.accounts, (item) => item.user.id),
       staffAccounts: mergeById(remoteStaffAccounts, local.staffAccounts || [], (item) => item.id),
       quotes: mergeById(remoteQuotes, local.quotes, (item) => item.id),

@@ -51,6 +51,7 @@ import type {
   StaffActivityLog,
   StaffLogCategory,
   StaffLogSeverity,
+  StockBatch,
   StockMovement,
   OperatingExpense,
   OperatingExpenseCategory,
@@ -86,6 +87,7 @@ type ServerStore = PersistentServerStore & {
   expenses: OperatingExpense[];
   collectionReminders: CollectionReminder[];
   stockMovements: StockMovement[];
+  stockBatches: StockBatch[];
   clientWorkspaces?: Record<string, ClientWorkspace>;
   deliveryLocations?: Record<string, DeliveryLocationPoint[]>;
   deliveryTrackingSessions?: Record<string, StoredDeliveryTrackingSession>;
@@ -155,14 +157,14 @@ function sanitizePermissions(input: unknown, fallbackRole: StaffRole): StaffPerm
   return normalized.filter((permission) => ALL_STAFF_PERMISSIONS.includes(permission));
 }
 
-function hasStockPermission(user: User | null | undefined, permission: Extract<StaffPermission, 'stock_view' | 'stock_receive' | 'stock_adjust' | 'stock_availability_manage' | 'stock_costs_view' | 'stock_costs_manage' | 'stock_export'>): boolean {
+function hasStockPermission(user: User | null | undefined, permission: Extract<StaffPermission, 'stock_view' | 'stock_receive' | 'stock_adjust' | 'stock_batches_manage' | 'stock_availability_manage' | 'stock_costs_view' | 'stock_costs_manage' | 'stock_export'>): boolean {
   if (!user) return false;
   if (user.role === 'Super-Admin') return true;
   const permissions = user.permissions || [];
   if (permissions.includes('catalog_stock') || permissions.includes(permission)) return true;
   if (permission === 'stock_costs_view' && permissions.includes('stock_costs_manage')) return true;
   return permission === 'stock_view' && [
-    'stock_receive', 'stock_adjust', 'stock_availability_manage', 'stock_costs_manage', 'stock_export'
+    'stock_receive', 'stock_adjust', 'stock_batches_manage', 'stock_availability_manage', 'stock_costs_manage', 'stock_export'
   ].some((implied) => permissions.includes(implied as StaffPermission));
 }
 
@@ -228,7 +230,7 @@ function isDeliveryLocationsMigrationError(error: unknown): boolean {
 }
 
 function isStockLedgerMigrationError(error: unknown): boolean {
-  return /stock_movements|app_cancel_order_and_restore_stock|app_create_order_atomic_(?:pre|without)_stock_ledger|PGRST202|PGRST205|42P01|schema cache/i.test(error instanceof Error ? error.message : String(error));
+  return /stock_movements|stock_batches|stock_batch_movements|app_receive_product_stock_with_batch|app_set_stock_batch_status|app_cancel_order_and_restore_stock|app_create_order_atomic_(?:pre|without)_stock_ledger|PGRST202|PGRST205|42P01|schema cache/i.test(error instanceof Error ? error.message : String(error));
 }
 
 function isOperatingExpensesMigrationError(error: unknown): boolean {
@@ -276,6 +278,7 @@ function loadStore(): ServerStore {
         expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
         collectionReminders: Array.isArray(parsed.collectionReminders) ? parsed.collectionReminders : [],
         stockMovements: Array.isArray(parsed.stockMovements) ? parsed.stockMovements : [],
+        stockBatches: Array.isArray(parsed.stockBatches) ? parsed.stockBatches : [],
         clientWorkspaces: parsed.clientWorkspaces && typeof parsed.clientWorkspaces === 'object' && !Array.isArray(parsed.clientWorkspaces)
           ? parsed.clientWorkspaces
           : {},
@@ -313,6 +316,7 @@ function loadStore(): ServerStore {
     expenses: [],
     collectionReminders: [],
     stockMovements: [],
+    stockBatches: [],
     clientWorkspaces: {},
     volumeDiscounts: { ...DEFAULT_VOLUME_DISCOUNT_SETTINGS },
     staffLogs: [],
@@ -494,7 +498,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         ...hydratedStore,
         expenses: hydratedStore.expenses || [],
         collectionReminders: hydratedStore.collectionReminders || [],
-        stockMovements: hydratedStore.stockMovements || []
+        stockMovements: hydratedStore.stockMovements || [],
+        stockBatches: hydratedStore.stockBatches || []
       };
       await saveStore(store, persistence);
     } catch (error) {
@@ -819,6 +824,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       allowed = hasPerm('settings_manage');
     } else if (route === '/admin/stock/movements') {
       allowed = method === 'GET' && hasStockPermission(user, 'stock_view');
+    } else if (route === '/admin/stock/batches') {
+      allowed = method === 'GET' && hasStockPermission(user, 'stock_view');
+    } else if (/^\/admin\/stock\/batches\/[^/]+\/status$/.test(route)) {
+      allowed = method === 'PATCH' && hasStockPermission(user, 'stock_batches_manage');
     } else if (route === '/admin/stock/receive') {
       allowed = method === 'POST' && hasStockPermission(user, 'stock_receive');
     } else if (route === '/admin/collection-reminders') {
@@ -1149,6 +1158,26 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     res.status(201).json(upload);
   }));
 
+  app.post('/api/packs/media-upload-url', asyncHandler(async (req, res) => {
+    if (!persistence) {
+      res.status(503).json({ error: 'L’import de photos de packs nécessite la connexion à Supabase Storage.' });
+      return;
+    }
+    const contentType = String(req.body?.contentType || '').trim().toLowerCase();
+    const fileSize = Number(req.body?.fileSize);
+    const validType = ['image/webp', 'image/jpeg', 'image/png'].includes(contentType);
+    if (!validType) {
+      res.status(400).json({ error: 'Format non accepté. Utilisez une image WebP, JPEG ou PNG.' });
+      return;
+    }
+    if (!Number.isFinite(fileSize) || fileSize <= 0 || fileSize > 6 * 1024 * 1024) {
+      res.status(400).json({ error: 'La photo optimisée doit peser au maximum 6 Mo.' });
+      return;
+    }
+    const upload = await persistence.createProductMediaUploadUrl('image', contentType, 'pack');
+    res.status(201).json(upload);
+  }));
+
   app.post('/api/products', asyncHandler(async (req, res) => {
     const productData = req.body || {};
     const actor = (req as AuthenticatedRequest).authenticatedUser;
@@ -1455,12 +1484,208 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   app.get('/api/admin/stock/movements', asyncHandler(async (req, res) => {
     const rawProductId = req.query.productId;
     const productId = typeof rawProductId === 'string' ? rawProductId.trim() : undefined;
-    const movements = persistence
-      ? await persistence.listStockMovements(productId)
-      : (store.stockMovements || [])
-          .filter(movement => !productId || movement.productId === productId)
-          .slice(0, 200);
-    res.json({ movements });
+    try {
+      const movements = persistence
+        ? await persistence.listStockMovements(productId)
+        : (store.stockMovements || [])
+            .filter(movement => !productId || movement.productId === productId)
+            .slice(0, 200);
+      res.json({ movements });
+    } catch (error) {
+      if (isStockLedgerMigrationError(error)) {
+        res.status(503).json({ error: 'Le journal de stock n’est pas encore créé dans Supabase. Appliquez les migrations 20261102000001_stock_movement_ledger.sql et 20261102000002_order_stock_movements.sql.' });
+        return;
+      }
+      throw error;
+    }
+  }));
+
+  app.get('/api/admin/stock/batches', asyncHandler(async (req, res) => {
+    const rawProductId = req.query.productId;
+    const productId = typeof rawProductId === 'string' ? rawProductId.trim() : undefined;
+    try {
+      const batches = persistence
+        ? await persistence.listStockBatches(productId)
+        : [...(store.stockBatches || [])]
+            .filter(batch => !productId || batch.productId === productId)
+            .sort((left, right) => right.receivedDate.localeCompare(left.receivedDate))
+            .slice(0, 2000);
+      const user = (req as AuthenticatedRequest).authenticatedUser!;
+      const canViewCosts = hasStockPermission(user, 'stock_costs_view') || hasStockPermission(user, 'stock_costs_manage');
+      res.json({ batches: batches.map(batch => {
+        if (canViewCosts) return batch;
+        const { purchasePrice: _restrictedCost, ...visibleBatch } = batch;
+        return visibleBatch;
+      }) });
+    } catch (error) {
+      if (isStockLedgerMigrationError(error)) {
+        res.status(503).json({ error: 'Le registre des lots n’est pas encore créé dans Supabase. Appliquez la migration 20261103000001_stock_batch_receipts.sql.' });
+        return;
+      }
+      throw error;
+    }
+  }));
+
+  app.patch('/api/admin/stock/batches/:batchId/status', asyncHandler(async (req, res) => {
+    const batchId = String(req.params.batchId || '').trim();
+    const movementId = typeof req.body?.movementId === 'string' ? req.body.movementId.trim() : '';
+    const targetStatus = req.body?.targetStatus;
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) : '';
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(batchId) ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(movementId) ||
+        !['disponible', 'quarantaine', 'detruit'].includes(targetStatus) || reason.length < 3) {
+      res.status(400).json({ error: 'Choisissez un état valide et indiquez un motif de 3 à 500 caractères.' });
+      return;
+    }
+
+    const actor = (req as AuthenticatedRequest).authenticatedUser!;
+    const batchIndex = (store.stockBatches || []).findIndex(batch => batch.id === batchId);
+    if (batchIndex < 0) {
+      res.status(404).json({ error: 'Lot introuvable.' });
+      return;
+    }
+    const batch = store.stockBatches[batchIndex];
+    const productIndex = store.products.findIndex(product => product.id === batch.productId);
+    if (productIndex < 0) {
+      res.status(404).json({ error: 'Produit associé au lot introuvable.' });
+      return;
+    }
+    if (batch.quantityRemaining === undefined) {
+      res.status(409).json({ error: 'Ce lot historique doit être rapproché par inventaire physique avant de changer son état.' });
+      return;
+    }
+    if (batch.status === 'detruit' && targetStatus !== 'detruit') {
+      res.status(409).json({ error: 'Un lot détruit ne peut pas être réactivé.' });
+      return;
+    }
+    if (targetStatus === 'disponible' && (batch.status !== 'quarantaine' || (batch.expiryDate && batch.expiryDate < new Date().toISOString().slice(0, 10)))) {
+      res.status(409).json({ error: 'Seul un lot non périmé en quarantaine peut être remis en disponibilité.' });
+      return;
+    }
+    if (batch.status === targetStatus) {
+      res.json({ success: true, batch, product: store.products[productIndex], movement: null });
+      return;
+    }
+
+    const product = store.products[productIndex];
+    const previousBatchSnapshot = { ...batch };
+    const previousProductSnapshot = { ...product };
+    const previousMovementsSnapshot = [...(store.stockMovements || [])];
+    const previousStaffLogsSnapshot = [...(store.staffLogs || [])];
+    const previousQuantity = Math.max(0, Number(product.quantityAvailable ?? product.stockQuantity ?? 0));
+    let delta = 0;
+    if (targetStatus === 'disponible') delta = batch.quantityRemaining;
+    else if (batch.status === 'disponible') delta = -batch.quantityRemaining;
+    const nextQuantity = previousQuantity + delta;
+    if (!Number.isSafeInteger(nextQuantity) || nextQuantity < 0 || nextQuantity > 2147483647) {
+      res.status(409).json({ error: 'Le stock disponible ne permet pas ce changement. Faites un inventaire par lot.' });
+      return;
+    }
+
+    const savedStatus = targetStatus as 'disponible' | 'quarantaine' | 'detruit';
+    let movement: StockMovement | null = null;
+    const now = new Date().toISOString();
+    if (delta !== 0) {
+      movement = {
+        id: movementId,
+        productId: product.id,
+        productName: product.name,
+        type: 'ajustement',
+        quantity: Math.abs(delta),
+        previousQuantity,
+        newQuantity: nextQuantity,
+        reason,
+        lotNumber: batch.lotNumber || undefined,
+        date: now,
+        performedBy: actor.contactName || actor.facilityName || actor.phone || 'Collaborateur',
+        performedById: actor.id,
+        performedByRole: actor.role,
+      };
+    }
+
+    try {
+      if (persistence) {
+        const result = await persistence.updateStockBatchStatus({
+          batchId,
+          targetStatus: savedStatus,
+          reason,
+          movementId,
+          performedById: actor.id,
+          performedBy: actor.contactName || actor.facilityName || actor.phone || 'Collaborateur',
+          performedByRole: actor.role,
+        });
+        store.stockBatches[batchIndex] = result.batch;
+        store.products[productIndex] = enrichProductWithStockState({
+          ...product,
+          quantityAvailable: result.quantity,
+          stockQuantity: result.quantity,
+          status: result.quantity > 0 ? (savedStatus === 'disponible' ? 'disponible' : product.status) : 'rupture',
+        });
+        if (result.movement) store.stockMovements = [result.movement, ...(store.stockMovements || []).filter(item => item.id !== result.movement!.id)].slice(0, 2000);
+        movement = result.movement;
+      } else {
+        const priorMovement = (store.stockMovements || []).find(item => item.id === movementId);
+        if (priorMovement) {
+          if (priorMovement.productId !== product.id || priorMovement.type !== 'ajustement' || priorMovement.lotNumber !== batch.lotNumber) {
+            res.status(409).json({ error: 'Cet identifiant de mouvement a déjà été utilisé pour une autre opération.' });
+            return;
+          }
+          movement = priorMovement;
+        }
+        store.stockBatches[batchIndex] = {
+          ...batch,
+          status: savedStatus,
+          statusReason: reason,
+          statusUpdatedAt: now,
+          statusUpdatedBy: actor.contactName || actor.facilityName || 'Collaborateur',
+          ...(savedStatus === 'detruit' ? {
+            quantityDestroyed: Number(batch.quantityDestroyed || 0) + batch.quantityRemaining,
+            quantityRemaining: 0,
+          } : {}),
+        };
+        store.products[productIndex] = enrichProductWithStockState({
+          ...product,
+          quantityAvailable: nextQuantity,
+          stockQuantity: nextQuantity,
+          status: nextQuantity > 0 ? (savedStatus === 'disponible' ? 'disponible' : product.status) : 'rupture',
+        });
+        if (movement) store.stockMovements = [movement, ...(store.stockMovements || []).filter(item => item.id !== movement!.id)].slice(0, 2000);
+      }
+
+      appendStaffLog(actor, {
+        category: 'stock_price',
+        severity: savedStatus === 'detruit' ? 'critical' : savedStatus === 'quarantaine' ? 'warning' : 'info',
+        actionLabel: savedStatus === 'disponible' ? 'Réactivation d’un lot' : savedStatus === 'detruit' ? 'Destruction d’un lot' : 'Mise en quarantaine d’un lot',
+        targetType: 'product',
+        targetId: product.id,
+        targetLabel: `${product.name} · lot ${batch.lotNumber || batch.id}`,
+        details: `État du lot : ${batch.status || 'disponible'} → ${savedStatus}. Motif : ${reason}. Stock vendable : ${previousQuantity} → ${persistence ? store.products[productIndex].quantityAvailable : nextQuantity} unité(s).`,
+        previousValue: `${batch.status || 'disponible'} · ${batch.quantityRemaining} unité(s) restantes`,
+        newValue: `${savedStatus} · ${store.products[productIndex].quantityAvailable ?? 0} unité(s) vendables`,
+      });
+      if (persistence) {
+        try { await saveStore(store, persistence); }
+        catch (error) { console.error('État du lot enregistré, mais le journal général n’a pas pu être synchronisé :', error); }
+      } else {
+        await saveStore(store, persistence);
+      }
+      res.json({ success: true, batch: store.stockBatches[batchIndex], product: store.products[productIndex], movement });
+    } catch (error) {
+      // The local JSON store is not transactional. Restore in-memory state if
+      // its write failed, so the UI cannot observe an operation we reported
+      // as failed.
+      if (!persistence) {
+        store.stockBatches[batchIndex] = previousBatchSnapshot;
+        store.products[productIndex] = previousProductSnapshot;
+        store.stockMovements = previousMovementsSnapshot;
+        store.staffLogs = previousStaffLogsSnapshot;
+      }
+      if (isStockLedgerMigrationError(error)) {
+        res.status(503).json({ error: 'Le suivi des quantités par lot n’est pas encore installé dans Supabase. Appliquez la migration 20261103000002_stock_batch_remaining_fefo.sql.' });
+        return;
+      }
+      throw error;
+    }
   }));
 
   app.post('/api/admin/stock/receive', asyncHandler(async (req, res) => {
@@ -1469,9 +1694,26 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const quantity = req.body?.quantity;
     const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) : '';
     const lotNumber = typeof req.body?.lotNumber === 'string' ? req.body.lotNumber.trim().slice(0, 100) : '';
+    const expiryDate = typeof req.body?.expiryDate === 'string' ? req.body.expiryDate.trim() : '';
+    const supplierName = typeof req.body?.supplierName === 'string' ? req.body.supplierName.trim().slice(0, 160) : '';
+    const supplierReference = typeof req.body?.supplierReference === 'string' ? req.body.supplierReference.trim().slice(0, 160) : '';
+    const purchasePrice = req.body?.purchasePrice;
+    const expiryTimestamp = expiryDate ? Date.parse(`${expiryDate}T00:00:00.000Z`) : 0;
+    const validExpiryDate = !expiryDate || (
+      /^\d{4}-\d{2}-\d{2}$/.test(expiryDate) && Number.isFinite(expiryTimestamp) &&
+      new Date(expiryTimestamp).toISOString().slice(0, 10) === expiryDate
+    );
     if (!productId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(movementId) ||
-        !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1000000 || reason.length < 3) {
-      res.status(400).json({ error: 'Saisissez une quantité reçue positive et un motif d’au moins 3 caractères.' });
+        !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1000000 || reason.length < 3 ||
+        !validExpiryDate ||
+        (purchasePrice !== undefined && (!Number.isSafeInteger(purchasePrice) || purchasePrice < 0))) {
+      res.status(400).json({ error: 'Vérifiez la quantité, la date de péremption, le coût et le motif de réception.' });
+      return;
+    }
+    const actor = (req as AuthenticatedRequest).authenticatedUser!;
+    const canManageBatchCost = hasStockPermission(actor, 'stock_costs_manage');
+    if (purchasePrice !== undefined && !canManageBatchCost) {
+      res.status(403).json({ error: 'Vous n’avez pas le droit de saisir un coût d’achat pour ce lot.' });
       return;
     }
     const idx = store.products.findIndex(product => product.id === productId);
@@ -1481,7 +1723,6 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
     const product = store.products[idx];
     const previousQuantity = getTrackedProductStock(product) ?? 0;
-    const actor = (req as AuthenticatedRequest).authenticatedUser!;
     const movement: StockMovement = {
       id: movementId,
       productId,
@@ -1497,11 +1738,47 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       performedById: actor.id,
       performedByRole: actor.role,
     };
+    const batch: StockBatch = {
+      id: movementId,
+      productId,
+      productName: product.name,
+      lotNumber,
+      expiryDate: expiryDate || '',
+      quantity,
+      initialQuantity: quantity,
+      purchasePrice: purchasePrice === undefined ? undefined : purchasePrice,
+      supplierName: supplierName || undefined,
+      supplierReference: supplierReference || undefined,
+      receivedDate: movement.date,
+      receivedBy: movement.performedBy,
+      receivedById: actor.id,
+      status: 'disponible',
+    };
     const previousLogs = [...(store.staffLogs || [])];
     const previousMovements = [...(store.stockMovements || [])];
-    const receipt = persistence
-      ? await persistence.receiveProductStock({ product, movement })
-      : { movement, quantity: movement.newQuantity, status: 'disponible' as const };
+    const previousBatches = [...(store.stockBatches || [])];
+    let receipt: { movement: StockMovement; batch: StockBatch; quantity: number; status: 'disponible' | 'rupture' };
+    try {
+      receipt = persistence
+        ? await persistence.receiveProductStock({ product, movement, batch })
+        : (() => {
+          const priorMovement = (store.stockMovements || []).find(item => item.id === movementId);
+          const priorBatch = (store.stockBatches || []).find(item => item.id === movementId);
+          if (priorMovement) {
+            if (priorMovement.productId !== productId || priorMovement.type !== 'entree' || priorMovement.quantity !== quantity || !priorBatch) {
+              throw new Error('Cet identifiant de réception existe déjà avec des données différentes.');
+            }
+            return { movement: priorMovement, batch: priorBatch, quantity: getTrackedProductStock(product) ?? 0, status: product.status };
+          }
+          return { movement, batch, quantity: movement.newQuantity, status: 'disponible' as const };
+        })();
+    } catch (error) {
+      if (isStockLedgerMigrationError(error)) {
+        res.status(503).json({ error: 'La réception avec lots n’est pas encore disponible dans Supabase. Appliquez les migrations de registre de stock puis réessayez.' });
+        return;
+      }
+      throw error;
+    }
     const savedMovement = receipt.movement;
     const updatedProduct = enrichProductWithStockState({
       ...product,
@@ -1511,6 +1788,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     });
     store.products[idx] = updatedProduct;
     store.stockMovements = [savedMovement, ...previousMovements].slice(0, 2000);
+    store.stockBatches = [receipt.batch, ...previousBatches.filter(item => item.id !== receipt.batch.id)].slice(0, 2000);
     appendStaffLog(actor, {
       category: 'stock_price',
       severity: 'info',
@@ -1518,9 +1796,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       targetType: 'product',
       targetId: product.id,
       targetLabel: product.name,
-      details: `Réception de ${quantity} unité(s) : ${savedMovement.previousQuantity} -> ${savedMovement.newQuantity}. Motif : ${reason}.`,
-      previousValue: `${savedMovement.previousQuantity} u.`,
-      newValue: `${savedMovement.newQuantity} u.`,
+      details: `Réception de ${quantity} unité(s) : ${savedMovement.previousQuantity} -> ${savedMovement.newQuantity}. Lot ${batch.lotNumber || 'sans numéro'}${batch.expiryDate ? ` · péremption ${batch.expiryDate}` : ''}${batch.supplierName ? ` · fournisseur ${batch.supplierName}` : ''}. Motif : ${reason}.`,
+      previousValue: `${savedMovement.previousQuantity} u. · Lot ${batch.lotNumber || 'sans numéro'}`,
+      newValue: `${savedMovement.newQuantity} u.${batch.expiryDate ? ` · péremption ${batch.expiryDate}` : ''}`,
     });
     if (persistence) {
       try {
@@ -1534,11 +1812,12 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       } catch (error) {
         store.products[idx] = product;
         store.stockMovements = previousMovements;
+        store.stockBatches = previousBatches;
         store.staffLogs = previousLogs;
         throw error;
       }
     }
-    res.status(201).json({ success: true, product: updatedProduct, movement: savedMovement });
+    res.status(201).json({ success: true, product: updatedProduct, movement: savedMovement, batch: receipt.batch });
   }));
 
   app.get('/api/admin/expenses', (_req, res) => {

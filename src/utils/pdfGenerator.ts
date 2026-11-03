@@ -654,6 +654,171 @@ export async function downloadInvoiceProjectPdf(order: Order, invoice: InvoiceRe
   triggerPdfBlobDownload(blob, `${prefix}_${invoice.number}.pdf`);
 }
 
+export async function downloadDeliveryNotePdf(order: Order): Promise<void> {
+  const doc = await createJsPdfInstance();
+  const logoDataUrl = await loadBrandLogoDataUrl();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 14;
+  const contentWidth = pageWidth - margin * 2;
+  const blue = [13, 68, 232];
+  const ink = [22, 22, 24];
+  const muted = [100, 116, 139];
+  const text = (value: unknown) => normalizePdfText(value);
+  const orderDate = new Date(order.createdAt);
+  const dateLabel = Number.isNaN(orderDate.getTime())
+    ? new Date().toLocaleDateString('fr-FR')
+    : orderDate.toLocaleDateString('fr-FR', { timeZone: 'Africa/Libreville' });
+
+  const drawHeader = (newPage = false) => {
+    if (newPage) doc.addPage();
+    doc.setFillColor(blue[0], blue[1], blue[2]);
+    doc.rect(0, 0, pageWidth, 29, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    if (logoDataUrl) {
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(margin, 2.5, 26, 24, 1.5, 1.5, 'F');
+      doc.addImage(logoDataUrl, 'PNG', margin + 1, 3, 24, 23, 'GLORYDAY_DELIVERY_LOGO', 'FAST');
+      doc.text('GLORYDAY PHARMA', margin + 31, 13);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.text('Distribution médicale · Libreville, Gabon', margin + 31, 20);
+    } else {
+      doc.text('GLORYDAY PHARMA', margin, 13);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.text('Distribution médicale · Libreville, Gabon', margin, 20);
+    }
+    doc.setTextColor(ink[0], ink[1], ink[2]);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('BON DE LIVRAISON', margin, 39);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.text(text(`Commande : ${order.reference}`), pageWidth - margin, 37, { align: 'right' });
+    doc.text(text(`Date : ${dateLabel}`), pageWidth - margin, 43, { align: 'right' });
+  };
+
+  drawHeader();
+  doc.setFillColor(241, 245, 249);
+  doc.roundedRect(margin, 50, contentWidth, 29, 2, 2, 'F');
+  doc.setTextColor(blue[0], blue[1], blue[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text('DESTINATAIRE', margin + 4, 57);
+  doc.text('LIVRAISON', pageWidth / 2 + 4, 57);
+  doc.setTextColor(ink[0], ink[1], ink[2]);
+  doc.setFontSize(9);
+  doc.text(text(order.customer.facilityName || 'Établissement'), margin + 4, 64);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(text(`${order.customer.contactName || 'Contact'} · ${order.customer.phone}`), margin + 4, 70);
+  doc.text(text(order.customer.deliveryAddress || 'Adresse à confirmer'), pageWidth / 2 + 4, 64, { maxWidth: pageWidth / 2 - margin - 8 });
+  doc.text(text(order.customer.deliveryMode === 'retrait' ? 'Retrait au dépôt' : `Livraison · ${order.courier?.name || 'Coursier à affecter'}`), pageWidth / 2 + 4, 70);
+
+  const drawTableHeader = (top: number) => {
+    doc.setFillColor(blue[0], blue[1], blue[2]);
+    doc.rect(margin, top, contentWidth, 8, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text('Article / conditionnement', margin + 3, top + 5.5);
+    doc.text('Qté commandée', 124, top + 5.5, { align: 'center' });
+    doc.text('Qté remise', 157, top + 5.5, { align: 'center' });
+    doc.text('Lot / remarque', pageWidth - margin - 3, top + 5.5, { align: 'right' });
+  };
+
+  let y = 87;
+  drawTableHeader(y);
+  y += 8;
+  (order.items || []).forEach((item, index) => {
+    const label = item.variant && item.variant !== 'Standard'
+      ? `${text(item.productName)} (${text(item.variant)})`
+      : text(item.productName);
+    const lines = doc.splitTextToSize(label || 'Article', 91);
+    const rowHeight = Math.max(9, lines.length * 4.2 + 3);
+    if (y + rowHeight > pageHeight - 47) {
+      drawHeader(true);
+      y = 49;
+      drawTableHeader(y);
+      y += 8;
+    }
+    if (index % 2 === 0) {
+      doc.setFillColor(248, 250, 252);
+      doc.rect(margin, y, contentWidth, rowHeight, 'F');
+    }
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(ink[0], ink[1], ink[2]);
+    doc.text(lines, margin + 3, y + 4.5);
+    doc.text(String(Math.max(0, Number(item.quantity) || 0)), 124, y + 5, { align: 'center' });
+    doc.setDrawColor(148, 163, 184);
+    doc.line(147, y + rowHeight - 2, 167, y + rowHeight - 2);
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, y + rowHeight, pageWidth - margin, y + rowHeight);
+    y += rowHeight;
+  });
+
+  if (y > pageHeight - 57) {
+    drawHeader(true);
+    y = 53;
+  } else {
+    y += 5;
+  }
+  doc.setTextColor(muted[0], muted[1], muted[2]);
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(8);
+  const instructions = order.isPartialDelivery
+    ? 'Livraison partielle : renseignez la quantité remise pour chaque ligne et indiquez les reliquats dans les observations.'
+    : 'À la réception, renseignez la quantité remise et signalez tout écart ou colis endommagé.';
+  const instructionLines = doc.splitTextToSize(text(instructions), contentWidth);
+  doc.text(instructionLines, margin, y + 3);
+  y += instructionLines.length * 4 + 10;
+  if (order.partialDeliveryNotes) {
+    doc.setTextColor(ink[0], ink[1], ink[2]);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    const notes = doc.splitTextToSize(text(`Reliquat / observations : ${order.partialDeliveryNotes}`), contentWidth);
+    doc.text(notes, margin, y);
+    y += notes.length * 4 + 6;
+  }
+
+  const signatureTop = Math.min(y, pageHeight - 45);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(margin, signatureTop, contentWidth / 2 - 3, 28, 2, 2, 'S');
+  doc.roundedRect(pageWidth / 2 + 3, signatureTop, contentWidth / 2 - 3, 28, 2, 2, 'S');
+  doc.setTextColor(ink[0], ink[1], ink[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text('Remis par', margin + 4, signatureTop + 6);
+  doc.text('Reçu par', pageWidth / 2 + 7, signatureTop + 6);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(text(order.courier?.name || 'Nom et signature'), margin + 4, signatureTop + 12);
+  doc.text(text(order.deliveryProof?.receivedBy || 'Nom et signature du réceptionnaire'), pageWidth / 2 + 7, signatureTop + 12);
+  doc.setTextColor(muted[0], muted[1], muted[2]);
+  doc.setFontSize(7.5);
+  doc.text('Date / signature', margin + 4, signatureTop + 23);
+  doc.text('Date / signature / cachet', pageWidth / 2 + 7, signatureTop + 23);
+
+  const pageCount = doc.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page += 1) {
+    doc.setPage(page);
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text('Bon de livraison · Les quantités remises doivent être vérifiées à la réception.', margin, pageHeight - 7);
+    doc.text(text(`${order.reference} · Page ${page}/${pageCount}`), pageWidth - margin, pageHeight - 7, { align: 'right' });
+  }
+
+  const safeReference = order.reference.replace(/[^A-Za-z0-9_-]/g, '_');
+  triggerPdfBlobDownload(doc.output('blob'), `Bon_de_livraison_${safeReference}.pdf`);
+}
+
 export async function downloadOrderPdf(order: Order, existingDataUrl?: string): Promise<void> {
   const filename = `Bon_de_Commande_${order.reference}.pdf`;
   if (existingDataUrl) {

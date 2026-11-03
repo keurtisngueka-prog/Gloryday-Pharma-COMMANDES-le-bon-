@@ -36,6 +36,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
   const [sortBy, setSortBy] = useState<'spent-desc' | 'orders-desc' | 'recent' | 'name'>('spent-desc');
   const [selectedClientDetail, setSelectedClientDetail] = useState<any | null>(null);
   const [detailModalTab, setDetailModalTab] = useState<'orders' | 'products'>('orders');
+  const [orderHistoryPeriod, setOrderHistoryPeriod] = useState<'all' | 'week' | 'month'>('all');
 
   const normalizePhoneKey = (phone: string) => (phone || '').replace(/[^0-9+]/g, '').toLowerCase();
 
@@ -197,6 +198,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
     if (match) {
       setSelectedClientDetail(match);
       setDetailModalTab('orders');
+      setOrderHistoryPeriod('all');
     }
   }, [initialSelectedClientId, clientStatsList]);
 
@@ -256,6 +258,25 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
 
     return list;
   }, [clientStatsList, searchQuery, selectedFacilityType, filterInactivity, sortBy]);
+
+  const todayLibrevilleKey = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Libreville', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+  const clientHistoryOrders = useMemo(() => {
+    const clientOrders: Order[] = selectedClientDetail?.orders || [];
+    if (orderHistoryPeriod === 'all') return clientOrders;
+    const todayDate = new Date(`${todayLibrevilleKey}T00:00:00.000Z`);
+    const weekDayOffset = (todayDate.getUTCDay() + 6) % 7;
+    todayDate.setUTCDate(todayDate.getUTCDate() - weekDayOffset);
+    const weekStartKey = todayDate.toISOString().slice(0, 10);
+    return clientOrders.filter(order => {
+      const orderDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Libreville' }).format(new Date(order.createdAt));
+      if (orderDate > todayLibrevilleKey) return false;
+      return orderHistoryPeriod === 'week'
+        ? orderDate >= weekStartKey
+        : orderDate.slice(0, 7) === todayLibrevilleKey.slice(0, 7);
+    });
+  }, [selectedClientDetail, orderHistoryPeriod, todayLibrevilleKey]);
 
   const generateRelaunchUrl = (client: any) => {
     const cleanPhone = client.phone.replace(/[^0-9]/g, '');
@@ -335,6 +356,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
 
   const closeDetailModal = () => {
     setSelectedClientDetail(null);
+    setOrderHistoryPeriod('all');
     if (onClearSelectedClient) onClearSelectedClient();
   };
 
@@ -589,6 +611,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
                       onClick={() => {
                         setSelectedClientDetail(client);
                         setDetailModalTab('orders');
+                        setOrderHistoryPeriod('all');
                       }}
                       className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
                       title="Consulter l'historique complet des achats de ce client"
@@ -711,7 +734,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
                   }`}
                 >
                   <FileText className="w-3.5 h-3.5" />
-                  <span>Bons de Commande ({selectedClientDetail.orders.length})</span>
+                  <span>Bons de Commande ({clientHistoryOrders.length}/{selectedClientDetail.orders.length})</span>
                 </button>
                 <button
                   type="button"
@@ -729,13 +752,30 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
 
               {detailModalTab === 'orders' ? (
                 <div>
-                  {selectedClientDetail.orders.length === 0 ? (
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                    <span className="text-[11px] font-bold text-slate-600">Filtrer cet historique par période</span>
+                    <div className="flex flex-wrap gap-1 rounded-xl bg-white p-1">
+                      {([
+                        ['all', 'Tout'], ['week', 'Cette semaine'], ['month', 'Ce mois']
+                      ] as const).map(([period, label]) => (
+                        <button
+                          key={period}
+                          type="button"
+                          onClick={() => setOrderHistoryPeriod(period)}
+                          className={`rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition ${orderHistoryPeriod === period ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                        >{label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  {clientHistoryOrders.length === 0 ? (
                     <div className="p-8 text-center text-slate-400 italic bg-slate-50 rounded-xl border border-slate-100">
-                      Aucune commande enregistrée pour cet établissement client.
+                      {selectedClientDetail.orders.length === 0
+                        ? 'Aucune commande enregistrée pour cet établissement client.'
+                        : 'Aucune commande dans cette période.'}
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {selectedClientDetail.orders.map((ord: Order) => (
+                      {clientHistoryOrders.map((ord: Order) => (
                         <div key={ord.id} className="p-3.5 rounded-2xl border border-slate-200 bg-white space-y-2.5">
                           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
                             <div className="flex items-center gap-2">

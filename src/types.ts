@@ -327,13 +327,23 @@ export interface HealthcareStructure {
 export interface StockBatch {
   id: string;
   productId: string;
+  productName?: string;
   lotNumber: string;
   expiryDate: string;
   quantity: number;
   initialQuantity?: number;
+  quantityRemaining?: number;
+  quantityDestroyed?: number;
   purchasePrice?: number;
   supplierName?: string;
+  supplierReference?: string;
   receivedDate: string;
+  receivedBy?: string;
+  receivedById?: string;
+  status?: 'disponible' | 'quarantaine' | 'perime' | 'detruit';
+  statusReason?: string;
+  statusUpdatedAt?: string;
+  statusUpdatedBy?: string;
   isArchived?: boolean;
 }
 
@@ -530,9 +540,8 @@ export type StaffPermission =
   | 'stock_view'
   | 'stock_receive'
   | 'stock_adjust'
-  | 'stock_availability_manage'
-  /** Legacy name retained for existing saved staff accounts. */
   | 'stock_batches_manage'
+  | 'stock_availability_manage'
   | 'stock_costs_view'
   | 'stock_costs_manage'
   | 'stock_export'

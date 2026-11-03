@@ -20,6 +20,7 @@ import {
   VolumeDiscountSettings,
   StaffActivityStats,
   StaffActivityLog,
+  StockBatch,
   StockMovement,
   OperatingExpense,
   OperatingExpenseCategory,
@@ -127,9 +128,10 @@ export const api = {
     return request<Product[]>('/api/products');
   },
 
-  async uploadProductMedia(file: Blob, kind: 'image' | 'pdf'): Promise<string> {
+  async uploadProductMedia(file: Blob, kind: 'image' | 'pdf', scope: 'product' | 'pack' = 'product'): Promise<string> {
     const contentType = kind === 'pdf' ? 'application/pdf' : file.type;
-    const upload = await request<ProductMediaUploadUrl>('/api/products/media-upload-url', {
+    const endpoint = scope === 'pack' ? '/api/packs/media-upload-url' : '/api/products/media-upload-url';
+    const upload = await request<ProductMediaUploadUrl>(endpoint, {
       method: 'POST',
       body: JSON.stringify({ kind, contentType, fileSize: file.size })
     });
@@ -219,13 +221,35 @@ export const api = {
     return result.movements;
   },
 
+  async getStockBatches(productId?: string): Promise<StockBatch[]> {
+    const query = productId ? `?productId=${encodeURIComponent(productId)}` : '';
+    const result = await request<{ batches: StockBatch[] }>(`/api/admin/stock/batches${query}`);
+    return result.batches;
+  },
+
+  async updateStockBatchStatus(input: {
+    batchId: string;
+    targetStatus: 'disponible' | 'quarantaine' | 'detruit';
+    reason: string;
+    movementId: string;
+  }): Promise<{ batch: StockBatch; product: Product; movement: StockMovement | null }> {
+    return request(`/api/admin/stock/batches/${encodeURIComponent(input.batchId)}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  },
+
   async receiveProductStock(input: {
     productId: string;
     quantity: number;
     reason: string;
     movementId: string;
     lotNumber?: string;
-  }): Promise<{ product: Product; movement: StockMovement }> {
+    expiryDate?: string;
+    supplierName?: string;
+    supplierReference?: string;
+    purchasePrice?: number;
+  }): Promise<{ product: Product; movement: StockMovement; batch: StockBatch }> {
     return request('/api/admin/stock/receive', {
       method: 'POST',
       body: JSON.stringify(input)

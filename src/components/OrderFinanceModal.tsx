@@ -18,7 +18,7 @@ import { Order, User, Courier, PaymentInstallment, InvoiceRecord } from '../type
 import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
 import { getCouriers } from '../utils/courierDirectory';
 import { logAuditEvent } from '../utils/auditLogger';
-import { downloadInvoiceProjectPdf } from '../utils/pdfGenerator';
+import { downloadDeliveryNotePdf, downloadInvoiceProjectPdf } from '../utils/pdfGenerator';
 
 interface OrderFinanceModalProps {
   order: Order;
@@ -76,6 +76,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   const [creditReason, setCreditReason] = useState('');
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [invoiceDownloadError, setInvoiceDownloadError] = useState('');
+  const [downloadingDeliveryNote, setDownloadingDeliveryNote] = useState(false);
+  const [deliveryNoteError, setDeliveryNoteError] = useState('');
 
   // Delivery Proof State
   const [selectedCourierId, setSelectedCourierId] = useState(order.courier?.matricule || couriers[0]?.id || '');
@@ -221,6 +223,19 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       setInvoiceDownloadError('Le PDF n’a pas pu être créé. Réessayez dans un instant.');
     } finally {
       setDownloadingInvoiceId(null);
+    }
+  };
+
+  const handleDownloadDeliveryNote = async () => {
+    setDownloadingDeliveryNote(true);
+    setDeliveryNoteError('');
+    try {
+      await downloadDeliveryNotePdf(order);
+    } catch (error) {
+      console.error('Impossible de générer le bon de livraison PDF:', error);
+      setDeliveryNoteError(error instanceof Error ? error.message : 'Le bon de livraison PDF n’a pas pu être créé.');
+    } finally {
+      setDownloadingDeliveryNote(false);
     }
   };
 
@@ -565,6 +580,24 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
           {/* TAB 3: COURRIER & PREUVE DE LIVRAISON */}
           {activeTab === 'delivery' && canManageLogistics && (
             <form onSubmit={handleSaveDeliveryProofAndCourier} className="space-y-3">
+              <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-blue-950"><FileText className="h-3.5 w-3.5" />Bon de livraison PDF</div>
+                    <p className="mt-1 text-[10px] text-blue-800">Document avec le logo Gloryday, les quantités commandées et les espaces de contrôle et de signature.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadDeliveryNote()}
+                    disabled={downloadingDeliveryNote || (order.items || []).length === 0}
+                    className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-blue-700 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {downloadingDeliveryNote ? <Clock className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                    {downloadingDeliveryNote ? 'Préparation…' : 'Télécharger le bon'}
+                  </button>
+                </div>
+                {deliveryNoteError && <p role="alert" className="mt-2 text-[11px] font-semibold text-rose-700">{deliveryNoteError}</p>}
+              </div>
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
                   Sélectionner un coursier (annuaire configuré)

@@ -144,6 +144,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const canReceiveStock = hasPerm('stock_receive') || hasPerm('catalog_stock');
   const canAdjustStock = hasPerm('stock_adjust') || hasPerm('catalog_stock');
   const canManageStockAvailability = hasPerm('stock_availability_manage') || hasPerm('catalog_stock');
+  const canManageStockBatches = hasPerm('stock_batches_manage') || hasPerm('catalog_stock');
   const canExportStock = hasPerm('stock_export') || hasPerm('catalog_stock');
   const canViewStock = hasPerm('stock_view') || canReceiveStock || canAdjustStock || canManageStockAvailability || canExportStock;
   const canViewStockCosts = hasPerm('stock_costs_view') || hasPerm('stock_costs_manage') || hasPerm('catalog_stock');
@@ -1573,11 +1574,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {activeTab === 'lots' && canViewStock && (
         <StockLotsModule
           products={products}
+          orders={orders}
+          onProductStockChanged={onProductSaved}
           onToggleProductStock={onToggleProductStock}
           actorName={currentUser.contactName || currentUser.facilityName}
           actorRole={role}
           canToggleStock={canManageStockAvailability}
           canExportStock={canExportStock}
+          canViewStockCosts={canViewStockCosts}
+          canManageBatches={canManageStockBatches}
         />
       )}
 
@@ -1888,6 +1893,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <StockReceiptModal
           product={receivingStockProduct}
           onClose={() => setReceivingStockProduct(null)}
+          canManagePurchasePrice={canManagePurchasePrice}
           onProductUpdated={(updatedProduct) => {
             onProductSaved(updatedProduct);
             setReceivingStockProduct(updatedProduct);

@@ -40,12 +40,15 @@ export const EnterpriseReportsModule: React.FC<EnterpriseReportsModuleProps> = (
     return orders.filter(o => new Date(o.createdAt).getTime() >= cutoff);
   }, [orders, periodFilter]);
 
+  const salesOrders = useMemo(
+    () => filteredOrders.filter(order => order.status !== 'Annulée'),
+    [filteredOrders]
+  );
+
   // Breakdown calculations
   const totalRevenue = useMemo(() => {
-    return filteredOrders
-      .filter(o => o.status !== 'Annulée')
-      .reduce((sum, o) => sum + (o.estimatedTotal || 0), 0);
-  }, [filteredOrders]);
+    return salesOrders.reduce((sum, o) => sum + (o.estimatedTotal || 0), 0);
+  }, [salesOrders]);
 
   const cancelledOrdersCount = useMemo(() => {
     return filteredOrders.filter(o => o.status === 'Annulée').length;
@@ -59,56 +62,84 @@ export const EnterpriseReportsModule: React.FC<EnterpriseReportsModuleProps> = (
   // Breakdown by delivery zone
   const revenueByZone = useMemo(() => {
     const zones: Record<string, number> = {};
-    filteredOrders.forEach(o => {
+    salesOrders.forEach(o => {
       const z = o.deliveryZone || o.customer.neighborhoodName || 'Zone 1 (Centre)';
       zones[z] = (zones[z] || 0) + (o.estimatedTotal || 0);
     });
     return Object.entries(zones).sort((a, b) => b[1] - a[1]);
-  }, [filteredOrders]);
+  }, [salesOrders]);
 
   // Breakdown by product category
   const revenueByCategory = useMemo(() => {
     const catRevenue: Record<string, number> = {};
-    filteredOrders.forEach(o => {
+    salesOrders.forEach(o => {
       o.items.forEach(it => {
         const cat = it.category || 'Dispositifs Médicaux Généraux';
         catRevenue[cat] = (catRevenue[cat] || 0) + (it.total || 0);
       });
     });
     return Object.entries(catRevenue).sort((a, b) => b[1] - a[1]);
-  }, [filteredOrders]);
+  }, [salesOrders]);
 
   // Sleeping products (> 30 days without order or zero orders)
   const orderedProductNames = useMemo(() => {
     const set = new Set<string>();
-    filteredOrders.forEach(o => {
+    salesOrders.forEach(o => {
       o.items.forEach(it => set.add(it.productName.toLowerCase()));
     });
     return set;
-  }, [filteredOrders]);
+  }, [salesOrders]);
 
   const sleepingProducts = useMemo(() => {
     return products.filter(p => !orderedProductNames.has(p.name.toLowerCase()));
   }, [products, orderedProductNames]);
 
-  // Estimated gross margin
+  // Margin uses only purchase costs explicitly recorded by an authorized user.
   const estimatedGrossMargin = useMemo(() => {
-    let revenue = 0;
+    let revenueWithKnownCost = 0;
     let cost = 0;
-    filteredOrders
-      .filter(o => o.status !== 'Annulée')
-      .forEach(o => {
-        o.items.forEach(it => {
-          revenue += it.total || 0;
-          const prod = products.find(p => p.id === it.productId);
-          const buyPrice = prod?.purchasePrice || Math.round((it.price || 0) * 0.65);
-          cost += buyPrice * it.quantity;
-        });
+    let missingCostLines = 0;
+    salesOrders.forEach(o => {
+      o.items.forEach(it => {
+        if (it.isQuote || !Number.isFinite(it.total) || it.total <= 0) return;
+        const prod = products.find(p => p.id === it.productId);
+        const buyPrice = Number(prod?.purchasePrice);
+        if (!Number.isFinite(buyPrice) || buyPrice <= 0) {
+          missingCostLines += 1;
+          return;
+        }
+        revenueWithKnownCost += it.total;
+        cost += buyPrice * Math.max(0, Number(it.quantity) || 0);
       });
-    const marginAmount = Math.max(0, revenue - cost);
-    const marginRate = revenue > 0 ? Math.round((marginAmount / revenue) * 100) : 32;
-    return { marginAmount, marginRate };
-  }, [filteredOrders, products]);
+    });
+    const marginAmount = revenueWithKnownCost - cost;
+    const marginRate = revenueWithKnownCost > 0 ? Math.round((marginAmount / revenueWithKnownCost) * 100) : null;
+    return { marginAmount, marginRate, revenueWithKnownCost, missingCostLines };
+  }, [salesOrders, products]);
+
+  const topSellingProducts = useMemo(() => {
+    const totals = new Map<string, { productId: string; name: string; category: string; quantity: number; revenue: number; orderIds: Set<string> }>();
+    salesOrders.forEach(order => order.items.forEach(item => {
+      if (item.isQuote || !Number.isFinite(item.quantity) || item.quantity <= 0) return;
+      const key = item.productId || item.productName.toLocaleLowerCase('fr');
+      const current = totals.get(key) || {
+        productId: item.productId,
+        name: item.productName,
+        category: item.category || 'Autres',
+        quantity: 0,
+        revenue: 0,
+        orderIds: new Set<string>(),
+      };
+      current.quantity += item.quantity;
+      current.revenue += Number(item.total) || 0;
+      current.orderIds.add(order.id);
+      totals.set(key, current);
+    }));
+    return [...totals.values()]
+      .map(item => ({ ...item, ordersCount: item.orderIds.size }))
+      .sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue)
+      .slice(0, 6);
+  }, [salesOrders]);
 
   // Accounting CSV Export
   const exportAccountingReport = () => {
@@ -224,11 +255,14 @@ export const EnterpriseReportsModule: React.FC<EnterpriseReportsModuleProps> = (
           </div>
 
           <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/30">
-            <span className="text-[10px] font-bold text-emerald-800 uppercase">Marge Brute Estimée</span>
-            <div className="text-lg font-black text-emerald-900 mt-1 font-mono tabular-nums">
-              +{estimatedGrossMargin.marginAmount.toLocaleString('fr-FR')} F
+            <span className="text-[10px] font-bold text-emerald-800 uppercase">Marge sur coûts renseignés</span>
+            <div className={`mt-1 font-mono text-lg font-black tabular-nums ${estimatedGrossMargin.marginAmount < 0 ? 'text-rose-800' : 'text-emerald-900'}`}>
+              {estimatedGrossMargin.marginAmount < 0 ? '−' : '+'}{Math.abs(estimatedGrossMargin.marginAmount).toLocaleString('fr-FR')} F
             </div>
-            <span className="text-[11px] text-emerald-700 font-semibold">Taux moyen : {estimatedGrossMargin.marginRate}%</span>
+            <span className="text-[11px] font-semibold text-emerald-700">
+              Taux : {estimatedGrossMargin.marginRate == null ? '—' : `${estimatedGrossMargin.marginRate}%`} · {estimatedGrossMargin.revenueWithKnownCost.toLocaleString('fr-FR')} F couverts
+            </span>
+            {estimatedGrossMargin.missingCostLines > 0 && <span className="mt-0.5 block text-[10px] text-amber-800">{estimatedGrossMargin.missingCostLines} ligne(s) sans coût d’achat enregistré, exclues du calcul</span>}
           </div>
 
           <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/30">
@@ -283,7 +317,7 @@ export const EnterpriseReportsModule: React.FC<EnterpriseReportsModuleProps> = (
         )}
 
         {/* Two-column analysis: Breakdown by Zone & Breakdown by Category */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 text-xs">
           {/* Revenue by Zone */}
           <div className="p-3.5 border border-slate-200 rounded-xl space-y-2.5">
             <h4 className="font-bold text-slate-900 flex items-center gap-1.5">
@@ -334,6 +368,36 @@ export const EnterpriseReportsModule: React.FC<EnterpriseReportsModuleProps> = (
                 );
               })}
             </div>
+          </div>
+
+          {/* Most ordered products */}
+          <div className="p-3.5 border border-slate-200 rounded-xl space-y-2.5">
+            <h4 className="font-bold text-slate-900 flex items-center gap-1.5">
+              <Package className="w-4 h-4 text-blue-700" />
+              <span>Produits les plus commandés</span>
+            </h4>
+            <p className="text-[10px] text-slate-500">Classement par unités, hors annulations et lignes sur devis.</p>
+            {topSellingProducts.length === 0 ? (
+              <div className="rounded-lg bg-slate-50 p-4 text-center text-[11px] text-slate-500">Pas encore de ventes sur cette période.</div>
+            ) : (
+              <div className="space-y-2">
+                {topSellingProducts.map((item, index) => {
+                  const share = Math.max(4, Math.round((item.quantity / (topSellingProducts[0]?.quantity || 1)) * 100));
+                  return (
+                    <div key={item.productId || item.name} className="space-y-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="truncate font-semibold text-slate-800"><span className="mr-1 text-slate-400">{index + 1}.</span>{item.name}</div>
+                          <div className="text-[10px] text-slate-500">{item.ordersCount} commande(s) · {item.revenue.toLocaleString('fr-FR')} FCFA</div>
+                        </div>
+                        <div className="shrink-0 font-mono font-bold tabular-nums text-slate-900">{item.quantity.toLocaleString('fr-FR')} u.</div>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600" style={{ width: `${share}%` }} /></div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 

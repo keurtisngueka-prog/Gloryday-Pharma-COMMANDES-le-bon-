@@ -26,6 +26,7 @@ export const STAFF_PERMISSION_GROUPS: PermissionGroup[] = [
       { id: 'stock_view', label: 'Voir les stocks', description: 'Quantités internes, seuils, mouvements et alertes.' },
       { id: 'stock_receive', label: 'Réceptionner du stock', description: 'Ajouter une réception fournisseur avec sa provenance et un motif.' },
       { id: 'stock_adjust', label: 'Corriger le stock', description: 'Faire un inventaire ou corriger une quantité avec motif.' },
+      { id: 'stock_batches_manage', label: 'Gérer les lots & quarantaines', description: 'Bloquer, réactiver ou détruire un lot suivi avec un motif.' },
       { id: 'stock_availability_manage', label: 'Gérer la disponibilité client', description: 'Basculer un article entre disponible et rupture dans le catalogue client.' },
       { id: 'stock_costs_view', label: 'Voir coûts & marges', description: 'Consulter les prix d’achat, prix de revient et marges.' },
       { id: 'stock_costs_manage', label: 'Modifier les coûts d’achat', description: 'Saisir ou modifier le prix de revient utilisé pour calculer les marges.' },
@@ -86,8 +87,7 @@ export const ALL_CONFIGURABLE_PERMISSIONS: StaffPermission[] = STAFF_PERMISSION_
   .flatMap(group => group.permissions.map(permission => permission.id));
 
 const LEGACY_PERMISSION_EXPANSIONS: Partial<Record<StaffPermission, StaffPermission[]>> = {
-  catalog_stock: ['catalog_view', 'catalog_manage', 'packs_manage', 'stock_view', 'stock_receive', 'stock_adjust', 'stock_availability_manage', 'stock_costs_view', 'stock_costs_manage', 'stock_export'],
-  stock_batches_manage: ['stock_availability_manage'],
+  catalog_stock: ['catalog_view', 'catalog_manage', 'packs_manage', 'stock_view', 'stock_receive', 'stock_adjust', 'stock_batches_manage', 'stock_availability_manage', 'stock_costs_view', 'stock_costs_manage', 'stock_export'],
   orders_manage: ['orders_view', 'orders_confirm', 'orders_cancel', 'orders_finance_view', 'orders_finance_manage', 'payments_manage', 'receivables_view', 'receivables_payments_manage', 'receivables_reminders_manage'],
   orders_status_manage: ['orders_confirm', 'orders_cancel'],
 };
@@ -97,7 +97,7 @@ export function normalizeStaffPermissions(input: unknown, fallbackRole: StaffRol
     ? input.filter((permission): permission is StaffPermission =>
       typeof permission === 'string' && (
         ALL_CONFIGURABLE_PERMISSIONS.includes(permission as StaffPermission) ||
-        permission === 'catalog_stock' || permission === 'orders_manage' || permission === 'orders_status_manage' || permission === 'stock_batches_manage' ||
+        permission === 'catalog_stock' || permission === 'orders_manage' || permission === 'orders_status_manage' ||
         permission === 'clients_manage' || permission === 'logistics_manage'
       ))
     : getDefaultStaffPermissions(fallbackRole);
@@ -107,7 +107,7 @@ export function normalizeStaffPermissions(input: unknown, fallbackRole: StaffRol
     if (legacyExpansion) legacyExpansion.forEach(granted => expanded.add(granted));
     else expanded.add(permission);
   });
-  if (expanded.has('stock_receive') || expanded.has('stock_adjust') || expanded.has('stock_availability_manage') || expanded.has('stock_costs_manage') || expanded.has('stock_export')) {
+  if (expanded.has('stock_receive') || expanded.has('stock_adjust') || expanded.has('stock_batches_manage') || expanded.has('stock_availability_manage') || expanded.has('stock_costs_manage') || expanded.has('stock_export')) {
     expanded.add('stock_view');
   }
   if (expanded.has('stock_costs_manage')) expanded.add('stock_costs_view');
@@ -124,7 +124,7 @@ export function getDefaultStaffPermissions(role: StaffRole): StaffPermission[] {
     case 'Commercial':
       return ['orders_view', 'orders_confirm', 'orders_cancel', 'quotes_view', 'quotes_manage', 'clients_view', 'clients_manage', 'messages_view', 'messages_send', 'receivables_view', 'receivables_reminders_manage'];
     case 'Gestionnaire Catalogue':
-      return ['catalog_view', 'catalog_manage', 'packs_manage', 'stock_view', 'stock_receive', 'stock_adjust', 'stock_availability_manage', 'stock_costs_view', 'stock_costs_manage', 'stock_export', 'orders_view'];
+      return ['catalog_view', 'catalog_manage', 'packs_manage', 'stock_view', 'stock_receive', 'stock_adjust', 'stock_batches_manage', 'stock_availability_manage', 'stock_costs_view', 'stock_costs_manage', 'stock_export', 'orders_view'];
     case 'Logistique':
       return ['orders_view', 'logistics_view', 'logistics_manage'];
     default:
