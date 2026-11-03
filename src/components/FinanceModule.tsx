@@ -94,6 +94,8 @@ export const FinanceModule: React.FC<FinanceModuleProps> = ({ orders, products, 
       : 0;
     return { knownSales, knownCost, missingCostSales, coverage, grossMargin: knownSales - knownCost };
   }, [orders, products, month]);
+  const marginAfterExpenses = marginSummary.grossMargin - expensesTotal;
+  const marginAfterExpensesReady = marginSummary.knownSales > 0 && marginSummary.missingCostSales === 0;
 
   const submitExpense = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -170,18 +172,18 @@ export const FinanceModule: React.FC<FinanceModuleProps> = ({ orders, products, 
         </article>
         <article className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 shadow-sm">
           <div className="text-xs font-bold uppercase tracking-wide text-emerald-800">Marge indicative connue</div>
-          <div className={`mt-2 text-xl font-black tabular-nums ${marginSummary.grossMargin < 0 ? 'text-rose-700' : 'text-emerald-900'}`}>{money(marginSummary.grossMargin)}</div>
+          <div className={`mt-2 text-xl font-black tabular-nums ${marginSummary.missingCostSales > 0 && marginSummary.knownSales === 0 ? 'text-amber-800' : marginSummary.grossMargin < 0 ? 'text-rose-700' : 'text-emerald-900'}`}>{marginSummary.missingCostSales > 0 && marginSummary.knownSales === 0 ? 'À compléter' : money(marginSummary.grossMargin)}</div>
           <div className="mt-1 text-xs text-emerald-800">Ventes avec coût connu : {marginSummary.coverage}%</div>
         </article>
         <article className="rounded-2xl border border-blue-200 bg-blue-50/60 p-4 shadow-sm">
           <div className="text-xs font-bold uppercase tracking-wide text-blue-800">Ventes sans coût renseigné</div>
           <div className="mt-2 text-xl font-black tabular-nums text-blue-950">{money(marginSummary.missingCostSales)}</div>
-          <div className="mt-1 text-xs text-blue-800">Coût à compléter sur les fiches produits</div>
+          <div className="mt-1 text-xs text-blue-800">Chiffre d’affaires concerné, pas un coût d’achat</div>
         </article>
         <article className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4 shadow-sm">
-          <div className="text-xs font-bold uppercase tracking-wide text-violet-800">Marge connue après frais</div>
-          <div className={`mt-2 text-xl font-black tabular-nums ${marginSummary.grossMargin - expensesTotal < 0 ? 'text-rose-700' : 'text-violet-950'}`}>{money(marginSummary.grossMargin - expensesTotal)}</div>
-          <div className="mt-1 text-xs text-violet-800">Estimation partielle si des coûts produits manquent</div>
+          <div className="text-xs font-bold uppercase tracking-wide text-violet-800">Marge indicative après frais</div>
+          <div className={`mt-2 text-xl font-black tabular-nums ${marginAfterExpensesReady && marginAfterExpenses < 0 ? 'text-rose-700' : marginAfterExpensesReady ? 'text-violet-950' : 'text-amber-800'}`}>{marginAfterExpensesReady ? money(marginAfterExpenses) : marginSummary.missingCostSales > 0 ? 'Coûts à compléter' : 'Aucune vente'}</div>
+          <div className="mt-1 text-xs text-violet-800">Affichée seulement si les coûts d’achat des ventes sont renseignés</div>
         </article>
       </section>
 

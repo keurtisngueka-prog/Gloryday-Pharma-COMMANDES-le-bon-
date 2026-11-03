@@ -2274,6 +2274,23 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     store.accounts.push({ user: newUser, passwordHash: await hashPassword(cleanPass) });
     await saveStore(store, persistence);
     await clearLoginFailures(registrationKey);
+    const welcomeNotification: AppNotification = {
+      id: `notif-${randomUUID()}`,
+      timestamp: new Date().toISOString(),
+      type: 'admin_message',
+      title: 'Bienvenue chez Gloryday Pharma',
+      message: `Bonjour ${newUser.contactName || newUser.facilityName}, bienvenue chez Gloryday Pharma. Votre compte client est créé : vous pouvez consulter le catalogue et suivre vos commandes depuis votre espace.`,
+      userId: newUser.id,
+      targetRole: 'client',
+      read: false,
+    };
+    store.notifications.unshift(welcomeNotification);
+    try {
+      await saveNotificationBatch(store, persistence, [welcomeNotification]);
+    } catch {
+      store.notifications = store.notifications.filter((notification) => notification.id !== welcomeNotification.id);
+      console.warn('The new-client welcome notification could not be persisted.');
+    }
     await issueSession(res, newUser);
     res.status(201).json({ user: cleanUser(newUser) });
   }));
@@ -2481,6 +2498,19 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       await recordLoginFailure(key);
       res.status(401).json({ error: 'Identifiant ou mot de passe incorrect.' });
     };
+    const verifyCollaboratorAccessCode = async (): Promise<boolean> => {
+      const configuredCode = process.env.STAFF_AREA_ACCESS_PIN?.trim() || '';
+      if (!/^\d{4}$/.test(configuredCode)) {
+        res.status(503).json({ error: 'Le code d’accès collaborateur n’est pas configuré. Contactez le Super-Admin.' });
+        return false;
+      }
+      const submittedCode = String(req.body?.accessCode || '');
+      if (!/^\d{4}$/.test(submittedCode) || !safeEqual(submittedCode, configuredCode)) {
+        await fail();
+        return false;
+      }
+      return true;
+    };
     const adminUserName = process.env.ADMIN_USERNAME || 'admin';
     const adminPassword = process.env.ADMIN_PASSWORD;
     if (identifier.toLowerCase() === adminUserName.toLowerCase() && !adminPassword) {
@@ -2507,6 +2537,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const normalizedIdentifier = normalizeStaffIdentifier(identifier);
     const staff = environmentStaffAccounts().find(item => item.identifier === normalizedIdentifier);
     if (staff && safeEqual(password, staff.password)) {
+      if (!await verifyCollaboratorAccessCode()) return;
       const user: User = { id: `staff-${Buffer.from(normalizedIdentifier).toString('hex').slice(0, 24)}`, phone: '', facilityName: 'Direction Générale Gloryday', contactName: staff.name || staff.role, role: staff.role, createdAt: new Date().toISOString() };
       await clearLoginFailures(key);
       await issueSession(res, user);
@@ -2526,6 +2557,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const managedStaff = store.staffAccounts.find(item => item.identifier === normalizedIdentifier);
     const validManagedPassword = await verifyPassword(password, managedStaff?.passwordHash || 'scrypt$00112233445566778899aabbccddeeff$00');
     if (managedStaff?.active && validManagedPassword) {
+      if (!await verifyCollaboratorAccessCode()) return;
       const now = new Date().toISOString();
       managedStaff.lastLoginAt = now;
       managedStaff.lastSeenAt = now;

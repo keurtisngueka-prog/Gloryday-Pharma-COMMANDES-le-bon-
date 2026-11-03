@@ -12,3 +12,5 @@ coverage/
 /data/
 /local-preview-data/
 /archive/reference/*.zip
+
+.vercel

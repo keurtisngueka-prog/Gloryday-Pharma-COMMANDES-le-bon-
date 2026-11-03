@@ -387,13 +387,10 @@ export const api = {
     return res;
   },
 
-  async adminLogin(identifier: string, passwordOrRole?: string | AppRole, _roleOption?: AppRole): Promise<{ user: User }> {
-    const password = typeof passwordOrRole === 'string' && !['client', 'Super-Admin', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'].includes(passwordOrRole)
-      ? passwordOrRole
-      : '';
+  async adminLogin(identifier: string, password: string, accessCode?: string): Promise<{ user: User }> {
     const res = await request<{ user: User }>('/api/auth/admin', {
       method: 'POST',
-      body: JSON.stringify({ identifier, password })
+      body: JSON.stringify({ identifier, password, accessCode })
     });
     return res;
   },

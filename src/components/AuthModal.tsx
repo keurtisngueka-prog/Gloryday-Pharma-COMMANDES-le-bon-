@@ -66,6 +66,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [adminIdentifier, setAdminIdentifier] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  const [staffAccessCode, setStaffAccessCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
@@ -106,6 +107,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setPassword('');
     setConfirmPassword('');
     setAdminPassword('');
+    setStaffAccessCode('');
     setShowPassword(false);
     setShowConfirmPassword(false);
     setShowAdminPassword(false);
@@ -239,7 +241,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         password,
         deliveryAddress,
         coordinates: coordinates || undefined,
-        avatarUrl: registrationAvatarUrl
+        avatarUrl: registrationAvatarUrl,
       });
       onSuccess(res.user);
       onClose();
@@ -315,7 +317,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
     try {
       setLoading(true);
-      const res = await api.adminLogin(adminIdentifier, adminPassword);
+      const res = await api.adminLogin(adminIdentifier, adminPassword, staffAccessCode);
       onSuccess(res.user);
       onClose();
     } catch (err: any) {
@@ -862,7 +864,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </label>
                 <PhoneNumberInput id="register-phone" required value={phone} onChange={setPhone} placeholder="77 00 30 04" />
               </div>
-
               <div>
                 <div className="flex items-center justify-between mb-0.5">
                   <label htmlFor="register-delivery-address" className="font-bold text-slate-700 uppercase">
@@ -1025,6 +1026,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     {showAdminPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
                   </button>
                 </div>
+              </div>
+
+              <div>
+                <label htmlFor="staff-access-code" className="block font-bold text-slate-700 uppercase mb-1">
+                  Code espace collaborateur <span className="font-medium normal-case text-slate-500">(4 chiffres)</span>
+                </label>
+                <input
+                  id="staff-access-code"
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={4}
+                  pattern="[0-9]{4}"
+                  placeholder="Requis pour les collaborateurs"
+                  value={staffAccessCode}
+                  onChange={(event) => setStaffAccessCode(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 font-mono tracking-[0.4em] focus:ring-2 focus:ring-purple-600 focus:outline-none"
+                />
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                  Le code ouvre l’espace collaborateur en plus de votre compte personnel. Il ne remplace pas vos droits individuels et ne donne pas accès au Super-Admin.
+                </p>
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[11px] text-slate-500 gap-1">
