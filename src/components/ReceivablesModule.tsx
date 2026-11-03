@@ -83,7 +83,13 @@ export const ReceivablesModule: React.FC<ReceivablesModuleProps> = ({
 
   const eligibleOrders = useMemo(() => orders.filter((order) => {
     if (order.status === 'Annulée' || getOrderRemainingBalance(order) <= 0) return false;
-    const hasReceivable = order.customer.paymentMethod === 'en_compte' || (order.invoices || []).some((invoice) => invoice.type === 'facture');
+    const hasValidatedPayment = (order.installments || []).some((installment) =>
+      installment.status === 'valide' && Number(installment.amount) > 0,
+    );
+    const hasReceivable = order.customer.paymentMethod === 'en_compte'
+      || Boolean(order.collectionDueDate)
+      || hasValidatedPayment
+      || (order.invoices || []).some((invoice) => invoice.type === 'facture');
     return hasReceivable;
   }), [orders]);
 

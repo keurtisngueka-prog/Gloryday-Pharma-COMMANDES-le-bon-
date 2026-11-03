@@ -504,7 +504,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                   className="btn-shine px-3.5 py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs whitespace-nowrap shrink-0"
                 >
                   <MessageCircle className="w-4 h-4 text-white" />
-                  <span>Support Pharmacie 24/7</span>
+                  <span>Support Gloryday 24/24</span>
                 </a>
               </>
             )}
