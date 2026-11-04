@@ -54,10 +54,13 @@ export interface Product {
   alertThreshold?: number;
   lowStockAlertThreshold?: number;
   purchasePrice?: number;
+  /** True only after an authorized operator explicitly confirms the recorded cost. */
+  purchasePriceVerified?: boolean;
   hasPhysicalStock?: boolean;
 }
 
 export interface PackItem {
+  productId?: string;
   productName: string;
   variant?: string;
   quantity: number;

@@ -104,7 +104,7 @@ export const EnterpriseReportsModule: React.FC<EnterpriseReportsModuleProps> = (
         if (it.isQuote || !Number.isFinite(it.total) || it.total <= 0) return;
         const prod = products.find(p => p.id === it.productId);
         const buyPrice = Number(prod?.purchasePrice);
-        if (!Number.isFinite(buyPrice) || buyPrice <= 0) {
+        if (prod?.purchasePriceVerified !== true || !Number.isFinite(buyPrice) || buyPrice <= 0) {
           missingCostLines += 1;
           return;
         }
@@ -255,9 +255,11 @@ export const EnterpriseReportsModule: React.FC<EnterpriseReportsModuleProps> = (
           </div>
 
           <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/30">
-            <span className="text-[10px] font-bold text-emerald-800 uppercase">Marge sur coûts renseignés</span>
+            <span className="text-[10px] font-bold text-emerald-800 uppercase">Marge indicative sur coûts confirmés</span>
             <div className={`mt-1 font-mono text-lg font-black tabular-nums ${estimatedGrossMargin.marginAmount < 0 ? 'text-rose-800' : 'text-emerald-900'}`}>
-              {estimatedGrossMargin.marginAmount < 0 ? '−' : '+'}{Math.abs(estimatedGrossMargin.marginAmount).toLocaleString('fr-FR')} F
+              {estimatedGrossMargin.revenueWithKnownCost === 0 && estimatedGrossMargin.missingCostLines > 0
+                ? 'À compléter'
+                : `${estimatedGrossMargin.marginAmount < 0 ? '−' : '+'}${Math.abs(estimatedGrossMargin.marginAmount).toLocaleString('fr-FR')} F`}
             </div>
             <span className="text-[11px] font-semibold text-emerald-700">
               Taux : {estimatedGrossMargin.marginRate == null ? '—' : `${estimatedGrossMargin.marginRate}%`} · {estimatedGrossMargin.revenueWithKnownCost.toLocaleString('fr-FR')} F couverts

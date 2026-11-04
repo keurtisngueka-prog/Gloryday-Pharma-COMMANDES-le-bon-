@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Layers, Plus, Edit, Trash2, CheckCircle2, Eye, EyeOff, Search, ImagePlus, LoaderCircle, X } from 'lucide-react';
-import { Pack, Product, User } from '../types';
+import { Pack, PackItem, Product, User } from '../types';
 import { logAuditEvent } from '../utils/auditLogger';
 import { api } from '../api';
 
@@ -65,10 +66,17 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
   const [productSearch, setProductSearch] = useState('');
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState('');
+  const [savingPack, setSavingPack] = useState(false);
+  const [packSaveError, setPackSaveError] = useState('');
+  const savingPackRef = useRef(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
-  const [items, setItems] = useState<{ productName: string; variant?: string; quantity: number }[]>([
-    { productName: products[0]?.name || 'Gants d\'examen', quantity: 10 }
+  const [items, setItems] = useState<PackItem[]>([
+    { productId: products[0]?.id, productName: products[0]?.name || 'Gants d\'examen', quantity: 10 }
   ]);
+
+  const productForPackItem = (item: Pick<PackItem, 'productId' | 'productName'>) =>
+    products.find(product => item.productId && product.id === item.productId)
+      || products.find(product => product.name === item.productName);
 
   const matchingProducts = useMemo(() => {
     const query = productSearch.trim().toLocaleLowerCase('fr');
@@ -76,12 +84,14 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
       .some(value => String(value || '').toLocaleLowerCase('fr').includes(query))).slice(0, 8);
   }, [products, productSearch]);
   const packCatalogValue = useMemo(() => items.reduce((total, item) => {
-    const product = products.find(candidate => candidate.name === item.productName);
+    const product = products.find(candidate => item.productId && candidate.id === item.productId)
+      || products.find(candidate => candidate.name === item.productName);
     const variant = product?.variants.find(candidate => candidate.label === item.variant) || product?.variants[0];
     return total + Math.max(0, variant?.originalPrice ?? variant?.price ?? 0) * Math.max(0, Number(item.quantity) || 0);
   }, 0), [items, products]);
   const unpricedItemCount = items.filter(item => {
-    const product = products.find(candidate => candidate.name === item.productName);
+    const product = products.find(candidate => item.productId && candidate.id === item.productId)
+      || products.find(candidate => candidate.name === item.productName);
     const variant = product?.variants.find(candidate => candidate.label === item.variant) || product?.variants[0];
     return !variant || (variant.originalPrice ?? variant.price) <= 0;
   }).length;
@@ -89,9 +99,9 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
   const addProductToPack = (product: Product) => {
     const variant = product.variants[0]?.label;
     setItems(current => {
-      const existingIndex = current.findIndex(item => item.productName === product.name && item.variant === variant);
+      const existingIndex = current.findIndex(item => (item.productId === product.id || (!item.productId && item.productName === product.name)) && item.variant === variant);
       if (existingIndex >= 0) return current.map((item, index) => index === existingIndex ? { ...item, quantity: item.quantity + 1 } : item);
-      return [...current, { productName: product.name, variant, quantity: 1 }];
+      return [...current, { productId: product.id, productName: product.name, variant, quantity: 1 }];
     });
   };
 
@@ -123,6 +133,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
     setImage('');
     setProductSearch('');
     setPhotoError('');
+    setPackSaveError('');
     setItems([{ productName: products[0]?.name || 'Kit médical', quantity: 5 }]);
     setIsModalOpen(true);
   };
@@ -135,7 +146,10 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
     setImage(pack.image);
     setProductSearch('');
     setPhotoError('');
-    setItems(pack.items.length > 0 ? pack.items : [{ productName: products[0]?.name || 'Dispositif', quantity: 1 }]);
+    setPackSaveError('');
+    setItems(pack.items.length > 0
+      ? pack.items.map(item => ({ ...item, productId: item.productId || products.find(product => product.name === item.productName)?.id }))
+      : [{ productId: products[0]?.id, productName: products[0]?.name || 'Dispositif', quantity: 1 }]);
     setIsModalOpen(true);
   };
 
@@ -149,13 +163,27 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
       return;
     }
 
+    if (savingPackRef.current) return;
+    const normalizedItems = cleanItems.map(item => {
+      const product = productForPackItem(item);
+      return product ? { ...item, productId: product.id, productName: product.name } : item;
+    });
+    if (normalizedItems.some(item => !productForPackItem(item))) {
+      setPackSaveError('Un produit du pack n’existe plus dans le catalogue. Remplace-le avant d’enregistrer.');
+      return;
+    }
+
+    savingPackRef.current = true;
+    setSavingPack(true);
+    setPackSaveError('');
+    try {
     if (editingPack) {
       await onUpdatePack(editingPack.id, {
         title: title.trim(),
         description: description.trim(),
         price: Number(price),
         image: image.trim() || 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&q=80&w=400',
-        items: cleanItems
+        items: normalizedItems
       });
       logAuditEvent(
         currentUser,
@@ -170,7 +198,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
         description: description.trim(),
         price: Number(price),
         image: image.trim() || 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&q=80&w=400',
-        items: cleanItems,
+        items: normalizedItems,
         active: true
       });
       logAuditEvent(
@@ -183,6 +211,12 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
     }
 
     setIsModalOpen(false);
+    } catch (error) {
+      setPackSaveError(error instanceof Error ? error.message : 'Le pack n’a pas pu être enregistré.');
+    } finally {
+      savingPackRef.current = false;
+      setSavingPack(false);
+    }
   };
 
   const handleToggleActive = async (pack: Pack) => {
@@ -291,7 +325,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
       </div>
 
       {/* Modal Create / Edit */}
-      {isModalOpen && (
+      {isModalOpen && createPortal((
         <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/50 p-2 sm:items-center sm:p-4">
           <div role="dialog" aria-modal="true" className="max-h-[94dvh] w-full max-w-xl overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
             <h3 className="font-bold text-sm text-slate-900">
@@ -299,6 +333,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
             </h3>
 
             <form onSubmit={handleSubmit} className="space-y-3">
+              {packSaveError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">{packSaveError}</p>}
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Titre du Pack</label>
                 <input
@@ -362,22 +397,25 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
                 {items.map((it, idx) => (
                   <div key={`${it.productName}-${it.variant || ''}-${idx}`} className="mb-1.5 flex flex-wrap items-center gap-2">
                     <select
-                      value={it.productName}
+                      value={productForPackItem(it)?.id || ''}
                       onChange={(e) => {
-                        const newItems = [...items];
-                        newItems[idx].productName = e.target.value;
-                        const selectedProduct = products.find(product => product.name === e.target.value);
-                        newItems[idx].variant = selectedProduct?.variants[0]?.label;
-                        setItems(newItems);
+                        const selectedProduct = products.find(product => product.id === e.target.value);
+                        setItems(current => current.map((item, index) => index === idx ? {
+                          ...item,
+                          productId: selectedProduct?.id,
+                          productName: selectedProduct?.name || '',
+                          variant: selectedProduct?.variants[0]?.label,
+                        } : item));
                       }}
                       className="min-w-[180px] flex-1 rounded-lg border border-slate-300 bg-white p-1.5"
                     >
+                      {!productForPackItem(it) && <option value="" disabled>Produit absent du catalogue · choisissez-en un</option>}
                       {products.map(p => (
-                        <option key={p.id} value={p.name}>{p.name}</option>
+                        <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
-                    {(products.find(product => product.name === it.productName)?.variants.length || 0) > 1 && <select value={it.variant || ''} onChange={event => setItems(current => current.map((item, index) => index === idx ? { ...item, variant: event.target.value } : item))} className="max-w-36 rounded-lg border border-slate-300 bg-white p-1.5 text-[11px]">
-                      {products.find(product => product.name === it.productName)?.variants.map(variant => <option key={variant.label} value={variant.label}>{variant.label}</option>)}
+                    {(productForPackItem(it)?.variants.length || 0) > 1 && <select value={it.variant || ''} onChange={event => setItems(current => current.map((item, index) => index === idx ? { ...item, variant: event.target.value } : item))} className="max-w-36 rounded-lg border border-slate-300 bg-white p-1.5 text-[11px]">
+                      {productForPackItem(it)?.variants.map(variant => <option key={variant.label} value={variant.label}>{variant.label}</option>)}
                     </select>}
                     <input
                       type="number"
@@ -427,22 +465,23 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
+                  disabled={savingPack}
                   className="px-3 py-1.5 border border-slate-200 text-slate-600 rounded-xl cursor-pointer"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
-                  disabled={photoBusy || items.length === 0}
+                  disabled={photoBusy || savingPack || items.length === 0}
                   className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl cursor-pointer shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Enregistrer
+                  {savingPack ? 'Enregistrement…' : 'Enregistrer'}
                 </button>
               </div>
             </form>
           </div>
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 };

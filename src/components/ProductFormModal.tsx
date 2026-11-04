@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Plus,
@@ -157,6 +158,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [purchasePrice, setPurchasePrice] = useState<number>(
     initialProduct?.purchasePrice || 0
   );
+  const [purchasePriceVerified, setPurchasePriceVerified] = useState(
+    initialProduct?.purchasePriceVerified === true
+  );
   const [variants, setVariants] = useState<ProductVariant[]>(
     initialProduct?.variants && initialProduct.variants.length > 0
       ? initialProduct.variants
@@ -226,6 +230,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           : 10
     );
     setPurchasePrice(initialProduct?.purchasePrice || 0);
+    setPurchasePriceVerified(initialProduct?.purchasePriceVerified === true);
     setVariants(
       initialProduct?.variants && initialProduct.variants.length > 0
         ? initialProduct.variants
@@ -444,7 +449,10 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         originalPrice: isPromotion ? Number(originalPrice) || 0 : undefined,
         alertThreshold: Number(alertThreshold) || 10,
         lowStockAlertThreshold: Number(alertThreshold) || 10,
-        ...(canManagePurchasePrice ? { purchasePrice: Number(purchasePrice) || 0 } : {})
+        ...(canManagePurchasePrice ? {
+          purchasePrice: Number(purchasePrice) || 0,
+          purchasePriceVerified: purchasePriceVerified && Number(purchasePrice) > 0
+        } : {})
       };
 
       let result: Product;
@@ -463,7 +471,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     }
   };
 
-  return (
+  return createPortal((
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 backdrop-blur-xs sm:p-4 animate-in fade-in duration-200 overscroll-contain">
       <div className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:max-w-xl">
         {/* Header */}
@@ -1048,9 +1056,27 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   min="0"
                   placeholder="ex: 4500"
                   value={purchasePrice || ''}
-                  onChange={(e) => setPurchasePrice(parseInt(e.target.value, 10) || 0)}
+                  onChange={(e) => {
+                    setPurchasePrice(parseInt(e.target.value, 10) || 0);
+                    setPurchasePriceVerified(false);
+                  }}
                   className="w-full p-2 rounded-lg border border-slate-300 font-mono text-xs bg-white"
                 />
+                {Number(initialProduct?.purchasePrice) > 0 && !initialProduct?.purchasePriceVerified && (
+                  <p className="mt-1 text-[10px] font-semibold text-amber-800">
+                    Valeur existante non confirmée : son origine est à vérifier et elle reste exclue des marges.
+                  </p>
+                )}
+                <label className="mt-2 flex items-start gap-2 text-[10px] leading-relaxed text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={purchasePriceVerified}
+                    disabled={purchasePrice <= 0}
+                    onChange={(e) => setPurchasePriceVerified(e.target.checked)}
+                    className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>Je confirme que ce prix est le coût d’achat réel. Seuls les coûts confirmés servent aux calculs de marge.</span>
+                </label>
               </div>}
             </div>
             <p className="text-[10px] text-slate-500">
@@ -1134,5 +1160,5 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         </form>
       </div>
     </div>
-  );
+  ), document.body);
 };

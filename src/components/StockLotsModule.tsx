@@ -210,7 +210,7 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
         'Unités disponibles': Number(product.quantityAvailable ?? product.stockQuantity ?? 0),
         'Seuil d’alerte': Number(product.alertThreshold ?? product.lowStockAlertThreshold ?? 0),
         Statut: isQuoteOnly(product) ? 'Sur devis' : product.status === 'rupture' ? 'Rupture' : 'Disponible',
-        ...(canViewStockCosts ? { 'Prix d’achat (FCFA)': Number(product.purchasePrice || 0) } : {}),
+        ...(canViewStockCosts ? { 'Prix d’achat confirmé (FCFA)': product.purchasePriceVerified === true ? Number(product.purchasePrice || 0) : '' } : {}),
       }));
       const batchRows = filteredBatches.map(batch => ({
         Produit: batch.productName || products.find(product => product.id === batch.productId)?.name || '',

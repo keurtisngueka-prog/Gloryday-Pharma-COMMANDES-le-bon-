@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertCircle, CheckCircle2, Clock3, PackagePlus, RefreshCw, X } from 'lucide-react';
 import type { Product, StockMovement } from '../types';
 import { api } from '../api';
@@ -114,7 +115,7 @@ export const StockReceiptModal: React.FC<StockReceiptModalProps> = ({ product, o
     }
   };
 
-  return (
+  return createPortal((
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 p-3 backdrop-blur-sm sm:p-5" role="presentation">
       <section
         role="dialog"
@@ -275,5 +276,5 @@ export const StockReceiptModal: React.FC<StockReceiptModalProps> = ({ product, o
         </div>
       </section>
     </div>
-  );
+  ), document.body);
 };

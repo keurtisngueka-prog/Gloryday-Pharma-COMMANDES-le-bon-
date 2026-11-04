@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   ShieldCheck, 
   TrendingUp, 
@@ -206,6 +206,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Inline stock draft quantities per product
   const [stockDrafts, setStockDrafts] = useState<Record<string, number>>({});
   const [savingStockId, setSavingStockId] = useState<string | null>(null);
+  const [stockSaveError, setStockSaveError] = useState<{ productId: string; message: string } | null>(null);
+  const savingStockIdsRef = useRef(new Set<string>());
   const [lastSavedStockId, setLastSavedStockId] = useState<string | null>(null);
   const [excelImportPreview, setExcelImportPreview] = useState<CatalogImportPreviewResult | null>(null);
   const [excelImportFeedback, setExcelImportFeedback] = useState<string | null>(null);
@@ -304,8 +306,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handleInlineStockSave = async (product: Product, nextQty: number) => {
+    if (savingStockIdsRef.current.has(product.id)) return;
     const cleanQty = Math.max(0, Math.round(nextQty));
+    savingStockIdsRef.current.add(product.id);
     setSavingStockId(product.id);
+    setStockSaveError(null);
     try {
       if (onUpdateProductStock) {
         await onUpdateProductStock(product.id, cleanQty, 'disponible');
@@ -320,7 +325,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       });
       setLastSavedStockId(product.id);
       setTimeout(() => setLastSavedStockId(curr => (curr === product.id ? null : curr)), 2500);
+    } catch (error) {
+      setStockSaveError({
+        productId: product.id,
+        message: error instanceof Error ? error.message : 'La quantité n’a pas pu être enregistrée.',
+      });
     } finally {
+      savingStockIdsRef.current.delete(product.id);
       setSavingStockId(null);
     }
   };
@@ -1483,7 +1494,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <h4 className="font-bold text-slate-900 truncate">{p.name}</h4>
                         <div className="flex flex-wrap items-center gap-2 mt-0.5">
                           <span className="text-[11px] text-slate-500">{p.category} · {p.variants.length} variante(s)</span>
-                          {canViewStockCosts && <span className="text-[11px] font-semibold text-amber-800">Achat {Number(p.purchasePrice || 0).toLocaleString('fr-FR')} FCFA · marge estimée {Math.max(0, Number(p.variants[0]?.price || 0) - Number(p.purchasePrice || 0)).toLocaleString('fr-FR')} FCFA</span>}
+                          {canViewStockCosts && (p.purchasePriceVerified === true && Number(p.purchasePrice) > 0 ? (
+                            Number(p.variants[0]?.price) > 0 ? (
+                              <span className="text-[11px] font-semibold text-amber-800">
+                                Achat {Number(p.purchasePrice).toLocaleString('fr-FR')} FCFA · marge brute estimée {Number(Number(p.variants[0]?.price) - Number(p.purchasePrice)).toLocaleString('fr-FR')} FCFA (variante principale)
+                              </span>
+                            ) : (
+                              <span className="text-[11px] font-semibold text-slate-500">Prix de vente absent · marge non calculable</span>
+                            )
+                          ) : (
+                            <span className="text-[11px] font-semibold text-amber-800">Coût d’achat à confirmer · marge inconnue</span>
+                          ))}
                           {/* Live Client-Side Visibility Status Indicator */}
                           {canViewStock && (p.status === 'rupture' ? (
                             <span className="px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">
@@ -1502,6 +1523,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               🟠 Stock 0 · Converti auto. en devis côté client
                             </span>
                           ))}
+                          {stockSaveError?.productId === p.id && (
+                            <span role="alert" className="text-[10px] font-semibold text-rose-700">Échec de sauvegarde : {stockSaveError.message}</span>
+                          )}
                           {lastSavedStockId === p.id && (
                             <span className="text-[10px] font-extrabold text-emerald-700">
                               ✓ Synchronisé côté client !

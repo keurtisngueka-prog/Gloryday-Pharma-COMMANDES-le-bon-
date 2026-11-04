@@ -650,12 +650,28 @@ export default function App() {
   };
 
   const handleAddPackToCart = (pack: Pack) => {
-    pack.items.forEach(item => {
-      const foundProduct = products.find(p => p.name === item.productName) || products[0];
-      const foundVariant = foundProduct?.variants.find(v => v.label === item.variant) || foundProduct?.variants[0];
-      if (foundProduct && foundVariant) {
-        handleAddToCart(foundProduct, foundVariant, item.quantity);
-      }
+    const resolvedItems = pack.items.map(item => {
+      const foundProduct = products.find(product => item.productId && product.id === item.productId)
+        || products.find(product => product.name === item.productName);
+      const foundVariant = item.variant
+        ? foundProduct?.variants.find(variant => variant.label === item.variant)
+        : foundProduct?.variants[0];
+      return foundProduct && foundVariant && Number.isSafeInteger(item.quantity) && item.quantity > 0
+        ? { product: foundProduct, variant: foundVariant, quantity: item.quantity }
+        : null;
+    });
+
+    if (resolvedItems.some(item => !item)) {
+      const missingNames = pack.items
+        .filter((_, index) => !resolvedItems[index])
+        .map(item => item.productName)
+        .filter(Boolean);
+      showToast(`Le pack « ${pack.title} » contient un article absent ou une variante invalide${missingNames.length ? ` : ${missingNames.join(', ')}` : ''}. L’équipe doit corriger sa composition.`, 'error');
+      return;
+    }
+
+    resolvedItems.forEach(item => {
+      if (item) handleAddToCart(item.product, item.variant, item.quantity);
     });
   };
 

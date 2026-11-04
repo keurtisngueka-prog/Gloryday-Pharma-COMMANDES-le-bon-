@@ -1113,7 +1113,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
     const user = await readSession(_req);
     const canViewStock = hasStockPermission(user, 'stock_view');
-    const canViewStockCosts = hasStockPermission(user, 'stock_costs_view');
+    const canViewStockCosts = hasStockPermission(user, 'stock_costs_view') || hasStockPermission(user, 'stock_costs_manage');
     res.json(store.products.map((product) => {
       const enriched = enrichProductWithStockState(product);
       const visibleProduct: Product = { ...enriched };
@@ -1125,7 +1125,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         delete visibleProduct.stockQuantity;
         delete visibleProduct.hasPhysicalStock;
       }
-      if (!canViewStockCosts) delete visibleProduct.purchasePrice;
+      if (!canViewStockCosts) {
+        delete visibleProduct.purchasePrice;
+        delete visibleProduct.purchasePriceVerified;
+      }
       return visibleProduct;
     }));
   }));
@@ -1215,7 +1218,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       hasPhysicalStock: initialStock > 0,
       alertThreshold: canAdjustStock ? productData.alertThreshold : 10,
       lowStockAlertThreshold: canAdjustStock ? productData.lowStockAlertThreshold : 10,
-      purchasePrice: canEditCost ? Math.round(purchasePrice) : 0
+      purchasePrice: canEditCost ? Math.round(purchasePrice) : 0,
+      purchasePriceVerified: canEditCost && productData.purchasePriceVerified === true && purchasePrice > 0
     };
     store.products.unshift(newProduct);
     const mainPrice = newProduct.variants[0]?.price ?? 0;
@@ -1408,7 +1412,14 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       success: true,
       updatedCount,
       createdCount,
-      products: store.products.map(product => enrichProductWithStockState(product))
+      products: store.products.map(product => {
+        const visibleProduct = enrichProductWithStockState(product);
+        if (!hasStockPermission(actor, 'stock_costs_view') && !hasStockPermission(actor, 'stock_costs_manage')) {
+          delete visibleProduct.purchasePrice;
+          delete visibleProduct.purchasePriceVerified;
+        }
+        return visibleProduct;
+      })
     });
   }));
 
@@ -1437,6 +1448,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       stockQuantity: _ignoredStockQuantity,
       stockAdjustment: _ignoredStockAdjustment,
       purchasePrice: _ignoredPurchasePrice,
+      purchasePriceVerified: _ignoredPurchasePriceVerified,
       status: _ignoredStatus,
       alertThreshold: _ignoredAlertThreshold,
       lowStockAlertThreshold: _ignoredLowStockAlertThreshold,
@@ -1449,6 +1461,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       ...(canAdjustStock && req.body?.alertThreshold !== undefined ? { alertThreshold: req.body.alertThreshold } : {}),
       ...(canAdjustStock && req.body?.lowStockAlertThreshold !== undefined ? { lowStockAlertThreshold: req.body.lowStockAlertThreshold } : {}),
       ...(canEditCost && Number.isFinite(Number(req.body?.purchasePrice)) ? { purchasePrice: Math.max(0, Math.round(Number(req.body.purchasePrice))) } : {}),
+      ...(canEditCost && (req.body?.purchasePrice !== undefined || typeof req.body?.purchasePriceVerified === 'boolean') ? {
+        purchasePriceVerified: req.body?.purchasePriceVerified === true
+          && Number(req.body?.purchasePrice ?? previousProduct.purchasePrice) > 0
+      } : {}),
       id
     };
     // Product metadata edits never change inventory. Dedicated stock routes
@@ -1478,7 +1494,13 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       store.staffLogs = previousStaffLogs;
       throw error;
     }
-    res.json(store.products[idx]);
+    const canViewCosts = hasStockPermission(actor, 'stock_costs_view') || canEditCost;
+    const visibleUpdatedProduct = { ...store.products[idx] };
+    if (!canViewCosts) {
+      delete visibleUpdatedProduct.purchasePrice;
+      delete visibleUpdatedProduct.purchasePriceVerified;
+    }
+    res.json(visibleUpdatedProduct);
   }));
 
   app.get('/api/admin/stock/movements', asyncHandler(async (req, res) => {
@@ -4874,7 +4896,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         name.startsWith('20261021') ||
         name.startsWith('20261022000001') ||
         name.startsWith('20261023') ||
-        name.startsWith('20261102')
+        name.startsWith('20261102') ||
+        name.startsWith('20261104')
       );
       const targetFiles = incrementalFiles.length > 0 ? incrementalFiles : fileNames.slice(-1);
       if (targetFiles.length > 0) {

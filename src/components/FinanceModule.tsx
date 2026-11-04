@@ -81,7 +81,7 @@ export const FinanceModule: React.FC<FinanceModuleProps> = ({ orders, products, 
       for (const item of order.items || []) {
         if (item.isQuote || item.isDeferredStock) continue;
         const purchasePrice = productById.get(item.productId)?.purchasePrice;
-        if (typeof purchasePrice === 'number' && purchasePrice > 0) {
+        if (productById.get(item.productId)?.purchasePriceVerified === true && typeof purchasePrice === 'number' && purchasePrice > 0) {
           knownSales += item.total || 0;
           knownCost += purchasePrice * item.quantity;
         } else {
@@ -171,9 +171,12 @@ export const FinanceModule: React.FC<FinanceModuleProps> = ({ orders, products, 
           <div className="mt-1 text-xs text-slate-500">{activeExpenses.length} écriture(s) {month === 'all' ? 'au total' : `en ${month}`}</div>
         </article>
         <article className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 shadow-sm">
-          <div className="text-xs font-bold uppercase tracking-wide text-emerald-800">Marge indicative connue</div>
+          <div className="text-xs font-bold uppercase tracking-wide text-emerald-800">Marge brute estimée (coûts connus)</div>
           <div className={`mt-2 text-xl font-black tabular-nums ${marginSummary.missingCostSales > 0 && marginSummary.knownSales === 0 ? 'text-amber-800' : marginSummary.grossMargin < 0 ? 'text-rose-700' : 'text-emerald-900'}`}>{marginSummary.missingCostSales > 0 && marginSummary.knownSales === 0 ? 'À compléter' : money(marginSummary.grossMargin)}</div>
-          <div className="mt-1 text-xs text-emerald-800">Ventes avec coût connu : {marginSummary.coverage}%</div>
+          <div className="mt-1 text-xs leading-relaxed text-emerald-800">
+            Ventes avec coût : {money(marginSummary.knownSales)} · coût produit calculé : {money(marginSummary.knownCost)}<br />
+            Couverture : {marginSummary.coverage}% · prix d’achat actuel saisi, pas le coût historique du lot
+          </div>
         </article>
         <article className="rounded-2xl border border-blue-200 bg-blue-50/60 p-4 shadow-sm">
           <div className="text-xs font-bold uppercase tracking-wide text-blue-800">Ventes sans coût renseigné</div>
@@ -183,7 +186,10 @@ export const FinanceModule: React.FC<FinanceModuleProps> = ({ orders, products, 
         <article className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4 shadow-sm">
           <div className="text-xs font-bold uppercase tracking-wide text-violet-800">Marge indicative après frais</div>
           <div className={`mt-2 text-xl font-black tabular-nums ${marginAfterExpensesReady && marginAfterExpenses < 0 ? 'text-rose-700' : marginAfterExpensesReady ? 'text-violet-950' : 'text-amber-800'}`}>{marginAfterExpensesReady ? money(marginAfterExpenses) : marginSummary.missingCostSales > 0 ? 'Coûts à compléter' : 'Aucune vente'}</div>
-          <div className="mt-1 text-xs text-violet-800">Affichée seulement si les coûts d’achat des ventes sont renseignés</div>
+          <div className="mt-1 text-xs leading-relaxed text-violet-800">
+            Dépenses actives saisies : {money(expensesTotal)}<br />
+            Marge brute moins ces dépenses · affichée si tous les coûts d’achat sont connus
+          </div>
         </article>
       </section>
 

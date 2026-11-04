@@ -495,9 +495,10 @@ export function exportProductsToCSV(products: Product[]): void {
 
   const rows = products.map(p => {
     const salePrice = p.variants && p.variants[0] ? p.variants[0].price : 0;
-    const buyPrice = p.purchasePrice || Math.round(salePrice * 0.65);
-    const margin = salePrice > 0 ? salePrice - buyPrice : 0;
-    const marginRate = salePrice > 0 ? Math.round((margin / salePrice) * 100) : 0;
+    const hasVerifiedCost = p.purchasePriceVerified === true && Number(p.purchasePrice) > 0;
+    const buyPrice = hasVerifiedCost ? Number(p.purchasePrice) : '';
+    const margin = hasVerifiedCost && salePrice > 0 ? salePrice - Number(p.purchasePrice) : '';
+    const marginRate = hasVerifiedCost && salePrice > 0 ? `${Math.round(((salePrice - Number(p.purchasePrice)) / salePrice) * 100)}%` : '';
     const stock = typeof p.stockQuantity === 'number' ? p.stockQuantity : 50;
     const alertThreshold = p.lowStockAlertThreshold || 10;
 
@@ -510,7 +511,7 @@ export function exportProductsToCSV(products: Product[]): void {
       salePrice,
       buyPrice,
       margin,
-      `${marginRate}%`,
+      marginRate,
       stock,
       alertThreshold
     ].join(';');

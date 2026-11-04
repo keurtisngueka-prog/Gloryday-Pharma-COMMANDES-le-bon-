@@ -528,6 +528,7 @@ export class SupabaseStorePersistence {
         alertThreshold: numberOr(row.alert_threshold, 15),
         lowStockAlertThreshold: extra.lowStockAlertThreshold,
         purchasePrice: numberOr(row.purchase_price),
+        purchasePriceVerified: extra.purchasePriceVerified === true,
       };
     });
 
@@ -857,6 +858,7 @@ export class SupabaseStorePersistence {
           alertThreshold: numberOr(row.alert_threshold, 15),
           lowStockAlertThreshold: extra.lowStockAlertThreshold,
           purchasePrice: numberOr(row.purchase_price),
+          purchasePriceVerified: extra.purchasePriceVerified === true,
         };
       }).filter((product) => !LEGACY_DEMO_PRODUCT_IDS.has(product.id));
 
@@ -1371,6 +1373,17 @@ export class SupabaseStorePersistence {
     for (const product of store.products) {
       const previous = oldById.get(product.id);
       if (previous && same(previous, product)) continue;
+      // Only stock-specific flows (such as an authorized CSV stock import)
+      // should write inventory values through this general product upsert.
+      // Metadata edits must let the SQL function retain the latest values in
+      // Supabase, even when this Vercel instance has a stale in-memory copy.
+      const currentStock = product.quantityAvailable ?? product.stockQuantity;
+      const previousStock = previous?.quantityAvailable ?? previous?.stockQuantity;
+      const allowInventoryUpdate = !previous || currentStock !== previousStock;
+      const allowStatusUpdate = !previous || allowInventoryUpdate || previous.status !== product.status;
+      const allowPurchasePriceUpdate = !previous
+        || numberOr(previous.purchasePrice) !== numberOr(product.purchasePrice)
+        || previous.purchasePriceVerified !== product.purchasePriceVerified;
       const extra = {
         specialty: product.specialty,
         specifications: product.specifications,
@@ -1381,8 +1394,12 @@ export class SupabaseStorePersistence {
         stockQuantity: product.stockQuantity,
         quantityAvailable: product.quantityAvailable,
         lowStockAlertThreshold: product.lowStockAlertThreshold,
+        purchasePriceVerified: product.purchasePriceVerified === true,
       };
       const productRow = {
+        __allow_inventory_update: allowInventoryUpdate,
+        __allow_status_update: allowStatusUpdate,
+        __allow_purchase_price_update: allowPurchasePriceUpdate,
         id: product.id,
         name: product.name,
         category: product.category,
