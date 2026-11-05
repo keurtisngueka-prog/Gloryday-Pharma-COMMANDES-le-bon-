@@ -449,16 +449,19 @@ export default function App() {
   }, [currentUser?.id]);
 
   // Initial Data Load
-  const refreshProductCatalog = async () => {
+  const refreshProductCatalog = async (expectedGeneration = authGeneration.current) => {
     setIsCatalogLoading(true);
     setCatalogLoadError(null);
     try {
-      setProducts(await api.getProducts());
+      const catalog = await api.getProducts();
+      if (expectedGeneration !== authGeneration.current) return;
+      setProducts(catalog);
     } catch (error) {
+      if (expectedGeneration !== authGeneration.current) return;
       console.error('Chargement du catalogue impossible', error);
       setCatalogLoadError('Le catalogue ne peut pas être chargé pour le moment. Vérifiez votre connexion puis réessayez.');
     } finally {
-      setIsCatalogLoading(false);
+      if (expectedGeneration === authGeneration.current) setIsCatalogLoading(false);
     }
   };
 
@@ -466,7 +469,7 @@ export default function App() {
     const generation = authGeneration.current;
     // Load the public catalogue independently so a slow session, pack, or
     // discount request cannot leave the customer looking at an empty catalogue.
-    void refreshProductCatalog();
+    void refreshProductCatalog(generation);
 
     const [packsResult, authResult, discountResult] = await Promise.allSettled([
       api.getPacks(),
@@ -498,6 +501,11 @@ export default function App() {
     }
 
     setCurrentUser(authData.user);
+    if (userHasPermission(authData.user, 'stock_view')) {
+      // The first catalogue request may have run as a visitor, whose response
+      // intentionally omits internal stock quantities. Reload it after auth.
+      void refreshProductCatalog(generation);
+    }
     setCartItems(loadCartForUser(authData.user));
     if (canReadStaffOrders(authData.user)) {
       try {
@@ -577,6 +585,10 @@ export default function App() {
     lastEventTimestamp.current = 0;
     setNotifications([]);
     setCurrentUser(user);
+    if (userHasPermission(user, 'stock_view')) {
+      // Refresh the masked public catalogue with the authenticated stock view.
+      void refreshProductCatalog(generation);
+    }
     // Load isolated cart belonging strictly to this user
     const userCart = loadCartForUser(user);
     setCartItems(userCart);
@@ -603,6 +615,15 @@ export default function App() {
       } catch {}
     }
     void api.logout().catch(() => {});
+    setProducts(current => current.map(product => {
+      const publicProduct = { ...product, status: 'disponible' as const };
+      delete publicProduct.quantityAvailable;
+      delete publicProduct.stockQuantity;
+      delete publicProduct.alertThreshold;
+      delete publicProduct.lowStockAlertThreshold;
+      delete publicProduct.hasPhysicalStock;
+      return publicProduct;
+    }));
     localStorage.removeItem('gloryday_current_user');
     localStorage.removeItem('gloryday_customer_info');
     localStorage.removeItem('gloryday_drafts_guest');
