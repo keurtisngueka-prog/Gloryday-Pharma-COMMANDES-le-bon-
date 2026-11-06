@@ -8,8 +8,8 @@ import {
   detectNeighborhoodFromAddress,
   extractDeliveryInstructions,
   getNeighborhoodById,
-  LIBREVILLE_ZONE_GROUPS
 } from '../data/librevilleZones';
+import { NeighborhoodPicker } from './NeighborhoodPicker';
 
 interface ClientProfileModalProps {
   user: User;
@@ -189,14 +189,13 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
             )}
             <label className="block sm:col-span-2">
               <span className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-slate-700"><MapPin className="h-3.5 w-3.5 text-blue-700" /> Quartier de livraison *</span>
-              <select required value={neighborhoodId} onChange={(event) => setNeighborhoodId(event.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                <option value="">Sélectionnez votre quartier</option>
-                {LIBREVILLE_ZONE_GROUPS.map((group) => (
-                  <optgroup key={group.zoneName} label={group.zoneName}>
-                    {group.neighborhoods.map((neighborhood) => <option key={neighborhood.id} value={neighborhood.id}>{neighborhood.name}</option>)}
-                  </optgroup>
-                ))}
-              </select>
+              <NeighborhoodPicker
+                id="client-profile-neighborhood"
+                value={neighborhoodId}
+                onChange={setNeighborhoodId}
+                placeholder="Rechercher un quartier…"
+                className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-10 pr-3.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
             </label>
             <label className="block sm:col-span-2">
               <span className="mb-1.5 block text-xs font-bold text-slate-700">Adresse détaillée / repère</span>

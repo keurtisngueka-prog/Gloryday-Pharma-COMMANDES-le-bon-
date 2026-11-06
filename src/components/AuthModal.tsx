@@ -19,6 +19,8 @@ import { api } from '../api';
 import { User, FacilityType, Coordinates } from '../types';
 import { processAvatarFile } from '../utils/avatarImage';
 import { PhoneNumberInput } from './PhoneNumberInput';
+import { NeighborhoodPicker } from './NeighborhoodPicker';
+import { buildNeighborhoodDeliveryAddress, getNeighborhoodById } from '../data/librevilleZones';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -59,7 +61,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [contactName, setContactName] = useState('');
   const [facilityName, setFacilityName] = useState('');
   const [facilityType, setFacilityType] = useState<FacilityType>('Clinique');
-  const [deliveryAddress, setDeliveryAddress] = useState('Libreville, Gabon');
+  const [neighborhoodId, setNeighborhoodId] = useState('');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
   const [coordinates, setCoordinates] = useState<Coordinates | null>(null);
   const [locating, setLocating] = useState(false);
   const [password, setPassword] = useState('');
@@ -193,6 +196,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setError('Veuillez renseigner votre numéro de téléphone gabonais (+241).');
       return;
     }
+    if (!getNeighborhoodById(neighborhoodId)) {
+      setError('Sélectionnez le quartier de livraison pour renseigner l’arrondissement.');
+      return;
+    }
 
     try {
       setLoading(true);
@@ -204,7 +211,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         phone: phone.trim(),
         contactName: contactName.trim() || googleProfile.name,
         facilityType,
-        deliveryAddress: deliveryAddress.trim() || 'Libreville, Gabon',
+        deliveryAddress: buildNeighborhoodDeliveryAddress(neighborhoodId, deliveryAddress),
         coordinates: coordinates || undefined
       });
       onSuccess(res.user);
@@ -223,6 +230,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setError('Veuillez remplir tous les champs obligatoires.');
       return;
     }
+    if (!getNeighborhoodById(neighborhoodId)) {
+      setError('Sélectionnez le quartier de livraison pour renseigner l’arrondissement.');
+      return;
+    }
     if (password.length < 8 || password.length > 85) {
       setError('Le mot de passe doit comporter entre 8 et 85 caractères.');
       return;
@@ -239,7 +250,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         contactName,
         facilityType,
         password,
-        deliveryAddress,
+        deliveryAddress: buildNeighborhoodDeliveryAddress(neighborhoodId, deliveryAddress),
         coordinates: coordinates || undefined,
         avatarUrl: registrationAvatarUrl,
       });
@@ -596,8 +607,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label htmlFor="google-delivery-address" className="font-bold text-slate-700 uppercase">
-                    Quartier & Adresse de livraison
+                  <label htmlFor="google-neighborhood" className="font-bold text-slate-700 uppercase">
+                    Quartier & Adresse de livraison *
                   </label>
                   <button
                     type="button"
@@ -609,16 +620,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     {locating ? 'GPS...' : 'Détecter GPS'}
                   </button>
                 </div>
-                <div className="relative">
-                  <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <div className="space-y-2">
+                  <NeighborhoodPicker
+                    id="google-neighborhood"
+                    value={neighborhoodId}
+                    onChange={setNeighborhoodId}
+                    placeholder="Rechercher un quartier…"
+                    className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
                   <input
                     id="google-delivery-address"
                     type="text"
-                    required
-                    placeholder="Quartier (ex: Batterie 4, Louis, Glass, Libreville...)"
+                    maxLength={240}
+                    placeholder="Repère ou complément d’adresse (facultatif)"
                     value={deliveryAddress}
                     onChange={(e) => setDeliveryAddress(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs bg-white"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs"
                   />
                 </div>
                 {coordinates && (
@@ -866,8 +883,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
               <div>
                 <div className="flex items-center justify-between mb-0.5">
-                  <label htmlFor="register-delivery-address" className="font-bold text-slate-700 uppercase">
-                    Localisation de livraison
+                  <label htmlFor="register-neighborhood" className="font-bold text-slate-700 uppercase">
+                    Quartier & adresse de livraison *
                   </label>
                   <button
                     type="button"
@@ -879,15 +896,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     {locating ? 'GPS...' : 'Détecter GPS'}
                   </button>
                 </div>
-                <input
-                  id="register-delivery-address"
-                  type="text"
-                  required
-                  placeholder="Ville, quartier (ex: Libreville, Mont-Bouët...)"
-                  value={deliveryAddress}
-                  onChange={(e) => setDeliveryAddress(e.target.value)}
-                  className="w-full p-2 rounded-xl border border-slate-300"
-                />
+                <div className="space-y-2">
+                  <NeighborhoodPicker
+                    id="register-neighborhood"
+                    value={neighborhoodId}
+                    onChange={setNeighborhoodId}
+                    placeholder="Rechercher un quartier…"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                  <input
+                    id="register-delivery-address"
+                    type="text"
+                    maxLength={240}
+                    placeholder="Repère ou complément d’adresse (facultatif)"
+                    value={deliveryAddress}
+                    onChange={(e) => setDeliveryAddress(e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 bg-white p-2"
+                  />
+                </div>
                 {coordinates && (
                   <p className="text-[11px] text-emerald-700 mt-1 flex items-center gap-1 font-semibold">
                     <MapPin className="w-3 h-3" />

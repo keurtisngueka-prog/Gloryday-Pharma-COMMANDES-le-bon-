@@ -280,6 +280,35 @@ export const ALL_LIBREVILLE_NEIGHBORHOODS: LibrevilleNeighborhood[] = LIBREVILLE
   group => group.neighborhoods
 );
 
+// Arrondissements administratifs (distincts des zones tarifaires de livraison).
+// Les secteurs qui traversent une limite administrative restent explicitement indiqués.
+const NEIGHBORHOOD_ADMINISTRATIVE_AREAS: Record<string, string> = {
+  'centre-ville': '3e arrondissement de Libreville',
+  'batterie-iv': '1er arrondissement de Libreville',
+  louis: '1er arrondissement de Libreville',
+  glass: '4e arrondissement de Libreville',
+  oloumi: '5e arrondissement de Libreville',
+  'mont-bouet': '3e arrondissement de Libreville',
+  angondje: '2e arrondissement d’Akanda',
+  'akanda-centre': '2e arrondissement d’Akanda',
+  avorbam: '2e arrondissement d’Akanda',
+  sabliere: '2e arrondissement d’Akanda',
+  'cap-esterias': '1er arrondissement d’Akanda',
+  charbonnages: '1er arrondissement de Libreville',
+  'nzeng-ayong': '6e arrondissement de Libreville',
+  'plein-ciel': '5e arrondissement de Libreville',
+  'sotega-kinguele': '2e arrondissement (Sotéga) ou 3e (Kinguélé), Libreville',
+  'pk5-pk8': '3e arrondissement de Libreville',
+  'pk9-pk12': '5e ou 6e arrondissement de Libreville, selon le côté de la Nationale',
+  'owendo-chuo': '1er arrondissement d’Owendo',
+  'port-owendo': '1er arrondissement d’Owendo',
+  'alenakiri-sni': '1er arrondissement d’Owendo'
+};
+
+export function getNeighborhoodAdministrativeArea(neighborhoodId: string): string {
+  return NEIGHBORHOOD_ADMINISTRATIVE_AREAS[neighborhoodId] || 'Arrondissement à confirmer';
+}
+
 export function getNeighborhoodById(id: string): LibrevilleNeighborhood | undefined {
   return ALL_LIBREVILLE_NEIGHBORHOODS.find(n => n.id === id);
 }
@@ -288,7 +317,8 @@ export function buildNeighborhoodDeliveryAddress(neighborhoodId: string, instruc
   const neighborhood = getNeighborhoodById(neighborhoodId);
   if (!neighborhood) return instructions.trim();
   const details = instructions.trim();
-  const base = `${neighborhood.name}, ${neighborhood.zone}, Libreville`;
+  const administrativeArea = getNeighborhoodAdministrativeArea(neighborhoodId);
+  const base = `${neighborhood.name}, ${administrativeArea}, ${neighborhood.zone}, Gabon`;
   return details ? `${base} · Repère : ${details}` : base;
 }
 
@@ -304,7 +334,7 @@ export function extractDeliveryInstructions(address: string, neighborhoodId?: st
   }
 
   let remainder = address;
-  for (const part of [neighborhood.name, neighborhood.zone, 'Libreville', 'Gabon']) {
+  for (const part of [neighborhood.name, getNeighborhoodAdministrativeArea(neighborhood.id), neighborhood.zone, 'Libreville', 'Akanda', 'Owendo', 'Gabon']) {
     const escaped = part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     remainder = remainder.replace(new RegExp(escaped, 'ig'), ' ');
   }

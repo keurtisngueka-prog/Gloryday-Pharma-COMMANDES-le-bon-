@@ -22,13 +22,13 @@ import { PhoneNumberInput } from './PhoneNumberInput';
 import { getOrderRemainingBalance } from '../utils/orderFinance';
 import { calculateCartVolumeSummary, calculateItemVolumePrice } from '../utils/volumeDiscount';
 import { 
-  LIBREVILLE_ZONE_GROUPS, 
   buildNeighborhoodDeliveryAddress,
   getNeighborhoodById, 
   detectNeighborhoodFromAddress,
   extractDeliveryInstructions,
   computeDeliveryTimeWindow
 } from '../data/librevilleZones';
+import { NeighborhoodPicker } from './NeighborhoodPicker';
 
 interface CartViewProps {
   items: CartItem[];
@@ -594,21 +594,13 @@ export const CartView: React.FC<CartViewProps> = ({
                     <MapPin className="w-3.5 h-3.5 text-[#0d44e8]" />
                     <span>Quartier de Libreville & Environs *</span>
                   </label>
-                  <select
+                  <NeighborhoodPicker
+                    id="checkout-neighborhood"
                     value={neighborhoodId}
-                    onChange={(e) => handleNeighborhoodChange(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white text-slate-900 focus:ring-2 focus:ring-[#0d44e8]"
-                  >
-                    {LIBREVILLE_ZONE_GROUPS.map((group) => (
-                      <optgroup key={group.zoneName} label={`${group.zoneName} (~${group.averageDelay})`}>
-                        {group.neighborhoods.map((n) => (
-                          <option key={n.id} value={n.id}>
-                            {n.name} · ~{n.estimatedMinutes}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
+                    onChange={handleNeighborhoodChange}
+                    placeholder="Rechercher un quartier…"
+                    className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs font-semibold text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
                 </div>
 
                 {selectedNeighborhood && (
