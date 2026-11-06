@@ -6,6 +6,7 @@ import type {
   CartItem,
   CommercialQuote,
   DirectMessage,
+  Courier,
   Order,
   Pack,
   Product,
@@ -62,6 +63,7 @@ export interface PersistentServerStore {
   notifications: AppNotification[];
   expenses?: OperatingExpense[];
   collectionReminders?: CollectionReminder[];
+  couriers?: Courier[];
   volumeDiscounts?: VolumeDiscountSettings;
   staffLogs?: StaffActivityLog[];
 }
@@ -73,6 +75,47 @@ const same = (left: unknown, right: unknown): boolean => JSON.stringify(left) ==
 const rows = (value: unknown): Row[] => Array.isArray(value) ? value as Row[] : [];
 const dataObject = (value: unknown): Row => value && typeof value === 'object' && !Array.isArray(value) ? value as Row : {};
 const numberOr = (value: unknown, fallback = 0): number => Number.isFinite(Number(value)) ? Number(value) : fallback;
+const normalizeCourierPhone = (value: unknown): string => String(value || '').replace(/\D/g, '');
+const normalizeCourier = (value: unknown): Courier | null => {
+  const raw = dataObject(value);
+  const id = String(raw.id || '').trim().slice(0, 120);
+  const name = String(raw.name || '').trim().slice(0, 120);
+  const phone = String(raw.phone || '').trim().slice(0, 40);
+  if (!id || !name || !normalizeCourierPhone(phone)) return null;
+  return {
+    id,
+    name,
+    phone,
+    vehicle: String(raw.vehicle || '').trim().slice(0, 100),
+    matricule: String(raw.matricule || '').trim().slice(0, 50),
+    currentZone: String(raw.currentZone || '').trim().slice(0, 100) || undefined,
+    estimatedTime: String(raw.estimatedTime || '').trim().slice(0, 100) || undefined,
+    active: raw.active !== false,
+    assignedOrdersCount: Number.isSafeInteger(Number(raw.assignedOrdersCount))
+      ? Math.max(0, Number(raw.assignedOrdersCount))
+      : 0,
+  };
+};
+const mergeCourierDirectories = (...groups: Array<unknown[]>): Courier[] => {
+  const byIdentity = new Map<string, Courier>();
+  for (const group of groups) {
+    for (const value of group) {
+      const courier = normalizeCourier(value);
+      if (!courier) continue;
+      const phoneKey = normalizeCourierPhone(courier.phone);
+      const existingEntry = Array.from(byIdentity.entries()).find(([, current]) =>
+        current.id === courier.id || normalizeCourierPhone(current.phone) === phoneKey
+      );
+      if (existingEntry) {
+        const [existingKey, current] = existingEntry;
+        byIdentity.set(existingKey, { ...current, ...courier, id: current.id });
+      } else {
+        byIdentity.set(courier.id, courier);
+      }
+    }
+  }
+  return Array.from(byIdentity.values());
+};
 const isEmbeddedPdf = (value: unknown): value is string =>
   typeof value === 'string' && /^data:application\/pdf(?:;[^,]+)*;base64,/i.test(value);
 const pdfUrlForDatabase = (value: unknown): string | null =>
@@ -763,9 +806,17 @@ export class SupabaseStorePersistence {
 
     const runtimeRows = rows(runtimeSettingsResult.data);
     const volumeDiscountRow = runtimeRows.find((r) => r.setting_key === 'volume_discounts');
+    const courierDirectoryRow = runtimeRows.find((r) => r.setting_key === 'couriers_directory');
     const remoteVolumeDiscounts = volumeDiscountRow?.setting_value
       ? (volumeDiscountRow.setting_value as VolumeDiscountSettings)
       : local.volumeDiscounts;
+    const savedCouriers = Array.isArray(courierDirectoryRow?.setting_value)
+      ? mergeCourierDirectories(courierDirectoryRow.setting_value)
+      : [];
+    const couriersFromOrders = remoteOrders.flatMap((order) => order.courier?.name && order.courier.phone
+      ? [{ ...order.courier, id: order.courier.courierId || `historic-${normalizeCourierPhone(order.courier.phone)}`, active: true }]
+      : []);
+    const remoteCouriers = mergeCourierDirectories(couriersFromOrders, savedCouriers);
 
     const mergedStaffLogs = mergeById(remoteActivityLogs, local.staffLogs || [], (item) => item.id)
       .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
@@ -784,6 +835,7 @@ export class SupabaseStorePersistence {
       notifications: mergeById(remoteNotifications, local.notifications, (item) => item.id),
       expenses: mergeById(remoteExpenses, local.expenses || [], (item) => item.id),
       collectionReminders: mergeById(remoteCollectionReminders, local.collectionReminders || [], (item) => item.id),
+      couriers: mergeCourierDirectories(local.couriers || [], remoteCouriers),
       volumeDiscounts: remoteVolumeDiscounts,
       staffLogs: mergedStaffLogs,
     };
@@ -800,6 +852,7 @@ export class SupabaseStorePersistence {
       notifications: remoteNotifications,
       expenses: remoteExpenses,
       collectionReminders: remoteCollectionReminders,
+      couriers: savedCouriers,
       staffLogs: remoteActivityLogs,
       volumeDiscounts: volumeDiscountRow?.setting_value
         ? volumeDiscountRow.setting_value as VolumeDiscountSettings
@@ -1019,18 +1072,25 @@ export class SupabaseStorePersistence {
     const snapshot = clone(store);
     const operation = this.queue.then(async () => {
       if (!this.baseline) throw new Error('Supabase doit être initialisé avant la première sauvegarde.');
-      await this.persistProducts(snapshot);
-      await this.persistPacks(snapshot);
+      // Resolve identity records first, then persist independent datasets in
+      // parallel. Orders follow products/accounts because their rows reference
+      // both; the remaining order-linked history follows the order write.
       await this.persistAccounts(snapshot);
-      await this.persistStaffAccounts(snapshot);
+      await Promise.all([
+        this.persistProducts(snapshot),
+        this.persistPacks(snapshot),
+        this.persistStaffAccounts(snapshot),
+        this.persistExpenses(snapshot),
+        this.persistRuntimeSettings(snapshot),
+      ]);
       await this.persistOrders(snapshot);
-      await this.persistQuotes(snapshot);
-      await this.persistExpenses(snapshot);
-      await this.persistCollectionReminders(snapshot);
-      await this.persistMessages(snapshot);
-      await this.persistNotifications(snapshot);
-      await this.persistRuntimeSettings(snapshot);
-      await this.persistActivityLogs(snapshot);
+      await Promise.all([
+        this.persistQuotes(snapshot),
+        this.persistCollectionReminders(snapshot),
+        this.persistMessages(snapshot),
+        this.persistNotifications(snapshot),
+        this.persistActivityLogs(snapshot),
+      ]);
       this.baseline = clone(snapshot);
     });
     this.queue = operation.catch(() => undefined);
@@ -1507,15 +1567,24 @@ export class SupabaseStorePersistence {
   }
 
   private async persistRuntimeSettings(store: PersistentServerStore): Promise<void> {
-    if (!store.volumeDiscounts) return;
-    if (same(this.baseline?.volumeDiscounts, store.volumeDiscounts)) return;
-    const { error } = await this.client.from('app_runtime_settings').upsert({
-      setting_key: 'volume_discounts',
-      setting_value: store.volumeDiscounts,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'setting_key' });
-    if (this.isMissingTableError(error, 'app_runtime_settings')) return;
-    assertNoError('enregistrement des paliers de remise volume', error);
+    if (store.volumeDiscounts && !same(this.baseline?.volumeDiscounts, store.volumeDiscounts)) {
+      const { error } = await this.client.from('app_runtime_settings').upsert({
+        setting_key: 'volume_discounts',
+        setting_value: store.volumeDiscounts,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'setting_key' });
+      if (this.isMissingTableError(error, 'app_runtime_settings')) return;
+      assertNoError('enregistrement des paliers de remise volume', error);
+    }
+    if (!same(this.baseline?.couriers || [], store.couriers || [])) {
+      const { error } = await this.client.from('app_runtime_settings').upsert({
+        setting_key: 'couriers_directory',
+        setting_value: mergeCourierDirectories(store.couriers || []),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'setting_key' });
+      if (this.isMissingTableError(error, 'app_runtime_settings')) return;
+      assertNoError('enregistrement de l’annuaire des coursiers', error);
+    }
   }
 
   private async persistActivityLogs(store: PersistentServerStore): Promise<void> {

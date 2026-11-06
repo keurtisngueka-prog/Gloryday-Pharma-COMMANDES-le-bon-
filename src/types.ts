@@ -149,6 +149,7 @@ export interface OrderItem {
 export type DeliveryStage = 'preparation' | 'picked_up' | 'in_transit' | 'delivered';
 
 export interface CourierInfo {
+  courierId?: string;
   name: string;
   phone: string;
   vehicle: string;

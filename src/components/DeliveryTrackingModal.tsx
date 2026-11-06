@@ -22,10 +22,11 @@ import {
   Zap,
   History
 } from 'lucide-react';
-import { Order, DeliveryStage, CourierInfo, DeliveryProof, DeliveryLocationPoint } from '../types';
+import { Order, DeliveryStage, Courier, CourierInfo, DeliveryProof, DeliveryLocationPoint } from '../types';
 import { generateWhatsAppMessageForStage, generateCourierMissionWhatsApp } from '../utils/whatsappNotifications';
 import { computeDeliveryTimeWindow, resolveOrderDestinationCoordinates } from '../data/librevilleZones';
 import { api } from '../api';
+import { normalizeCourierPhone } from '../utils/courierDirectory';
 import { LiveDeliveryMap } from './LiveDeliveryMap';
 
 interface DeliveryTrackingModalProps {
@@ -63,6 +64,9 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
   const [trackingLinkCopied, setTrackingLinkCopied] = useState(false);
   const [trackingActionError, setTrackingActionError] = useState('');
   const [trackingActionBusy, setTrackingActionBusy] = useState(false);
+  const [courierDirectory, setCourierDirectory] = useState<Courier[]>([]);
+  const [selectedCourierId, setSelectedCourierId] = useState('new');
+  const [courierDirectoryError, setCourierDirectoryError] = useState('');
   const [showDeliveryProofForm, setShowDeliveryProofForm] = useState(false);
   const [receivedBy, setReceivedBy] = useState(order.deliveryProof?.receivedBy || '');
   const [receiptReference, setReceiptReference] = useState(order.deliveryProof?.receiptReference || '');
@@ -94,6 +98,41 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
     setTrackingLinkCopied(false);
     setTrackingActionError('');
   }, [order.id]);
+
+  useEffect(() => {
+    if (!isOpen || !isAdmin) {
+      setCourierDirectory([]);
+      return;
+    }
+    let active = true;
+    void api.getCourierDirectory().then((couriers) => {
+      if (!active) return;
+      const usableCouriers = couriers.filter((courier) => courier.active !== false);
+      setCourierDirectory(usableCouriers);
+      setCourierDirectoryError('');
+      const currentPhone = normalizeCourierPhone(order.courier?.phone);
+      const current = usableCouriers.find((courier) =>
+        courier.id === order.courier?.courierId || normalizeCourierPhone(courier.phone) === currentPhone
+      );
+      if (current) {
+        setSelectedCourierId(current.id);
+        setCourierDraft({
+          courierId: current.id,
+          name: current.name,
+          phone: current.phone,
+          vehicle: current.vehicle,
+          matricule: current.matricule,
+          currentZone: current.currentZone,
+          estimatedTime: current.estimatedTime,
+        });
+      } else if (!order.courier) {
+        setSelectedCourierId('new');
+      }
+    }).catch((error) => {
+      if (active) setCourierDirectoryError(error instanceof Error ? error.message : 'Impossible de charger l’annuaire des coursiers.');
+    });
+    return () => { active = false; };
+  }, [isOpen, isAdmin, order.id, order.courier?.courierId, order.courier?.phone]);
 
   useEffect(() => {
     if (!isOpen || order.status === 'Livrée' || order.status === 'Annulée') {
@@ -374,6 +413,25 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
     } finally {
       setIsUpdating(false);
     }
+  };
+
+  const handleCourierSelection = (courierId: string) => {
+    setSelectedCourierId(courierId);
+    if (courierId === 'new') {
+      setCourierDraft({ name: '', phone: '', vehicle: '', matricule: '', currentZone: '', estimatedTime: '' });
+      return;
+    }
+    const courier = courierDirectory.find((entry) => entry.id === courierId);
+    if (!courier) return;
+    setCourierDraft({
+      courierId: courier.id,
+      name: courier.name,
+      phone: courier.phone,
+      vehicle: courier.vehicle,
+      matricule: courier.matricule,
+      currentZone: courier.currentZone,
+      estimatedTime: courier.estimatedTime,
+    });
   };
 
   const handleCopyPhone = () => {
@@ -907,6 +965,21 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
               {['Confirmée', 'En préparation'].includes(order.status) && (
                 <div className="rounded-xl border border-purple-200 bg-white p-3 space-y-2">
                   <strong className="block text-xs text-slate-800">Affecter le coursier</strong>
+                  <select
+                    aria-label="Choisir un coursier déjà enregistré"
+                    value={selectedCourierId}
+                    onChange={(event) => handleCourierSelection(event.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs"
+                  >
+                    <option value="new">Nouveau coursier — saisir ses informations</option>
+                    {courierDirectory.map((courier) => (
+                      <option key={courier.id} value={courier.id}>
+                        {courier.name} · {courier.phone}{courier.matricule ? ` · ${courier.matricule}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-500">Un nouveau coursier saisi ici sera enregistré dans l’annuaire lors de son affectation. Ensuite, tu pourras le sélectionner sans ressaisir sa plaque ni son téléphone.</p>
+                  {courierDirectoryError && <p role="status" className="text-[11px] text-amber-700">Annuaire indisponible : saisie manuelle possible. {courierDirectoryError}</p>}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <input aria-label="Nom du coursier" value={courierDraft.name} onChange={event => setCourierDraft(previous => ({ ...previous, name: event.target.value }))} placeholder="Nom du coursier" className="rounded-lg border border-slate-300 px-3 py-2 text-xs" />
                     <input aria-label="Téléphone du coursier" value={courierDraft.phone} onChange={event => setCourierDraft(previous => ({ ...previous, phone: event.target.value }))} placeholder="Téléphone du coursier" className="rounded-lg border border-slate-300 px-3 py-2 text-xs" />

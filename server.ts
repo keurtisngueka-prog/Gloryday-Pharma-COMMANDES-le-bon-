@@ -56,6 +56,7 @@ import type {
   OperatingExpense,
   OperatingExpenseCategory,
   CollectionReminder,
+  Courier,
   OrderDraft,
   CollectionReminderChannel,
   CollectionReminderOutcome
@@ -86,6 +87,7 @@ type StoredDeliveryTrackingSession = { token?: string; tokenHash: string; expire
 type ServerStore = PersistentServerStore & {
   expenses: OperatingExpense[];
   collectionReminders: CollectionReminder[];
+  couriers: Courier[];
   stockMovements: StockMovement[];
   stockBatches: StockBatch[];
   clientWorkspaces?: Record<string, ClientWorkspace>;
@@ -125,6 +127,26 @@ function cleanUser(user: User): User {
 
 function normalizePhone(p: string): string {
   return (p || '').replace(/[\s\-\.\(\)]/g, '').toLowerCase();
+}
+
+function upsertCourierDirectory(store: ServerStore, info: CourierInfo): CourierInfo {
+  const phoneKey = info.phone.replace(/\D/g, '');
+  const existing = (store.couriers || []).find(courier =>
+    (info.courierId && courier.id === info.courierId) || courier.phone.replace(/\D/g, '') === phoneKey
+  );
+  const saved: Courier = {
+    id: existing?.id || randomUUID(),
+    name: info.name,
+    phone: info.phone,
+    vehicle: info.vehicle,
+    matricule: info.matricule,
+    currentZone: info.currentZone,
+    estimatedTime: info.estimatedTime,
+    active: existing?.active ?? true,
+    assignedOrdersCount: existing?.assignedOrdersCount || 0,
+  };
+  store.couriers = [saved, ...(store.couriers || []).filter(courier => courier.id !== saved.id)];
+  return { ...info, courierId: saved.id };
 }
 
 function normalizeStaffIdentifier(value: unknown): string {
@@ -277,6 +299,7 @@ function loadStore(): ServerStore {
         notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
         expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
         collectionReminders: Array.isArray(parsed.collectionReminders) ? parsed.collectionReminders : [],
+        couriers: Array.isArray(parsed.couriers) ? parsed.couriers : [],
         stockMovements: Array.isArray(parsed.stockMovements) ? parsed.stockMovements : [],
         stockBatches: Array.isArray(parsed.stockBatches) ? parsed.stockBatches : [],
         clientWorkspaces: parsed.clientWorkspaces && typeof parsed.clientWorkspaces === 'object' && !Array.isArray(parsed.clientWorkspaces)
@@ -315,6 +338,7 @@ function loadStore(): ServerStore {
     notifications: [],
     expenses: [],
     collectionReminders: [],
+    couriers: [],
     stockMovements: [],
     stockBatches: [],
     clientWorkspaces: {},
@@ -498,6 +522,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         ...hydratedStore,
         expenses: hydratedStore.expenses || [],
         collectionReminders: hydratedStore.collectionReminders || [],
+        couriers: hydratedStore.couriers || [],
         stockMovements: hydratedStore.stockMovements || [],
         stockBatches: hydratedStore.stockBatches || []
       };
@@ -830,6 +855,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       allowed = method === 'PATCH' && hasStockPermission(user, 'stock_batches_manage');
     } else if (route === '/admin/stock/receive') {
       allowed = method === 'POST' && hasStockPermission(user, 'stock_receive');
+    } else if (route === '/admin/couriers') {
+      allowed = method === 'GET'
+        ? hasPerm('logistics_view') || hasPerm('logistics_manage')
+        : method === 'PUT' && hasPerm('logistics_manage');
     } else if (route === '/admin/collection-reminders') {
       allowed = method === 'GET'
         ? hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('receivables_reminders_manage')
@@ -1847,6 +1876,57 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       .sort((left, right) => right.date.localeCompare(left.date) || right.createdAt.localeCompare(left.createdAt));
     res.json(expenses);
   });
+
+  app.get('/api/admin/couriers', (_req, res) => {
+    const couriers = (store.couriers || []).map(courier => ({
+      ...courier,
+      assignedOrdersCount: store.orders.filter(order =>
+        order.status !== 'Livrée' && order.status !== 'Annulée' && (
+          order.courier?.courierId === courier.id || (order.courier?.phone || '').replace(/\D/g, '') === courier.phone.replace(/\D/g, '')
+        )
+      ).length,
+    }));
+    res.json(couriers);
+  });
+
+  app.put('/api/admin/couriers', asyncHandler(async (req, res) => {
+    const rawCouriers = req.body?.couriers;
+    if (!Array.isArray(rawCouriers) || rawCouriers.length > 100) {
+      res.status(400).json({ error: 'La liste des coursiers est invalide.' });
+      return;
+    }
+    const normalizedCouriers: CourierInfo[] = [];
+    for (const raw of rawCouriers) {
+      const name = typeof raw?.name === 'string' ? raw.name.trim().slice(0, 120) : '';
+      const phone = typeof raw?.phone === 'string' ? raw.phone.trim().slice(0, 40) : '';
+      if (!name || !phone || !normalizePhone(phone).replace(/\D/g, '')) {
+        res.status(400).json({ error: 'Chaque coursier doit avoir un nom et un numéro valides.' });
+        return;
+      }
+      normalizedCouriers.push({
+        courierId: typeof raw.id === 'string' ? raw.id.trim().slice(0, 120) : undefined,
+        name,
+        phone,
+        vehicle: typeof raw.vehicle === 'string' ? raw.vehicle.trim().slice(0, 100) : '',
+        matricule: typeof raw.matricule === 'string' ? raw.matricule.trim().slice(0, 50) : '',
+        currentZone: typeof raw.currentZone === 'string' ? raw.currentZone.trim().slice(0, 100) : undefined,
+        estimatedTime: typeof raw.estimatedTime === 'string' ? raw.estimatedTime.trim().slice(0, 100) : undefined,
+      });
+    }
+    for (const courier of normalizedCouriers) upsertCourierDirectory(store, courier);
+    const actor = (req as AuthenticatedRequest).authenticatedUser!;
+    appendStaffLog(actor, {
+      category: 'orders',
+      severity: 'info',
+      actionLabel: 'Mise à jour de l’annuaire des coursiers',
+      targetType: 'settings',
+      targetId: 'couriers-directory',
+      targetLabel: `${store.couriers.length} coursier(s)`,
+      details: `${normalizedCouriers.length} fiche(s) de coursier importée(s) ou actualisée(s).`,
+    });
+    await saveStore(store, persistence);
+    res.json(store.couriers);
+  }));
 
   app.get('/api/admin/collection-reminders', asyncHandler(async (req, res) => {
     const user = (req as AuthenticatedRequest).authenticatedUser!;
@@ -4127,6 +4207,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
 
     if (courierToSave) {
+      courierToSave = upsertCourierDirectory(store, courierToSave);
       order.courier = courierToSave;
       courierChanged = true;
     }
@@ -4367,13 +4448,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       }
       if (body.courier === null) {
         order.courier = undefined;
-      } else if (typeof body.courier === 'object' && typeof body.courier.name === 'string' && body.courier.name.trim()) {
-        order.courier = {
+      } else if (typeof body.courier === 'object' && typeof body.courier.name === 'string' && body.courier.name.trim() &&
+          typeof body.courier.phone === 'string' && body.courier.phone.trim()) {
+        order.courier = upsertCourierDirectory(store, {
+          courierId: typeof body.courier.courierId === 'string' ? body.courier.courierId.trim().slice(0, 120) : undefined,
           name: body.courier.name.trim().slice(0, 120),
-          phone: typeof body.courier.phone === 'string' ? body.courier.phone.trim().slice(0, 40) : '',
+          phone: body.courier.phone.trim().slice(0, 40),
           vehicle: typeof body.courier.vehicle === 'string' ? body.courier.vehicle.trim().slice(0, 80) : '',
           matricule: typeof body.courier.matricule === 'string' ? body.courier.matricule.trim().slice(0, 80) : '',
-        };
+          currentZone: '',
+        });
       } else {
         res.status(400).json({ error: 'Les informations du coursier sont invalides.' });
         return;

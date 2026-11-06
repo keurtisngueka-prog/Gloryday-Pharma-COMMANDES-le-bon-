@@ -1,63 +1,57 @@
 import { Courier } from '../types';
 
 const COURIERS_STORAGE_KEY = 'gloryday_couriers_directory_v1';
+const LEGACY_DEMO_COURIER_PHONES: Record<string, string> = {
+  'cour-1': '24174123456',
+  'cour-2': '24165987654',
+  'cour-3': '24177889900',
+  'cour-4': '24166112233',
+};
 
-export const INITIAL_COURIERS: Courier[] = [
-  {
-    id: 'cour-1',
-    name: 'Jean-Marc Mba',
-    phone: '+241 74 12 34 56',
-    vehicle: 'Moto Yamaha YBR 125 (Caisson isotherme médical)',
-    matricule: 'GA-8942-LBV',
-    active: true,
-    assignedOrdersCount: 2
-  },
-  {
-    id: 'cour-2',
-    name: 'Paul-Arnaud Nguema',
-    phone: '+241 65 98 76 54',
-    vehicle: 'Fourgonnette Peugeot Partner Climatique',
-    matricule: 'GA-3120-LBV',
-    active: true,
-    assignedOrdersCount: 1
-  },
-  {
-    id: 'cour-3',
-    name: 'Brice Obame',
-    phone: '+241 77 88 99 00',
-    vehicle: 'Moto Honda CB125F (Urgences Bloc & Labo)',
-    matricule: 'GA-5501-LBV',
-    active: true,
-    assignedOrdersCount: 3
-  },
-  {
-    id: 'cour-4',
-    name: 'Éric Ondo',
-    phone: '+241 66 11 22 33',
-    vehicle: 'Pick-up Toyota Hilux (Gros volumes & Hôpitaux régionaux)',
-    matricule: 'GA-7840-LBV',
-    active: true,
-    assignedOrdersCount: 0
-  }
-];
+export function normalizeCourierPhone(phone: string | undefined): string {
+  return String(phone || '').replace(/\D/g, '');
+}
 
-export function getCouriers(): Courier[] {
+/**
+ * Returns genuine records saved by an older browser-only version so they can
+ * be copied once into the shared server directory. The old hard-coded demo
+ * couriers are deliberately excluded.
+ */
+export function getLegacyCouriersForMigration(): Courier[] {
   try {
-    const raw = localStorage.getItem(COURIERS_STORAGE_KEY);
-    if (!raw) {
-      localStorage.setItem(COURIERS_STORAGE_KEY, JSON.stringify(INITIAL_COURIERS));
-      return INITIAL_COURIERS;
-    }
-    return JSON.parse(raw);
+    if (typeof window === 'undefined') return [];
+    const raw = window.localStorage.getItem(COURIERS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((value): Courier[] => {
+      if (!value || typeof value !== 'object') return [];
+      const entry = value as Partial<Courier>;
+      const id = String(entry.id || '').trim();
+      const name = String(entry.name || '').trim();
+      const phone = String(entry.phone || '').trim();
+      const phoneKey = normalizeCourierPhone(phone);
+      if (!id || !name || !phoneKey || LEGACY_DEMO_COURIER_PHONES[id] === phoneKey) return [];
+      return [{
+        id,
+        name: name.slice(0, 120),
+        phone: phone.slice(0, 40),
+        vehicle: String(entry.vehicle || '').trim().slice(0, 100),
+        matricule: String(entry.matricule || '').trim().slice(0, 50),
+        currentZone: String(entry.currentZone || '').trim().slice(0, 100) || undefined,
+        estimatedTime: String(entry.estimatedTime || '').trim().slice(0, 100) || undefined,
+        active: entry.active !== false,
+      }];
+    });
   } catch {
-    return INITIAL_COURIERS;
+    return [];
   }
 }
 
-export function saveCouriers(couriers: Courier[]): void {
+export function clearLegacyCourierDirectory(): void {
   try {
-    localStorage.setItem(COURIERS_STORAGE_KEY, JSON.stringify(couriers));
-  } catch (err) {
-    console.error('Erreur save couriers:', err);
+    if (typeof window !== 'undefined') window.localStorage.removeItem(COURIERS_STORAGE_KEY);
+  } catch {
+    // The shared server directory remains the source of truth.
   }
 }

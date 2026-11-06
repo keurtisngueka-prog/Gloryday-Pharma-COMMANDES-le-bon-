@@ -15,6 +15,7 @@ import {
   CourierInfo,
   DeliveryProof,
   DeliveryLocationPoint,
+  Courier,
   CourierTrackingInfo,
   StaffPermission,
   VolumeDiscountSettings,
@@ -29,6 +30,7 @@ import {
   CollectionReminderOutcome
 } from './types';
 import type { PushSubscriptionPayload } from './utils/pushNotifications';
+import { clearLegacyCourierDirectory, getLegacyCouriersForMigration } from './utils/courierDirectory';
 
 export type StaffRole = Extract<AppRole, 'Admin simple' | 'Commercial' | 'Gestionnaire Catalogue' | 'Logistique'>;
 
@@ -612,6 +614,25 @@ export const api = {
 
   async getOperatingExpenses(): Promise<OperatingExpense[]> {
     return request<OperatingExpense[]>('/api/admin/expenses');
+  },
+
+  async getCourierDirectory(): Promise<Courier[]> {
+    const couriers = await request<Courier[]>('/api/admin/couriers');
+    const legacyCouriers = getLegacyCouriersForMigration();
+    if (legacyCouriers.length === 0) return couriers;
+    const migrated = await request<Courier[]>('/api/admin/couriers', {
+      method: 'PUT',
+      body: JSON.stringify({ couriers: legacyCouriers }),
+    });
+    clearLegacyCourierDirectory();
+    return migrated;
+  },
+
+  async saveCourierDirectory(couriers: Courier[]): Promise<Courier[]> {
+    return request<Courier[]>('/api/admin/couriers', {
+      method: 'PUT',
+      body: JSON.stringify({ couriers }),
+    });
   },
 
   async createOperatingExpense(input: {

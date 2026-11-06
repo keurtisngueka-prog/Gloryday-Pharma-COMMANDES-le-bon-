@@ -964,21 +964,18 @@ export default function App() {
   };
 
   const handleAdminCreatePack = async (packData: Omit<Pack, 'id'>) => {
-    await api.createPack(packData);
-    const updated = await api.getPacks();
-    setPacks(updated);
+    const savedPack = await api.createPack(packData);
+    setPacks(prev => [savedPack, ...prev.filter(pack => pack.id !== savedPack.id)]);
   };
 
   const handleAdminUpdatePack = async (id: string, packData: Partial<Pack>) => {
-    await api.updatePack(id, packData);
-    const updated = await api.getPacks();
-    setPacks(updated);
+    const savedPack = await api.updatePack(id, packData);
+    setPacks(prev => prev.map(pack => pack.id === id ? savedPack : pack));
   };
 
   const handleAdminDeletePack = async (id: string) => {
     await api.deletePack(id);
-    const updated = await api.getPacks();
-    setPacks(updated);
+    setPacks(prev => prev.filter(pack => pack.id !== id));
   };
 
   const handleAdminToggleStock = async (productId: string, currentStatus: 'disponible' | 'rupture') => {

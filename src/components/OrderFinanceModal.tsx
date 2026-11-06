@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   X, 
   CreditCard, 
@@ -16,9 +16,10 @@ import {
 } from 'lucide-react';
 import { Order, User, Courier, PaymentInstallment, InvoiceRecord } from '../types';
 import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
-import { getCouriers } from '../utils/courierDirectory';
+import { normalizeCourierPhone } from '../utils/courierDirectory';
 import { logAuditEvent } from '../utils/auditLogger';
 import { downloadDeliveryNotePdf, downloadInvoiceProjectPdf } from '../utils/pdfGenerator';
+import { api } from '../api';
 
 interface OrderFinanceModalProps {
   order: Order;
@@ -61,7 +62,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   const [activeTab, setActiveTab] = useState<'installments' | 'invoices' | 'delivery' | 'partial'>(availableTabs[0] || 'invoices');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
-  const couriers: Courier[] = getCouriers();
+  const [couriers, setCouriers] = useState<Courier[]>([]);
+  const [courierDirectoryError, setCourierDirectoryError] = useState('');
 
   // Installment State
   const [installmentAmount, setInstallmentAmount] = useState<number>(Math.round(order.estimatedTotal / 2));
@@ -80,7 +82,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   const [deliveryNoteError, setDeliveryNoteError] = useState('');
 
   // Delivery Proof State
-  const [selectedCourierId, setSelectedCourierId] = useState(order.courier?.matricule || couriers[0]?.id || '');
+  const [selectedCourierId, setSelectedCourierId] = useState(order.courier?.courierId || '');
   const [receivedByName, setReceivedByName] = useState(order.deliveryProof?.receivedBy || order.customer.contactName || '');
   const [signatureText, setSignatureText] = useState(order.deliveryProof?.signatureUrl || 'Émargé sur bon de livraison papier');
   const [photoProof, setPhotoProof] = useState(order.deliveryProof?.photoUrl || '');
@@ -88,6 +90,25 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   // Partial Delivery State
   const [isPartial, setIsPartial] = useState(order.isPartialDelivery || false);
   const [partialNotes, setPartialNotes] = useState(order.partialDeliveryNotes || '');
+
+  useEffect(() => {
+    if (!canManageLogistics) return;
+    let active = true;
+    void api.getCourierDirectory().then((directory) => {
+      if (!active) return;
+      const activeCouriers = directory.filter((courier) => courier.active !== false);
+      setCouriers(activeCouriers);
+      setCourierDirectoryError('');
+      const currentPhone = normalizeCourierPhone(order.courier?.phone);
+      const selected = activeCouriers.find((courier) =>
+        courier.id === order.courier?.courierId || normalizeCourierPhone(courier.phone) === currentPhone
+      );
+      setSelectedCourierId(selected?.id || activeCouriers[0]?.id || '');
+    }).catch((error) => {
+      if (active) setCourierDirectoryError(error instanceof Error ? error.message : 'Impossible de charger l’annuaire des coursiers.');
+    });
+    return () => { active = false; };
+  }, [canManageLogistics, order.id, order.courier?.courierId, order.courier?.phone]);
 
   const totalPaid = getOrderPaidAmount(order);
   const remainingDue = getOrderRemainingBalance(order);
@@ -247,6 +268,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     const updatedOrder: Order = {
       ...order,
       courier: courierFound ? {
+        courierId: courierFound.id,
         name: courierFound.name,
         phone: courierFound.phone,
         vehicle: courierFound.vehicle,
@@ -607,12 +629,14 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                   onChange={(e) => setSelectedCourierId(e.target.value)}
                   className="w-full p-2 border border-slate-300 rounded-xl bg-white font-medium"
                 >
+                  {couriers.length === 0 && <option value="">Aucun coursier enregistré — affectez-en un dans le suivi livraison</option>}
                   {couriers.map(c => (
                     <option key={c.id} value={c.id}>
-                      {c.name} · {c.phone} ({c.vehicle} - {c.matricule})
+                      {c.name} · {c.phone}{c.vehicle ? ` (${c.vehicle}` : ''}{c.matricule ? `${c.vehicle ? ' · ' : ' ('}${c.matricule}` : ''}{c.vehicle || c.matricule ? ')' : ''}
                     </option>
                   ))}
                 </select>
+                {courierDirectoryError && <p role="status" className="mt-1 text-[11px] text-amber-700">Annuaire indisponible : {courierDirectoryError}</p>}
               </div>
 
               <div>
