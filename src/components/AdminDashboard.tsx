@@ -1284,7 +1284,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               products={products}
               canManageInvoices={canManageFinance}
               onClose={() => setIsCreateOrderModalOpen(false)}
-              onOrderCreated={onOrderCreated}
+              onOrderCreated={(order) => {
+                // New staff-created orders start as "À confirmer". Clear any
+                // existing search/financial filters so the saved order is visible
+                // as soon as the confirmation dialog is closed.
+                setSearchQuery('');
+                setOrderStatusFilter('to_confirm');
+                setFinancialFilter('all');
+                onOrderCreated(order);
+              }}
               onViewOrderPdf={onViewOrderPdf}
             />
           )}

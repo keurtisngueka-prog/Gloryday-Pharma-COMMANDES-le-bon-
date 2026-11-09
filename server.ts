@@ -3354,6 +3354,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   }));
 
   app.post('/api/orders', asyncHandler(async (req, res) => {
+    const orderRequestStartedAt = Date.now();
+    let productRefreshDurationMs = 0;
+    let atomicSaveDurationMs = 0;
     const user = (req as AuthenticatedRequest).authenticatedUser!;
     const requestedClientId = typeof req.body?.clientId === 'string' ? req.body.clientId.trim().slice(0, 120) : '';
     const isStaffOrderCreation = user.role !== 'client';
@@ -3404,7 +3407,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       const requestedProductIds = requestedItems
         .map((item: unknown) => String((item as { productId?: unknown } | null)?.productId || '').trim())
         .filter(Boolean);
+      const productRefreshStartedAt = Date.now();
       const latestProducts = await persistence.loadProductsByIds(requestedProductIds);
+      productRefreshDurationMs = Date.now() - productRefreshStartedAt;
       const productsById = new Map(store.products.map((product) => [product.id, product]));
       for (const product of latestProducts) productsById.set(product.id, product);
       store.products = Array.from(productsById.values());
@@ -3639,7 +3644,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
 
     let orderToSave = newOrder;
     if (persistence) {
+      const atomicSaveStartedAt = Date.now();
       const atomicResult = await persistence.createOrderAtomically(newOrder, store);
+      atomicSaveDurationMs = Date.now() - atomicSaveStartedAt;
       if (!atomicResult.created) {
         res.status(200).json(atomicResult.order);
         return;
@@ -3763,6 +3770,12 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       await sideEffectsPromise;
       scheduleBackgroundTask(pushPromise, `notification Push de la commande ${orderToSave.reference}`);
     }
+    console.info('[api/orders] création terminée', {
+      productRefreshMs: productRefreshDurationMs,
+      atomicSaveMs: atomicSaveDurationMs,
+      responseReadyMs: Date.now() - orderRequestStartedAt,
+      sideEffectsDeferred: Boolean(persistence && process.env.VERCEL),
+    });
     res.status(201).json(orderToSave);
   }));
 

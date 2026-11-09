@@ -505,7 +505,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="p-5 overflow-y-auto space-y-4 flex-1 text-xs">
+        <form onSubmit={handleSubmit} className="min-h-0 p-5 overflow-y-auto space-y-4 flex-1 text-xs">
           <div>
             <label className="block font-bold text-slate-700 uppercase mb-1">
               Désignation de l'article *
@@ -1136,7 +1136,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           </div>
 
           {/* Footer */}
-          <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+          <div className="sticky bottom-0 -mx-5 bg-white/95 px-5 pb-1 pt-3 flex justify-end gap-2 border-t border-slate-100 backdrop-blur">
             <button
               type="button"
               onClick={() => {
