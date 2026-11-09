@@ -58,6 +58,9 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
   const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
   const [movementsLoading, setMovementsLoading] = useState(true);
   const [movementsError, setMovementsError] = useState('');
+  const [movementProductId, setMovementProductId] = useState('');
+  const [movementOffset, setMovementOffset] = useState(0);
+  const [movementHasMore, setMovementHasMore] = useState(false);
   const [batchQuery, setBatchQuery] = useState('');
   const [batchFilter, setBatchFilter] = useState<'all' | 'expiring' | 'expired' | 'quarantine'>('all');
   const [periodFilter, setPeriodFilter] = useState<'7' | '30' | '90' | 'all'>('30');
@@ -80,11 +83,14 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
     }
   };
 
-  const loadMovements = async () => {
+  const loadMovements = async (productId = movementProductId || undefined, offset = 0, append = false) => {
     setMovementsLoading(true);
     setMovementsError('');
     try {
-      setStockMovements(await api.getStockMovements());
+      const result = await api.getStockMovementsPage(productId, offset, 200);
+      setStockMovements(previous => append ? [...previous, ...result.movements] : result.movements);
+      setMovementOffset(offset);
+      setMovementHasMore(result.hasMore);
     } catch (error) {
       setMovementsError(error instanceof Error ? error.message : 'Le journal des mouvements est indisponible.');
     } finally {
@@ -92,7 +98,7 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
     }
   };
 
-  useEffect(() => { void loadBatches(); void loadMovements(); }, []);
+  useEffect(() => { void loadBatches(); void loadMovements(undefined, 0, false); }, []);
 
   const categories = ['Toutes', ...Array.from(new Set(products.map(p => p.category)))];
 
@@ -189,13 +195,14 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
 
   const filteredMovements = useMemo(() => stockMovements.filter(movement => {
     if (!isWithinSelectedPeriod(movement.date)) return false;
+    if (movementProductId && movement.productId !== movementProductId) return false;
     const product = products.find(item => item.id === movement.productId);
     if (categoryFilter !== 'Toutes' && product?.category !== categoryFilter) return false;
     if (searchQuery.trim() && product && !matchesProductSearch(product, searchQuery)) return false;
     const query = batchQuery.trim().toLocaleLowerCase('fr');
     return !query || [movement.productName, movement.lotNumber, movement.reference, movement.performedBy, movement.reason]
       .some(value => String(value || '').toLocaleLowerCase('fr').includes(query));
-  }).slice(0, 100), [stockMovements, products, categoryFilter, searchQuery, batchQuery, periodFilter]);
+  }), [stockMovements, products, categoryFilter, searchQuery, batchQuery, periodFilter, movementProductId]);
 
   const exportStockWorkbook = async () => {
     setExportError('');
@@ -712,11 +719,28 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
       </section>
 
       <section className="overflow-hidden rounded-3xl border border-slate-200/90 bg-white shadow-2xs">
-        <header className="border-b border-slate-100 bg-slate-50/60 p-4 sm:p-5">
-          <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">
-            <ArrowUpDown className="h-4 w-4 text-blue-700" /> Journal des mouvements ({filteredMovements.length})
-          </h3>
-          <p className="mt-1 text-[11px] text-slate-500">Réceptions, sorties de commandes, retours, pertes et ajustements, avec l’opérateur et les quantités avant/après.</p>
+        <header className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/60 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div>
+            <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">
+              <ArrowUpDown className="h-4 w-4 text-blue-700" /> Journal des mouvements ({filteredMovements.length})
+            </h3>
+            <p className="mt-1 text-[11px] text-slate-500">Filtrez un produit pour consulter son historique individuel. Les mouvements arrivent par pages pour garder l’écran rapide.</p>
+          </div>
+          <select
+            aria-label="Afficher les mouvements d’un produit"
+            value={movementProductId}
+            onChange={event => {
+              const productId = event.target.value;
+              setMovementProductId(productId);
+              void loadMovements(productId || undefined, 0, false);
+            }}
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 sm:max-w-sm"
+          >
+            <option value="">Tous les produits — dernières opérations</option>
+            {[...products].sort((a, b) => a.name.localeCompare(b.name, 'fr')).map(product => (
+              <option key={product.id} value={product.id}>{product.name}</option>
+            ))}
+          </select>
         </header>
         {movementsError ? (
           <div role="alert" className="m-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900">{movementsError}</div>
@@ -761,6 +785,17 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {!movementsLoading && movementHasMore && (
+          <div className="border-t border-slate-100 p-3 text-center">
+            <button
+              type="button"
+              onClick={() => void loadMovements(movementProductId || undefined, movementOffset + 200, true)}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+            >
+              Charger les mouvements plus anciens
+            </button>
           </div>
         )}
       </section>

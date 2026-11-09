@@ -34,7 +34,7 @@ export interface StoredUserAccount {
   passwordHash: string;
 }
 
-export type StaffRole = Extract<AppRole, 'Admin simple' | 'Commercial' | 'Gestionnaire Catalogue' | 'Logistique'>;
+export type StaffRole = Extract<AppRole, 'Admin simple' | 'Commercial' | 'Gestionnaire Catalogue' | 'Logistique' | 'Secrétaire'>;
 
 export interface ManagedStaffAccount {
   id: string;
@@ -278,12 +278,15 @@ export class SupabaseStorePersistence {
     return Number(dataObject(data).setting_value && dataObject(dataObject(data).setting_value).version) >= 1;
   }
 
-  async listStockMovements(productId?: string): Promise<StockMovement[]> {
+  async listStockMovements(productId?: string, offset = 0, limit = 200): Promise<{ movements: StockMovement[]; hasMore: boolean }> {
     let query = this.client.from('stock_movements').select('*');
     if (productId) query = query.eq('product_id', productId);
-    const { data, error } = await query.order('created_at', { ascending: false }).limit(200);
+    const safeOffset = Math.max(0, Math.trunc(offset));
+    const safeLimit = Math.min(500, Math.max(1, Math.trunc(limit)));
+    const { data, error } = await query.order('created_at', { ascending: false }).range(safeOffset, safeOffset + safeLimit);
     assertNoError('lecture des mouvements de stock', error);
-    return rows(data).map(stockMovementFromRow);
+    const page = rows(data);
+    return { movements: page.slice(0, safeLimit).map(stockMovementFromRow), hasMore: page.length > safeLimit };
   }
 
   async listStockBatches(productId?: string): Promise<StockBatch[]> {

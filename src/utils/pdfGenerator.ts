@@ -1,4 +1,5 @@
 import { InvoiceRecord, Order } from '../types';
+import { getOrderPaidAmount, getOrderRemainingBalance } from './orderFinance';
 
 export const formatPdfAmount = (amount: number): string =>
   `${Number.isFinite(amount) ? Math.round(amount) : 0}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
@@ -514,8 +515,11 @@ export async function generateInvoiceProjectPdf(
     doc.text('Distribution médicale · Libreville, Gabon', margin, 21);
   }
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.text('Libreville, Gabon', pageWidth - margin, 21, { align: 'right' });
+  doc.setFontSize(7);
+  doc.text(text('NIF : 250301 T'), pageWidth - margin, 8, { align: 'right' });
+  doc.text(text('RCCM : GA.LBV-01 2021-A10-00629'), pageWidth - margin, 13, { align: 'right' });
+  doc.text(text('BP 20350 · Libreville, Gabon'), pageWidth - margin, 18, { align: 'right' });
+  doc.text(text('+241 77 00 30 04 · +241 66 24 03 99'), pageWidth - margin, 23, { align: 'right' });
 
   doc.setTextColor(150, 65, 0);
   doc.setFillColor(255, 247, 237);
@@ -555,16 +559,25 @@ export async function generateInvoiceProjectPdf(
   if (order.customer.secondaryPhone) doc.text(text(`2e téléphone : ${order.customer.secondaryPhone}`), margin + 4, 100);
   doc.text(text(`Adresse : ${order.customer.deliveryAddress || 'Non renseignée'}`), margin + 4, 105);
 
+  const referenceX = margin + 3;
+  const designationX = margin + 23;
+  const quantityX = margin + 111;
+  const unitPriceX = margin + 140;
+  const discountX = margin + 159;
+  const totalX = pageWidth - margin - 3;
   const drawTableHeader = (top: number) => {
     doc.setFillColor(blue[0], blue[1], blue[2]);
     doc.rect(margin, top, contentWidth, 8, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
-    doc.text('Désignation', margin + 4, top + 5.5);
-    doc.text('Qté', 126, top + 5.5, { align: 'center' });
-    doc.text('Prix unitaire (FCFA)', 158, top + 5.5, { align: 'right' });
-    doc.text('Total (FCFA)', pageWidth - margin - 4, top + 5.5, { align: 'right' });
+    doc.setFontSize(7);
+    doc.text('Réf.', referenceX, top + 5.5);
+    doc.text('Désignation', designationX, top + 5.5);
+    doc.text('Qté', quantityX, top + 5.5, { align: 'center' });
+    doc.text('P.U. TTC', unitPriceX, top + 5.5, { align: 'right' });
+    doc.text('Remise', discountX, top + 5.5, { align: 'right' });
+    doc.text('Total TTC', totalX, top + 5.5, { align: 'right' });
   };
 
   let y = 117;
@@ -576,7 +589,7 @@ export async function generateInvoiceProjectPdf(
       : text(item.productName || 'Article');
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
-    const labelLines = doc.splitTextToSize(label, 96);
+    const labelLines = doc.splitTextToSize(label, 66);
     const rowHeight = Math.max(8, labelLines.length * 4.2 + 3.5);
     if (y + rowHeight > pageHeight - 28) {
       doc.addPage();
@@ -591,38 +604,113 @@ export async function generateInvoiceProjectPdf(
     doc.setDrawColor(226, 232, 240);
     doc.line(margin, y + rowHeight, pageWidth - margin, y + rowHeight);
     doc.setTextColor(ink[0], ink[1], ink[2]);
-    doc.text(labelLines, margin + 4, y + 5.2);
+    doc.text(text(item.productId ? item.productId.slice(-8).toUpperCase() : `L${index + 1}`), referenceX, y + 5.2);
+    doc.text(labelLines, designationX, y + 5.2);
     const valueY = y + Math.min(rowHeight - 1.5, Math.max(5.2, rowHeight / 2 + 1));
-    doc.text(String(item.quantity), 126, valueY, { align: 'center' });
+    doc.text(String(item.quantity), quantityX, valueY, { align: 'center' });
     if (item.isQuote) {
       doc.setTextColor(180, 83, 9);
-      doc.text('Sur devis', 158, valueY, { align: 'right' });
-      doc.text('Sur devis', pageWidth - margin - 4, valueY, { align: 'right' });
+      doc.text('Sur devis', unitPriceX, valueY, { align: 'right' });
+      doc.text('—', discountX, valueY, { align: 'right' });
+      doc.text('Sur devis', totalX, valueY, { align: 'right' });
     } else {
       const unitPrice = Number(item.price) || 0;
       const lineTotal = Number(item.total) || unitPrice * (Number(item.quantity) || 1);
-      doc.text(formatPdfAmount(unitPrice), 158, valueY, { align: 'right' });
-      doc.text(formatPdfAmount(lineTotal), pageWidth - margin - 4, valueY, { align: 'right' });
+      doc.text(formatPdfAmount(unitPrice), unitPriceX, valueY, { align: 'right' });
+      doc.text(formatPdfAmount(Number(item.savings) || 0), discountX, valueY, { align: 'right' });
+      doc.text(formatPdfAmount(lineTotal), totalX, valueY, { align: 'right' });
     }
     y += rowHeight;
   });
 
+  const deliveryFee = Math.max(0, Math.trunc(Number(order.deliveryFee ?? order.customer.deliveryFee) || 0));
+  if (deliveryFee > 0) {
+    const rowHeight = 8;
+    if (y + rowHeight > pageHeight - 28) {
+      doc.addPage();
+      y = 20;
+      drawTableHeader(y);
+      y += 8;
+    }
+    doc.setFillColor(248, 250, 252);
+    doc.rect(margin, y, contentWidth, rowHeight, 'F');
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, y + rowHeight, pageWidth - margin, y + rowHeight);
+    doc.setTextColor(ink[0], ink[1], ink[2]);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text('LIVRAISON', referenceX, y + 5.2);
+    doc.text('Frais de livraison', designationX, y + 5.2);
+    doc.text('1', quantityX, y + 5.2, { align: 'center' });
+    doc.text(formatPdfAmount(deliveryFee), unitPriceX, y + 5.2, { align: 'right' });
+    doc.text('0', discountX, y + 5.2, { align: 'right' });
+    doc.text(formatPdfAmount(deliveryFee), totalX, y + 5.2, { align: 'right' });
+    y += rowHeight;
+  }
+
   y += 7;
-  if (y + 34 > pageHeight - 23) {
+  if (y + 77 > pageHeight - 22) {
     doc.addPage();
     y = 22;
   }
   const totalsX = pageWidth - margin - 92;
   doc.setFillColor(241, 245, 249);
-  doc.roundedRect(totalsX, y, 92, 31, 2, 2, 'F');
+  doc.roundedRect(totalsX, y, 92, 35, 2, 2, 'F');
   doc.setTextColor(ink[0], ink[1], ink[2]);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
-  doc.text(`Total HT estimé : ${formatPdfAmount(invoice.totalHT)} FCFA`, totalsX + 4, y + 7);
-  doc.text(`TVA indiquée (${Math.round(invoice.tvaRate * 100)}%) : ${formatPdfAmount(invoice.tvaAmount)} FCFA`, totalsX + 4, y + 14);
+  doc.text(`Total HT : ${formatPdfAmount(invoice.totalHT)} FCFA`, totalsX + 4, y + 7);
+  doc.text(`TVA / CSS (${Math.round(invoice.tvaRate * 100)}%) : ${formatPdfAmount(invoice.tvaAmount)} FCFA`, totalsX + 4, y + 14);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(blue[0], blue[1], blue[2]);
-  doc.text(`Total TTC estimé : ${formatPdfAmount(invoice.totalTTC)} FCFA`, totalsX + 4, y + 23);
+  doc.text(`Total TTC : ${formatPdfAmount(invoice.totalTTC)} FCFA`, totalsX + 4, y + 23);
+
+  const paidAmount = Math.min(invoice.totalTTC, getOrderPaidAmount(order));
+  const remainingAmount = Math.min(invoice.totalTTC, getOrderRemainingBalance(order));
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(ink[0], ink[1], ink[2]);
+  doc.setFontSize(7.5);
+  doc.text(`Reçu : ${formatPdfAmount(paidAmount)} FCFA`, totalsX + 4, y + 29);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Reste à régler : ${formatPdfAmount(remainingAmount)} FCFA`, totalsX + 4, y + 34);
+
+  const paymentLabels: Record<string, string> = {
+    especes: 'Espèces', airtel_money: 'Airtel Money', moov_money: 'Moov Money',
+    virement: 'Virement bancaire', cheque: 'Chèque', en_compte: 'Paiement à terme',
+  };
+  const bankX = margin + 69;
+  const bankY = y + 40;
+  const bankWidth = contentWidth - 69;
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(bankX, bankY, bankWidth, 28, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(blue[0], blue[1], blue[2]);
+  doc.text('COORDONNÉES BANCAIRES', bankX + 3, bankY + 5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.8);
+  doc.setTextColor(ink[0], ink[1], ink[2]);
+  doc.text('Ecobank · Compte : 40024 000020 36188011806 64', bankX + 3, bankY + 11);
+  doc.text('Bamboo · Compte : 40021 01000 23055700201 24', bankX + 3, bankY + 17);
+  doc.text(text(`Mode de règlement : ${paymentLabels[order.customer.paymentMethod] || 'À convenir'}`), bankX + 3, bankY + 23);
+
+  const stampX = margin;
+  const stampY = bankY + 1;
+  doc.setDrawColor(39, 67, 161);
+  doc.setLineWidth(0.8);
+  doc.roundedRect(stampX, stampY, 62, 26, 1.5, 1.5, 'S');
+  doc.setLineWidth(0.35);
+  doc.roundedRect(stampX + 1.7, stampY + 1.7, 58.6, 22.6, 1, 1, 'S');
+  doc.setTextColor(39, 67, 161);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.text('GLORYDAY PHARMA', stampX + 31, stampY + 8, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.6);
+  doc.text(text('Consommables, réactifs & équipements médicaux'), stampX + 31, stampY + 13, { align: 'center' });
+  doc.setFontSize(6.1);
+  doc.text(text('+241 77 00 30 04 · +241 66 24 03 99'), stampX + 31, stampY + 19, { align: 'center' });
 
   if (invoice.reason) {
     doc.setTextColor(ink[0], ink[1], ink[2]);
@@ -639,7 +727,7 @@ export async function generateInvoiceProjectPdf(
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(muted[0], muted[1], muted[2]);
-    doc.text('Document interne à valider par la comptabilité avant toute émission officielle.', margin, pageHeight - 9);
+    doc.text('Projet de document interne · À valider par la comptabilité avant émission officielle.', margin, pageHeight - 9);
     doc.text(text(`${invoice.number} | Page ${page}/${pageCount}`), pageWidth - margin, pageHeight - 9, { align: 'right' });
   }
 

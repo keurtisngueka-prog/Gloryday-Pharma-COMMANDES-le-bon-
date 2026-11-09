@@ -59,6 +59,7 @@ const SalesMonthlyChart = React.lazy(() => import('./SalesMonthlyChart').then(mo
 import { generateWhatsAppMessageForStage } from '../utils/whatsappNotifications';
 import type { CatalogImportPreviewResult } from '../utils/dataExport';
 import { CatalogExcelImportModal } from './CatalogExcelImportModal';
+import { AdminCreateOrderModal } from './AdminCreateOrderModal';
 
 const hasValidOrderCoordinates = (order: Order): boolean => {
   const coordinates = order.customer.coordinates;
@@ -93,6 +94,7 @@ interface AdminDashboardProps {
   onOpenDeliveryModal?: (order: Order) => void;
   onOpenFinanceModal?: (order: Order) => void;
   onViewOrderPdf?: (order: Order) => void;
+  onOrderCreated: (order: Order) => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -116,15 +118,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   defaultSubTab = 'kpi',
   onOpenDeliveryModal,
   onOpenFinanceModal,
-  onViewOrderPdf
+  onViewOrderPdf,
+  onOrderCreated
 }) => {
   const role: AppRole = currentUser.role;
   const isSuperAdmin = role === 'Super-Admin';
   const hasPerm = (perm: StaffPermission) => isSuperAdmin || Boolean(currentUser.permissions?.includes(perm));
-  const canViewOrders = hasPerm('orders_view') || hasPerm('orders_confirm') || hasPerm('orders_cancel') || hasPerm('orders_status_manage') || hasPerm('orders_finance_view') || hasPerm('orders_finance_manage') || hasPerm('payments_manage') || hasPerm('logistics_view') || hasPerm('logistics_manage') || hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('receivables_reminders_manage') || hasPerm('finance_view');
+  const canViewOrders = hasPerm('orders_view') || hasPerm('orders_create_for_client') || hasPerm('orders_confirm') || hasPerm('orders_cancel') || hasPerm('orders_status_manage') || hasPerm('orders_finance_view') || hasPerm('orders_finance_manage') || hasPerm('payments_manage') || hasPerm('logistics_view') || hasPerm('logistics_manage') || hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('receivables_reminders_manage') || hasPerm('finance_view');
   const canConfirmOrders = hasPerm('orders_confirm') || hasPerm('orders_status_manage');
   const canCancelOrders = hasPerm('orders_cancel') || hasPerm('orders_status_manage');
-  const canViewOrderDocuments = hasPerm('orders_view') || hasPerm('orders_finance_view') || hasPerm('orders_finance_manage');
+  const canViewOrderDocuments = hasPerm('orders_view') || hasPerm('orders_create_for_client') || hasPerm('orders_finance_view') || hasPerm('orders_finance_manage');
   const canViewDelivery = hasPerm('logistics_view') || hasPerm('logistics_manage');
   const canViewOrderFinance = hasPerm('orders_finance_view') || hasPerm('orders_finance_manage') || hasPerm('payments_manage') || hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('stats_view') || hasPerm('finance_view');
   const canManageFinance = hasPerm('orders_finance_manage');
@@ -173,6 +176,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   ];
 
   const [activeTab, setActiveTab] = useState<AdminSubTab>(defaultSubTab);
+  const [isCreateOrderModalOpen, setIsCreateOrderModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | 'to_confirm' | 'confirmed' | 'preparation' | 'delivered' | 'cancelled'>('all');
   const [financialFilter, setFinancialFilter] = useState<'all' | 'outstanding' | 'overdue'>('all');
@@ -893,15 +897,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </p>
             </div>
 
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Rechercher référence, clinique..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:bg-white focus:ring-2 focus:ring-[#0d44e8] w-56 sm:w-64"
-              />
+            <div className="flex flex-wrap items-center gap-2">
+              {hasPerm('orders_create_for_client') && (
+                <button type="button" onClick={() => setIsCreateOrderModalOpen(true)} className="inline-flex items-center gap-1.5 rounded-xl bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800">
+                  <Plus className="h-4 w-4" />Créer pour un client
+                </button>
+              )}
+              {hasPerm('orders_view') && <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Rechercher référence, clinique..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:bg-white focus:ring-2 focus:ring-[#0d44e8] w-56 sm:w-64"
+                />
+              </div>}
             </div>
           </div>
 
@@ -1267,6 +1278,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               })
             )}
           </div>
+          {isCreateOrderModalOpen && hasPerm('orders_create_for_client') && (
+            <AdminCreateOrderModal
+              clients={clients}
+              products={products}
+              canManageInvoices={canManageFinance}
+              onClose={() => setIsCreateOrderModalOpen(false)}
+              onOrderCreated={onOrderCreated}
+              onViewOrderPdf={onViewOrderPdf}
+            />
+          )}
         </div>
       )}
 

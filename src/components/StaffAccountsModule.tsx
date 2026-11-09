@@ -9,6 +9,7 @@ const ROLE_DETAILS: Record<StaffRole, string> = {
   Commercial: 'Clients attribués, commandes et devis',
   'Gestionnaire Catalogue': 'Produits, tarifs dégressifs et stock',
   Logistique: 'Préparation et suivi des livraisons',
+  Secrétaire: 'Clients et suivi de ses commandes ; facturation et stock désactivés par défaut',
 };
 
 const LEGACY_PERMISSION_LABELS: { id: StaffPermission; label: string; desc: string }[] = [

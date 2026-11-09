@@ -72,7 +72,7 @@ const scrypt = promisify(scryptCallback);
 const requireFromProject = createRequire(import.meta.url);
 const SESSION_COOKIE = 'gloryday_session';
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-const STAFF_ROLES: StaffRole[] = ['Admin simple', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'];
+const STAFF_ROLES: StaffRole[] = ['Admin simple', 'Commercial', 'Gestionnaire Catalogue', 'Logistique', 'Secrétaire'];
 const OPERATING_EXPENSE_CATEGORIES: OperatingExpenseCategory[] = [
   'transport', 'loyer', 'salaires', 'communication', 'fournitures', 'frais_bancaires', 'autre'
 ];
@@ -829,8 +829,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       else if (route.endsWith('/mobile-payment')) allowed = role === 'client' || hasPerm('payments_manage');
       else if (route.endsWith('/expected-delivery')) allowed = role === 'client' || hasPerm('logistics_manage');
       else if (route.endsWith('/status')) allowed = role === 'client' || hasPerm('orders_confirm') || hasPerm('orders_cancel');
-      else if (method === 'GET') allowed = role === 'client' || hasPerm('orders_view') || hasPerm('orders_confirm') || hasPerm('orders_cancel') || hasPerm('orders_finance_view') || hasPerm('orders_finance_manage') || hasPerm('payments_manage') || hasPerm('logistics_view') || hasPerm('logistics_manage') || hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('receivables_reminders_manage') || hasPerm('finance_view');
-      else if (method === 'POST') allowed = role === 'client';
+      else if (method === 'GET') allowed = role === 'client' || hasPerm('orders_view') || hasPerm('orders_create_for_client') || hasPerm('orders_confirm') || hasPerm('orders_cancel') || hasPerm('orders_finance_view') || hasPerm('orders_finance_manage') || hasPerm('payments_manage') || hasPerm('logistics_view') || hasPerm('logistics_manage') || hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('receivables_reminders_manage') || hasPerm('finance_view');
+      else if (method === 'POST') allowed = role === 'client' || hasPerm('orders_create_for_client');
     } else if (route === '/events') {
       allowed = method === 'GET';
     } else if (route === '/auth/profile') {
@@ -1535,13 +1535,17 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   app.get('/api/admin/stock/movements', asyncHandler(async (req, res) => {
     const rawProductId = req.query.productId;
     const productId = typeof rawProductId === 'string' ? rawProductId.trim() : undefined;
+    const offset = Math.max(0, Math.trunc(Number(req.query.offset) || 0));
+    const limit = Math.min(500, Math.max(1, Math.trunc(Number(req.query.limit) || 200)));
     try {
-      const movements = persistence
-        ? await persistence.listStockMovements(productId)
-        : (store.stockMovements || [])
-            .filter(movement => !productId || movement.productId === productId)
-            .slice(0, 200);
-      res.json({ movements });
+      if (persistence) {
+        res.json(await persistence.listStockMovements(productId, offset, limit));
+      } else {
+        const filtered = (store.stockMovements || [])
+          .filter(movement => !productId || movement.productId === productId)
+          .sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+        res.json({ movements: filtered.slice(offset, offset + limit), hasMore: filtered.length > offset + limit });
+      }
     } catch (error) {
       if (isStockLedgerMigrationError(error)) {
         res.status(503).json({ error: 'Le journal de stock n’est pas encore créé dans Supabase. Appliquez les migrations 20261102000001_stock_movement_ledger.sql et 20261102000002_order_stock_movements.sql.' });
@@ -3303,6 +3307,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       visibleOrders = visibleOrders.filter(o => o.userId === user.id);
     } else if (user.role === 'Commercial') {
       visibleOrders = visibleOrders.filter(o => o.assignedCommercialId === user.id || store.accounts.some(a => a.user.id === o.userId && a.user.assignedToCommercialId === user.id));
+    } else if (user.role === 'Secrétaire' && !normalizeStaffPermissions(user.permissions, user.role).includes('orders_view')) {
+      // A secretary with only the creation right can follow orders they created,
+      // without gaining access to the entire order book.
+      visibleOrders = visibleOrders.filter(o => o.createdByUserId === user.id);
     } else if (user.role === 'Logistique') {
       res.json(currentOrders.map(order => {
         const permittedOrder = user.role === 'Super-Admin' ? order : redactOrderFinancialFields(order, user);
@@ -3331,7 +3339,22 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
 
   app.post('/api/orders', asyncHandler(async (req, res) => {
     const user = (req as AuthenticatedRequest).authenticatedUser!;
-    const account = store.accounts.find(a => a.user.id === user.id);
+    const requestedClientId = typeof req.body?.clientId === 'string' ? req.body.clientId.trim().slice(0, 120) : '';
+    const isStaffOrderCreation = user.role !== 'client';
+    const canCreateForClient = user.role === 'Super-Admin' || normalizeStaffPermissions(user.permissions, user.role as StaffRole).includes('orders_create_for_client');
+    if (isStaffOrderCreation && !canCreateForClient) {
+      res.status(403).json({ error: 'Le droit « Créer une commande pour un client » est requis.' });
+      return;
+    }
+    if (isStaffOrderCreation && !requestedClientId) {
+      res.status(400).json({ error: 'Sélectionnez le client pour lequel créer la commande.' });
+      return;
+    }
+    if (!isStaffOrderCreation && requestedClientId && requestedClientId !== user.id) {
+      res.status(403).json({ error: 'Un client ne peut créer une commande que pour son propre compte.' });
+      return;
+    }
+    const account = store.accounts.find(a => a.user.id === (isStaffOrderCreation ? requestedClientId : user.id));
     const customerInput = req.body?.customer || {};
     const requestedItems = req.body?.items;
     if (!account || !Array.isArray(requestedItems) || requestedItems.length === 0 || requestedItems.length > 100) {
@@ -3550,6 +3573,11 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       ...(idempotencyKey ? { idempotencyKey } : {}),
       createdAt: createdNow.toISOString(),
       userId: account.user.id,
+      ...(isStaffOrderCreation ? {
+        createdByUserId: user.id,
+        createdByName: user.contactName || user.facilityName || 'Collaborateur Gloryday',
+        createdByRole: user.role,
+      } : {}),
       assignedCommercialId: account.user.assignedToCommercialId,
       customer,
       items: items.map((it: any) => {
@@ -3619,9 +3647,11 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
             newQuantity: update.remaining,
             reason: `Réservation liée à la commande ${orderToSave.reference}`,
             date: new Date().toISOString(),
-            performedBy: account.user.contactName || account.user.facilityName || account.user.phone,
-            performedById: account.user.id,
-            performedByRole: account.user.role,
+            performedBy: isStaffOrderCreation
+              ? (user.contactName || user.facilityName || user.phone || 'Collaborateur Gloryday')
+              : (account.user.contactName || account.user.facilityName || account.user.phone),
+            performedById: isStaffOrderCreation ? user.id : account.user.id,
+            performedByRole: isStaffOrderCreation ? user.role : account.user.role,
           });
         }
       }
@@ -3654,7 +3684,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       store.quotes.unshift(autoQuote);
     }
 
-    const staffOrderNotificationRoles: AppRole[] = ['Super-Admin', 'Admin simple', 'Commercial', 'Gestionnaire Catalogue', 'Logistique'];
+    const staffOrderNotificationRoles: AppRole[] = ['Super-Admin', 'Admin simple', 'Commercial', 'Gestionnaire Catalogue', 'Logistique', 'Secrétaire'];
     const staffOrderNotifications: AppNotification[] = staffOrderNotificationRoles.map(targetRole => ({
       id: `notif-${randomUUID()}`,
       timestamp: new Date().toISOString(),
@@ -3677,6 +3707,17 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       userId: account.user.id,
       read: false
     });
+    if (isStaffOrderCreation) {
+      appendStaffLog(user, {
+        category: 'orders',
+        severity: 'info',
+        actionLabel: 'Création d’une commande pour un client',
+        targetType: 'order',
+        targetId: orderToSave.id,
+        targetLabel: `${orderToSave.reference} · ${customer.facilityName}`,
+        details: `Commande de ${orderToSave.estimatedTotal.toLocaleString('fr-FR')} FCFA créée par ${user.contactName || user.phone || user.id} pour le compte client ${account.user.id}.`,
+      });
+    }
     const orderCreatedNotification = store.notifications[0];
 
     await saveStore(store, persistence);

@@ -7,6 +7,8 @@ export interface LibrevilleNeighborhood {
   landmarkExample: string;
   isExpressEligible: boolean;
   baseDeliveryFee: number; // in FCFA (0 if free/included)
+  administrativeArea?: string;
+  aliases?: string[];
   defaultCoordinates: {
     lat: number;
     lng: number;
@@ -276,9 +278,214 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
   }
 ];
 
-export const ALL_LIBREVILLE_NEIGHBORHOODS: LibrevilleNeighborhood[] = LIBREVILLE_ZONE_GROUPS.flatMap(
-  group => group.neighborhoods
-);
+const EXISTING_NEIGHBORHOODS = LIBREVILLE_ZONE_GROUPS.flatMap(group => group.neighborhoods);
+
+// Official Gabonese Journal register for Libreville, Akanda and Owendo.
+// Existing grouped IDs stay available for addresses already stored in accounts.
+type NeighborhoodRow = [id: string, name: string, administrativeArea: string, zone: string, fee: number, aliases?: string[]];
+const EXPANDED_NEIGHBORHOOD_ROWS: NeighborhoodRow[] = [
+  ['aeroport', 'Aéroport', '1er arrondissement de Libreville', 'Zone 2', 2000],
+  ['okala-sud', 'Okala Sud', '1er arrondissement de Libreville', 'Zone 2', 2000, ['Okala']],
+  ['mikolongo', 'Mikolongo', '1er arrondissement de Libreville', 'Zone 2', 2000],
+  ['lycee-indjendje', 'Lycée Indjendje Gondjout', '1er arrondissement de Libreville', 'Zone 2', 2000, ['Indjendje Gondjout']],
+  ['alibandeng', 'Alibandeng', '1er arrondissement de Libreville', 'Zone 3', 2000, ['Alibandeng']],
+  ['pierre-de-mbigou', 'Pierre de Mbigou', '1er arrondissement de Libreville', 'Zone 3', 2000],
+  ['camp-de-gaulle', 'Camp de Gaulle', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['tahiti', 'Tahiti', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['cite-democratie', 'Cité de la Démocratie', '1er arrondissement de Libreville', 'Zone 3', 2000],
+  ['lac-bleu', 'Lac Bleu', '1er arrondissement de Libreville', 'Zone 3', 2000],
+  ['diba-diba', 'Diba-Diba', '1er arrondissement de Libreville', 'Zone 3', 2000],
+  ['ondogo-1', 'Ondogo 1 GR', '1er arrondissement de Libreville', 'Zone 3', 2000, ['Ondogo 1']],
+  ['bel-air-lbv', 'Bel-Air', '1er arrondissement de Libreville', 'Zone 3', 2000],
+  ['lycee-leon-mba', 'Lycée Léon MBA', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['gue-gue', 'Gué-Gué', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['bas-gue-gue', 'Bas de Gué-Gué', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['haut-gue-gue', 'Haut de Gué-Gué', '1er arrondissement de Libreville', 'Zone 1', 0, ['Hauts de Gué-Gué']],
+  ['ongongo', 'Ongongo', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['kalikak', 'Kalikak', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['camp-des-boys', 'Camp des Boys', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['derriere-prison', 'Derrière la Prison', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['palais-justice', 'Palais de Justice', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['ecole-normale', 'École Normale', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['cite-pomidou', 'Cité Pompidou', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['gros-bouquet-1', 'Gros-Bouquet I', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['gros-bouquet-2', 'Gros-Bouquet II', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['trois-quartiers', 'Trois-Quartiers', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['quaben', 'Quaben', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['jeanne-ebori', 'Jeanne Ebori', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['plaine-orety-louis', 'Plaine-Orety (côté Louis)', '1er arrondissement de Libreville', 'Zone 1', 0, ['Plaine Orety']],
+  ['jeanne-blanche', 'Jeanne et Blanche', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['ancienne-sobraga-ens', 'Ancienne Sobraga (côté ENS)', '1er arrondissement de Libreville', 'Zone 1', 0],
+  ['uob', 'Université Omar Bongo', '2e arrondissement de Libreville', 'Zone 1', 0, ['UOB']],
+  ['ancien-site-rtg', 'Ancien site de la RTG', '2e arrondissement de Libreville', 'Zone 1', 0],
+  ['plaine-orety-uob', 'Plaine-Orety (côté UOB)', '2e arrondissement de Libreville', 'Zone 1', 0, ['Plaine Orety']],
+  ['saint-nicolas', 'Saint-Nicolas', '2e arrondissement de Libreville', 'Zone 1', 0],
+  ['port-mole', 'Port-Môle', '2e arrondissement de Libreville', 'Zone 1', 0],
+  ['vallee-sainte-marie', 'Vallée Sainte-Marie', '2e arrondissement de Libreville', 'Zone 1', 0],
+  ['archeveche', 'Archevêché', '2e arrondissement de Libreville', 'Zone 1', 0],
+  ['jean-paul-ii', 'Jean-Paul II', '2e arrondissement de Libreville', 'Zone 1', 0],
+  ['bessieux', 'Bessieux', '2e arrondissement de Libreville', 'Zone 1', 0],
+  ['hotel-de-ville', 'Hôtel de Ville', '2e arrondissement de Libreville', 'Zone 1', 0],
+  ['fonction-publique', 'Fonction Publique', '2e arrondissement de Libreville', 'Zone 1', 0],
+  ['cocotiers', 'Cocotiers', '2e arrondissement de Libreville', 'Zone 1', 0],
+  ['atong-abe', 'Atong-Abé', '2e arrondissement de Libreville', 'Zone 1', 0],
+  ['nkembo', 'Nkembo', '2e arrondissement de Libreville', 'Zone 1', 0],
+  ['la-campagne', 'La Campagne', '2e arrondissement de Libreville', 'Zone 3', 1500],
+  ['sotega', 'Sotéga', '2e arrondissement de Libreville', 'Zone 3', 1500, ['Sodega']],
+  ['sociga', 'SOCIGA', '2e arrondissement de Libreville', 'Zone 3', 1500],
+  ['avea', 'Avéa', '2e arrondissement de Libreville', 'Zone 3', 1500],
+  ['atsibi-ntsos', 'Atsib-Ntsos', '2e arrondissement de Libreville', 'Zone 3', 1500, ['Atsibe-Ntsos', 'Atsibi Tsoss']],
+  ['usso', 'USSO', '2e arrondissement de Libreville', 'Zone 3', 1500, ['IUSO']],
+  ['cite-caisse', 'Cité de la Caisse', '2e arrondissement de Libreville', 'Zone 3', 1500],
+  ['cite-mebiame', 'Cité Mebiame', '2e arrondissement de Libreville', 'Zone 3', 1500],
+  ['sorbonne', 'Sorbonne', '3e arrondissement de Libreville', 'Zone 1', 0],
+  ['sainte-anne', 'Sainte-Anne', '3e arrondissement de Libreville', 'Zone 1', 0],
+  ['akemindjogoni', 'Akémindjogoni', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['abenelang', 'Abénélang', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['cinq-palmiers', 'Cinq-Palmiers', '3e arrondissement de Libreville', 'Zone 1', 0],
+  ['carrefour-hassan', 'Carrefour Hassan', '3e arrondissement de Libreville', 'Zone 1', 0],
+  ['presidence', 'Présidence', '3e arrondissement de Libreville', 'Zone 1', 0],
+  ['chul', 'CHUL', '3e arrondissement de Libreville', 'Zone 1', 0],
+  ['avenue-cointet', 'Avenue de Cointet', '3e arrondissement de Libreville', 'Zone 1', 0],
+  ['derriere-hopital', 'Derrière l’Hôpital', '3e arrondissement de Libreville', 'Zone 1', 0],
+  ['montagne-sainte', 'Montagne Sainte', '3e arrondissement de Libreville', 'Zone 1', 0],
+  ['petit-paris', 'Petit-Paris', '3e arrondissement de Libreville', 'Zone 1', 0],
+  ['peyrie', 'La Peyrie', '3e arrondissement de Libreville', 'Zone 1', 0],
+  ['peyrie-dakar', 'Peyrie Dakar', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['akebe-ville', 'Akébé-Ville', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['nombakele-nord', 'Nombakélé-Nord', '3e arrondissement de Libreville', 'Zone 1', 0],
+  ['stfo', 'STFO', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['venez-voir', 'Venez-Voir', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['likouala', 'Likouala', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['akebe-plaine', 'Akébé Plaine', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['belle-vue', 'Belle-Vue', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['belle-vue-2', 'Belle-Vue II', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['kinguele-1', 'Kinguélé I', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['kinguele-2', 'Kinguélé II', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['akebe-frontiere', 'Akébé Frontière', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['awendje-zone-b2', 'Awendjé Zone B2', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['belles-peintures', 'Belles-Peintures', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['dragon', 'Dragon', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['cosmopark', 'Cosmopark', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['rio', 'Rio', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['terre-nouvelle-3', 'Terre Nouvelle (secteur 3e)', '3e arrondissement de Libreville', 'Zone 3', 1500, ['Terre Nouvelle']],
+  ['pk5', 'PK 5', '3e arrondissement de Libreville', 'Zone 3', 1500],
+  ['pk6', 'PK 6', '3e arrondissement de Libreville', 'Zone 3', 2000],
+  ['pk7', 'PK 7', '3e arrondissement de Libreville', 'Zone 3', 2000],
+  ['pk8', 'PK 8', '3e arrondissement de Libreville', 'Zone 3', 2000],
+  ['ambilambani', 'Ambilambani', '4e arrondissement de Libreville', 'Zone 3', 1500],
+  ['baraka', 'Baraka', '4e arrondissement de Libreville', 'Zone 3', 1500],
+  ['carrefour-boulingui', 'Carrefour Boulingui', '4e arrondissement de Libreville', 'Zone 3', 1500],
+  ['plaine-niger', 'Plaine Niger', '4e arrondissement de Libreville', 'Zone 3', 1500],
+  ['baraka-mission', 'Baraka Mission', '4e arrondissement de Libreville', 'Zone 3', 1500],
+  ['awendje-2', 'Awendjé II', '4e arrondissement de Libreville', 'Zone 3', 1500],
+  ['poste-centrale', 'Poste Centrale', '4e arrondissement de Libreville', 'Zone 1', 0],
+  ['hollando', 'Hollando', '4e arrondissement de Libreville', 'Zone 1', 0],
+  ['bicig-centre', 'BICIG Centre', '4e arrondissement de Libreville', 'Zone 1', 0],
+  ['waterman', 'Waterman', '4e arrondissement de Libreville', 'Zone 1', 0],
+  ['chambre-commerce', 'Chambre de Commerce', '4e arrondissement de Libreville', 'Zone 1', 0],
+  ['saint-benoit', 'Saint-Benoît', '4e arrondissement de Libreville', 'Zone 1', 0],
+  ['nombakele-sud', 'Nombakélé-Sud', '4e arrondissement de Libreville', 'Zone 1', 0],
+  ['batavea', 'Batavéa', '4e arrondissement de Libreville', 'Zone 1', 0],
+  ['london', 'London', '4e arrondissement de Libreville', 'Zone 1', 0],
+  ['saint-michel', 'Saint-Michel', '4e arrondissement de Libreville', 'Zone 1', 0],
+  ['toulon', 'Toulon', '4e arrondissement de Libreville', 'Zone 1', 0],
+  ['cite-damas', 'Cité Damas', '5e arrondissement de Libreville', 'Zone 3', 2000],
+  ['bissegue', 'Bisségué', '5e arrondissement de Libreville', 'Zone 3', 2000],
+  ['beau-sejour', 'Beau-Séjour', '5e arrondissement de Libreville', 'Zone 3', 2000],
+  ['fopi', 'FOPI', '5e arrondissement de Libreville', 'Zone 3', 2000],
+  ['mindoube-1', 'Mindoubé I', '5e arrondissement de Libreville', 'Zone 4', 2500],
+  ['mindoube-2', 'Mindoubé II', '5e arrondissement de Libreville', 'Zone 4', 2500],
+  ['iai', 'IAI', '5e arrondissement de Libreville', 'Zone 3', 2000],
+  ['golf-lbv', 'Golf', '5e arrondissement de Libreville', 'Zone 3', 2000],
+  ['ozangue', 'Ozangué', '5e arrondissement de Libreville', 'Zone 3', 2000],
+  ['pk10-droit', 'PK 10 (côté droit de la Nationale)', '5e arrondissement de Libreville', 'Zone 3', 2500, ['PK10 droite']],
+  ['melen-ena', 'Melen ENA', '5e arrondissement de Libreville', 'Zone 3', 2000],
+  ['nzeng-miang', 'Nzeng-Miang', '5e arrondissement de Libreville', 'Zone 3', 2000],
+  ['bizango-rail', 'Bizango-Rail', '5e arrondissement de Libreville', 'Zone 3', 2500],
+  ['lalala-gauche', 'Lalala à gauche', '5e arrondissement de Libreville', 'Zone 4', 2000],
+  ['lalala-droite', 'Lalala à droite', '5e arrondissement de Libreville', 'Zone 4', 2000],
+  ['lalala-dakar', 'Lalala Dakar', '5e arrondissement de Libreville', 'Zone 4', 2000],
+  ['acae', 'ACAE', '5e arrondissement de Libreville', 'Zone 4', 2000],
+  ['soduco', 'SODUCO', '5e arrondissement de Libreville', 'Zone 4', 2000],
+  ['ozoungue', 'Ozoungué', '5e arrondissement de Libreville', 'Zone 3', 2000],
+  ['injs', 'INJS', '5e arrondissement de Libreville', 'Zone 4', 2000],
+  ['ondogo-2', 'Ondogo 2', '6e arrondissement de Libreville', 'Zone 3', 2000],
+  ['montalier', 'Montalier', '6e arrondissement de Libreville', 'Zone 3', 2500],
+  ['lycee-djoue-dabany', 'Lycée Djoué Dabany', '6e arrondissement de Libreville', 'Zone 3', 2000],
+  ['pk9-gauche', 'PK 9 (côté gauche de la Nationale)', '6e arrondissement de Libreville', 'Zone 3', 2500, ['PK9 gauche']],
+  ['pk10-gauche', 'PK 10 (côté gauche de la Nationale)', '6e arrondissement de Libreville', 'Zone 3', 2500, ['PK10 gauche']],
+  ['pk11-gauche', 'PK 11 (côté gauche de la Nationale)', '6e arrondissement de Libreville', 'Zone 3', 2500, ['PK11 gauche']],
+  ['derriere-hopital-militaire', 'Derrière l’Hôpital Militaire', '6e arrondissement de Libreville', 'Zone 3', 2000],
+  ['melen', 'Melen', '6e arrondissement de Libreville', 'Zone 3', 2000],
+  ['oveng', 'Oveng', '6e arrondissement de Libreville', 'Zone 3', 2500],
+  ['bambouchine', 'Bambouchine', '6e arrondissement de Libreville', 'Zone 3', 2500, ['Bambou-Chine', 'Bambouchine']],
+  ['akougbe', 'Akougbe', '6e arrondissement de Libreville', 'Zone 3', 2500],
+  ['sibang-nkol-ogoum', 'Sibang-Nkol-Ogoum', '6e arrondissement de Libreville', 'Zone 3', 2500],
+  ['sibang-arboretum', 'Sibang-Arboretum', '6e arrondissement de Libreville', 'Zone 3', 2500],
+  ['adzebe-sibang', 'Adzébé-Sibang', '6e arrondissement de Libreville', 'Zone 3', 2500],
+  ['marche-bananes', 'Marché-Bananes', '6e arrondissement de Libreville', 'Zone 3', 2000],
+  ['sga', 'SGA', '6e arrondissement de Libreville', 'Zone 3', 2000],
+  ['nzeng-ayong-centre', 'Nzeng-Ayong (centre)', '6e arrondissement de Libreville', 'Zone 3', 2000],
+  ['marseille-akanda', 'Marseille', '1er arrondissement d’Akanda', 'Zone 2', 2500],
+  ['mveng-ayong-akanda', 'Mveng-Ayong', '1er arrondissement d’Akanda', 'Zone 2', 3000],
+  ['premier-campement-akanda', '1er Campement', '1er arrondissement d’Akanda', 'Zone 2', 2500, ['Premier Campement']],
+  ['makwengue', 'Makwengue', '1er arrondissement d’Akanda', 'Zone 2', 3000],
+  ['iyalala', 'Iyalala', '1er arrondissement d’Akanda', 'Zone 2', 3000],
+  ['malibe-1', 'Malibé 1', '1er arrondissement d’Akanda', 'Zone 2', 3500],
+  ['malibe-2', 'Malibé 2', '1er arrondissement d’Akanda', 'Zone 2', 3500],
+  ['santa-clara', 'Santa-Clara', '1er arrondissement d’Akanda', 'Zone 2', 3000],
+  ['bolokobouet', 'Bolokobouet', '1er arrondissement d’Akanda', 'Zone 2', 3500],
+  ['gabaga', 'Gabaga', '1er arrondissement d’Akanda', 'Zone 2', 4000],
+  ['ile-mbanie', 'Île Mbanié', '1er arrondissement d’Akanda', 'Zone 2', 5000],
+  ['okala-akanda', 'Okala', '2e arrondissement d’Akanda', 'Zone 2', 2000],
+  ['delta-postal', 'Delta Postal', '2e arrondissement d’Akanda', 'Zone 2', 2000],
+  ['gigi', 'Gigi', '2e arrondissement d’Akanda', 'Zone 2', 2000],
+  ['sherko', 'Sherko', '2e arrondissement d’Akanda', 'Zone 2', 2000],
+  ['entraco', 'Entraco', '2e arrondissement d’Akanda', 'Zone 2', 2000],
+  ['cite-amissa', 'Cité Amissa', '2e arrondissement d’Akanda', 'Zone 2', 2000],
+  ['cap-caravane', 'Cap Caravane', '2e arrondissement d’Akanda', 'Zone 2', 2500],
+  ['akournam-1', 'Akournam 1', '1er arrondissement d’Owendo', 'Zone 4', 2500],
+  ['cite-sni-owendo', 'Cité SNI', '1er arrondissement d’Owendo', 'Zone 4', 2500],
+  ['cite-octra', 'Cité OCTRA', '1er arrondissement d’Owendo', 'Zone 4', 2500],
+  ['awoungou', 'Awoungou', '1er arrondissement d’Owendo', 'Zone 4', 2500],
+  ['service-civique', 'Service Civique', '1er arrondissement d’Owendo', 'Zone 4', 2500],
+  ['owendo-port', 'Owendo Port', '1er arrondissement d’Owendo', 'Zone 4', 3000],
+  ['virie', 'Virié', '1er arrondissement d’Owendo', 'Zone 4', 3000],
+  ['akournam-2', 'Akournam 2', '2e arrondissement d’Owendo', 'Zone 4', 3000],
+  ['igoumie', 'Igoumié', '2e arrondissement d’Owendo', 'Zone 4', 3000],
+  ['mbila-nyambi', 'Mbila-Nyambi', '2e arrondissement d’Owendo', 'Zone 4', 3000],
+  ['pointe-claire', 'Pointe Claire', '2e arrondissement d’Owendo', 'Zone 4', 3000],
+  ['ile-coniquet', 'Île Coniquet', '2e arrondissement d’Owendo', 'Zone 4', 5000],
+];
+
+const zoneTemplates = new Map<string, LibrevilleNeighborhood>();
+EXISTING_NEIGHBORHOODS.forEach(neighborhood => {
+  if (!zoneTemplates.has(neighborhood.zone)) zoneTemplates.set(neighborhood.zone, neighborhood);
+});
+
+const expandedNeighborhoods: LibrevilleNeighborhood[] = EXPANDED_NEIGHBORHOOD_ROWS.map(([id, name, administrativeArea, zone, fee, aliases]) => {
+  const template = zoneTemplates.get(zone) || zoneTemplates.get('Zone 1')!;
+  return {
+    ...template,
+    id,
+    name,
+    zone,
+    baseDeliveryFee: fee,
+    administrativeArea,
+    aliases,
+    estimatedMinutes: template.estimatedMinutes,
+    estimatedText: template.estimatedText,
+    landmarkExample: `Précisez un repère exact pour ${name}`,
+    isExpressEligible: false,
+    defaultCoordinates: { ...template.defaultCoordinates },
+  };
+});
+
+export const ALL_LIBREVILLE_NEIGHBORHOODS: LibrevilleNeighborhood[] = [
+  ...EXISTING_NEIGHBORHOODS,
+  ...expandedNeighborhoods,
+];
 
 // Arrondissements administratifs (distincts des zones tarifaires de livraison).
 // Les secteurs qui traversent une limite administrative restent explicitement indiqués.
@@ -306,7 +513,9 @@ const NEIGHBORHOOD_ADMINISTRATIVE_AREAS: Record<string, string> = {
 };
 
 export function getNeighborhoodAdministrativeArea(neighborhoodId: string): string {
-  return NEIGHBORHOOD_ADMINISTRATIVE_AREAS[neighborhoodId] || 'Arrondissement à confirmer';
+  return ALL_LIBREVILLE_NEIGHBORHOODS.find(neighborhood => neighborhood.id === neighborhoodId)?.administrativeArea
+    || NEIGHBORHOOD_ADMINISTRATIVE_AREAS[neighborhoodId]
+    || 'Arrondissement à confirmer';
 }
 
 export function getNeighborhoodById(id: string): LibrevilleNeighborhood | undefined {

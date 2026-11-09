@@ -368,7 +368,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                     <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
                   )}
-                  {(hasPermission('orders_view') || hasPermission('orders_confirm') || hasPermission('orders_cancel') || hasPermission('orders_status_manage') || hasPermission('logistics_view') || hasPermission('logistics_manage')) && (
+              {(hasPermission('orders_view') || hasPermission('orders_create_for_client') || hasPermission('orders_confirm') || hasPermission('orders_cancel') || hasPermission('orders_status_manage') || hasPermission('logistics_view') || hasPermission('logistics_manage')) && (
                   <button
                     type="button"
                     onClick={() => handleNav('admin-orders')}
@@ -392,7 +392,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 </button>
               )}
 
-              {role !== 'Super-Admin' && (hasPermission('orders_view') || hasPermission('orders_confirm') || hasPermission('orders_cancel') || hasPermission('orders_status_manage') || hasPermission('orders_finance_view') || hasPermission('orders_finance_manage') || hasPermission('payments_manage') || hasPermission('logistics_view') || hasPermission('logistics_manage') || hasPermission('receivables_view') || hasPermission('receivables_payments_manage') || hasPermission('receivables_reminders_manage')) && (
+              {role !== 'Super-Admin' && (hasPermission('orders_view') || hasPermission('orders_create_for_client') || hasPermission('orders_confirm') || hasPermission('orders_cancel') || hasPermission('orders_status_manage') || hasPermission('orders_finance_view') || hasPermission('orders_finance_manage') || hasPermission('payments_manage') || hasPermission('logistics_view') || hasPermission('logistics_manage') || hasPermission('receivables_view') || hasPermission('receivables_payments_manage') || hasPermission('receivables_reminders_manage')) && (
                 <button
                   type="button"
                   onClick={() => handleNav('admin-orders')}

@@ -32,7 +32,7 @@ import {
 import type { PushSubscriptionPayload } from './utils/pushNotifications';
 import { clearLegacyCourierDirectory, getLegacyCouriersForMigration } from './utils/courierDirectory';
 
-export type StaffRole = Extract<AppRole, 'Admin simple' | 'Commercial' | 'Gestionnaire Catalogue' | 'Logistique'>;
+export type StaffRole = Extract<AppRole, 'Admin simple' | 'Commercial' | 'Gestionnaire Catalogue' | 'Logistique' | 'Secrétaire'>;
 
 export interface StaffAccountSummary {
   id: string;
@@ -218,9 +218,14 @@ export const api = {
   },
 
   async getStockMovements(productId?: string): Promise<StockMovement[]> {
-    const query = productId ? `?productId=${encodeURIComponent(productId)}` : '';
-    const result = await request<{ movements: StockMovement[] }>(`/api/admin/stock/movements${query}`);
+    const result = await this.getStockMovementsPage(productId, 0, 200);
     return result.movements;
+  },
+
+  async getStockMovementsPage(productId?: string, offset = 0, limit = 200): Promise<{ movements: StockMovement[]; hasMore: boolean }> {
+    const params = new URLSearchParams({ offset: String(Math.max(0, offset)), limit: String(Math.min(500, Math.max(1, limit))) });
+    if (productId) params.set('productId', productId);
+    return request<{ movements: StockMovement[]; hasMore: boolean }>(`/api/admin/stock/movements?${params.toString()}`);
   },
 
   async getStockBatches(productId?: string): Promise<StockBatch[]> {
@@ -510,6 +515,13 @@ export const api = {
       }
       throw error;
     }
+  },
+
+  async createOrderForClient(clientId: string, customer: Partial<Order['customer']>, items: CartItem[], idempotencyKey: string): Promise<Order> {
+    return request<Order>('/api/orders', {
+      method: 'POST',
+      body: JSON.stringify({ clientId, customer, items, idempotencyKey })
+    });
   },
 
   async getOrders(phone?: string): Promise<Order[]> {

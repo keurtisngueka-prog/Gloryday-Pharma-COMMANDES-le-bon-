@@ -860,7 +860,7 @@ CREATE TABLE IF NOT EXISTS staff (
     id VARCHAR(64) PRIMARY KEY,
     phone VARCHAR(32) NOT NULL UNIQUE,
     full_name VARCHAR(255) NOT NULL,
-    role VARCHAR(32) NOT NULL, -- Super-Admin, Commercial, Gestionnaire Catalogue, Logistique
+  role VARCHAR(32) NOT NULL, -- Super-Admin, Admin simple, Commercial, Gestionnaire Catalogue, Logistique, Secrétaire
     email VARCHAR(255),
     active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

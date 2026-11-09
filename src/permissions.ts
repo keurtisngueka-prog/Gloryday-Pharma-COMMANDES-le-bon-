@@ -36,6 +36,7 @@ export const STAFF_PERMISSION_GROUPS: PermissionGroup[] = [
   {
     id: 'orders', title: 'Commandes & paiements', permissions: [
       { id: 'orders_view', label: 'Consulter les commandes', description: 'Voir les commandes accessibles à son rôle.' },
+      { id: 'orders_create_for_client', label: 'Créer une commande pour un client', description: 'Préparer et enregistrer un bon de commande au nom d’un client sélectionné.' },
       { id: 'orders_confirm', label: 'Confirmer & lancer la préparation', description: 'Valider une commande reçue puis la passer en préparation.' },
       { id: 'orders_cancel', label: 'Annuler une commande', description: 'Annuler une commande autorisée et déclencher la restitution de stock.' },
       { id: 'orders_finance_view', label: 'Voir les montants', description: 'Voir les prix, totaux, acomptes et soldes.' },
@@ -127,6 +128,8 @@ export function getDefaultStaffPermissions(role: StaffRole): StaffPermission[] {
       return ['catalog_view', 'catalog_manage', 'packs_manage', 'stock_view', 'stock_receive', 'stock_adjust', 'stock_batches_manage', 'stock_availability_manage', 'stock_costs_view', 'stock_costs_manage', 'stock_export', 'orders_view'];
     case 'Logistique':
       return ['orders_view', 'logistics_view', 'logistics_manage'];
+    case 'Secrétaire':
+      return ['orders_create_for_client', 'clients_view'];
     default:
       return [];
   }

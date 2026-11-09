@@ -51,6 +51,7 @@ export const NeighborhoodPicker: React.FC<NeighborhoodPickerProps> = ({
     return normalizeSearchText([
       neighborhood.name,
       neighborhood.id.replace(/-/g, ' '),
+      ...(neighborhood.aliases || []),
       neighborhood.zone,
       neighborhood.estimatedMinutes,
       getNeighborhoodAdministrativeArea(neighborhood.id)

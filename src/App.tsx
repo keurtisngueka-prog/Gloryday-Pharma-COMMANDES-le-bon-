@@ -93,7 +93,7 @@ export const ADMIN_TABS: AppTab[] = [
 
 const canReadStaffOrders = (user: User) => user.role === 'client' || [
   'orders_view', 'orders_confirm', 'orders_cancel', 'orders_status_manage', 'orders_finance_view', 'orders_finance_manage',
-  'payments_manage', 'logistics_view', 'logistics_manage', 'receivables_view',
+  'orders_create_for_client', 'payments_manage', 'logistics_view', 'logistics_manage', 'receivables_view',
   'receivables_payments_manage', 'receivables_reminders_manage', 'finance_view',
 ].some(permission => userHasPermission(user, permission as StaffPermission));
 
@@ -944,6 +944,11 @@ export default function App() {
     setOrders(updated);
   };
 
+  const handleAdminOrderCreated = (order: Order) => {
+    setOrders(previous => [order, ...previous.filter(existing => existing.id !== order.id)]);
+    void api.getProducts().then(setProducts).catch(() => {});
+  };
+
   const handleAdminUpdateFinance = async (updatedOrder: Order) => {
     const previousOrder = activeFinanceOrder?.id === updatedOrder.id
       ? activeFinanceOrder
@@ -1255,6 +1260,7 @@ export default function App() {
                     currentUser={currentUser}
                     onUpdateStatus={handleAdminUpdateStatus}
                     onUpdatePayment={handleAdminUpdatePayment}
+                    onOrderCreated={handleAdminOrderCreated}
                     onCreatePack={handleAdminCreatePack}
                     onUpdatePack={handleAdminUpdatePack}
                     onDeletePack={handleAdminDeletePack}

@@ -1,4 +1,4 @@
-export type AppRole = 'client' | 'Super-Admin' | 'Admin simple' | 'Commercial' | 'Gestionnaire Catalogue' | 'Logistique';
+export type AppRole = 'client' | 'Super-Admin' | 'Admin simple' | 'Commercial' | 'Gestionnaire Catalogue' | 'Logistique' | 'Secrétaire';
 
 export type FacilityType = 
   | 'Clinique' 
@@ -266,6 +266,9 @@ export interface Order {
   idempotencyKey?: string;
   createdAt: string;
   userId?: string;
+  createdByUserId?: string;
+  createdByName?: string;
+  createdByRole?: AppRole;
   customer: CustomerInfo;
   items: OrderItem[];
   estimatedTotal: number;
@@ -550,6 +553,7 @@ export type StaffPermission =
   | 'stock_costs_manage'
   | 'stock_export'
   | 'orders_view'
+  | 'orders_create_for_client'
   /** Legacy aggregate grant. Expanded to individual order/finance permissions on load. */
   | 'orders_manage'
   | 'orders_confirm'
