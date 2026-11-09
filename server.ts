@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 import { createRequire } from 'module';
+import { waitUntil } from '@vercel/functions';
 import { INITIAL_PRODUCTS, INITIAL_PACKS, LEGACY_DEMO_PRODUCT_IDS, LEGACY_DEMO_PACK_IDS } from './src/data/initialProducts.js';
 import { buildNeighborhoodDeliveryAddress, getEstimatedDeliveryText, getNeighborhoodById, resolveOrderDestinationCoordinates } from './src/data/librevilleZones.js';
 import {
@@ -70,6 +71,20 @@ const STORE_PATH = path.join(DATA_DIR, 'store.json');
 
 const scrypt = promisify(scryptCallback);
 const requireFromProject = createRequire(import.meta.url);
+const scheduleBackgroundTask = (task: Promise<unknown>, label: string): void => {
+  const handledTask = task.catch((error) => {
+    console.warn(`${label} :`, error instanceof Error ? error.message : error);
+  });
+  if (process.env.VERCEL) {
+    try {
+      waitUntil(handledTask);
+      return;
+    } catch (error) {
+      console.warn(`Background task ${label} could not be scheduled:`, error instanceof Error ? error.message : error);
+    }
+  }
+  void handledTask;
+};
 const SESSION_COOKIE = 'gloryday_session';
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const STAFF_ROLES: StaffRole[] = ['Admin simple', 'Commercial', 'Gestionnaire Catalogue', 'Logistique', 'Secrétaire'];
@@ -736,6 +751,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
 
   const isPublicApi = (req: express.Request) =>
     (['GET', 'HEAD'].includes(req.method) && ['/products', '/packs', '/auth/session', '/download-project-zip', '/settings/volume-discounts'].includes(req.path)) ||
+    (req.method === 'GET' && req.path === '/cron/collection-due-reminders') ||
     (req.method === 'POST' && ['/auth/register', '/auth/login', '/auth/admin', '/auth/google', '/auth/google/complete', '/auth/recovery-request', '/auth/logout'].includes(req.path)) ||
     (['GET', 'POST'].includes(req.method) && /^\/courier-tracking\/[A-Za-z0-9_-]{32,64}$/.test(req.path));
 
@@ -3381,9 +3397,18 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       return;
     }
 
-    // Validate every checkout against the latest catalog instead of an old
-    // serverless-instance snapshot. The RPC still locks and reserves stock.
-    if (persistence) store.products = await persistence.loadProducts();
+    // Refresh only the products requested in this order. The previous full
+    // catalogue read made every checkout transfer all products and variants;
+    // the atomic RPC below still locks and reserves the latest stock.
+    if (persistence) {
+      const requestedProductIds = requestedItems
+        .map((item: unknown) => String((item as { productId?: unknown } | null)?.productId || '').trim())
+        .filter(Boolean);
+      const latestProducts = await persistence.loadProductsByIds(requestedProductIds);
+      const productsById = new Map(store.products.map((product) => [product.id, product]));
+      for (const product of latestProducts) productsById.set(product.id, product);
+      store.products = Array.from(productsById.values());
+    }
 
     const items = [] as CartItem[];
     for (const requested of requestedItems) {
@@ -3661,9 +3686,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const hasDeferredStockItems = orderToSave.items.some((item) => Boolean(item.isDeferredStock));
     const orderNeedsQuote = orderToSave.hasQuoteItems || orderToSave.items.some((item) => item.isQuote || item.isDeferredStock);
 
+    let autoQuote: CommercialQuote | undefined;
     if (orderNeedsQuote) {
       const validUntil = new Date(createdNow.getTime() + 15 * 24 * 60 * 60 * 1000).toISOString();
-      const autoQuote: CommercialQuote = {
+      autoQuote = {
         id: `qte-${randomUUID()}`,
         reference: `DEV-${year}-${orderToSave.reference.split('-').at(-1) || randomUUID().slice(0, 8).toUpperCase()}`,
         createdAt: createdNow.toISOString(),
@@ -3695,8 +3721,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       targetRole,
       read: false
     }));
-    store.notifications.unshift(...staffOrderNotifications);
-    store.notifications.unshift({
+    const clientOrderNotification: AppNotification = {
       id: `notif-${randomUUID()}`,
       timestamp: new Date().toISOString(),
       type: 'order_created',
@@ -3706,9 +3731,12 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       targetRole: 'client',
       userId: account.user.id,
       read: false
-    });
+    };
+    const orderNotifications = [...staffOrderNotifications, clientOrderNotification];
+    store.notifications.unshift(...orderNotifications);
+    let orderCreationLog: StaffActivityLog | undefined;
     if (isStaffOrderCreation) {
-      appendStaffLog(user, {
+      orderCreationLog = appendStaffLog(user, {
         category: 'orders',
         severity: 'info',
         actionLabel: 'Création d’une commande pour un client',
@@ -3718,10 +3746,23 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         details: `Commande de ${orderToSave.estimatedTotal.toLocaleString('fr-FR')} FCFA créée par ${user.contactName || user.phone || user.id} pour le compte client ${account.user.id}.`,
       });
     }
-    const orderCreatedNotification = store.notifications[0];
-
-    await saveStore(store, persistence);
-    if (orderCreatedNotification) await sendPushForNotification(orderCreatedNotification);
+    const sideEffectsPromise = persistence
+      ? persistence.persistOrderCreationSideEffects({
+          quote: autoQuote,
+          notifications: orderNotifications,
+          staffLog: orderCreationLog,
+        })
+      : saveStore(store, persistence);
+    const pushPromise = sendPushForNotification(clientOrderNotification);
+    if (persistence && process.env.VERCEL) {
+      scheduleBackgroundTask(
+        Promise.all([sideEffectsPromise, pushPromise]),
+        `notifications annexes de la commande ${orderToSave.reference}`
+      );
+    } else {
+      await sideEffectsPromise;
+      scheduleBackgroundTask(pushPromise, `notification Push de la commande ${orderToSave.reference}`);
+    }
     res.status(201).json(orderToSave);
   }));
 
@@ -4162,7 +4203,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
     const customerStatusNotification = store.orders[idx].userId ? store.notifications[0] : null;
     await saveStore(store, persistence);
-    if (customerStatusNotification) await sendPushForNotification(customerStatusNotification);
+    if (customerStatusNotification) {
+      scheduleBackgroundTask(sendPushForNotification(customerStatusNotification), `notification de statut ${store.orders[idx].reference}`);
+    }
     res.json(store.orders[idx]);
   }));
 
@@ -4335,13 +4378,29 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     });
 
     await saveStore(store, persistence);
-    if (customerDeliveryNotification) await sendPushForNotification(customerDeliveryNotification);
+    if (customerDeliveryNotification) {
+      scheduleBackgroundTask(sendPushForNotification(customerDeliveryNotification), `notification de livraison ${order.reference}`);
+    }
     res.json(order);
   }));
 
   app.patch('/api/orders/:id/finance', asyncHandler(async (req, res) => {
     const user = (req as AuthenticatedRequest).authenticatedUser!;
-    if (persistence) store.orders = await persistence.loadOrders();
+    let persistedInvoiceNumbers: string[] | undefined;
+    if (persistence) {
+      const [freshOrder, invoiceNumbers] = await Promise.all([
+        persistence.loadOrderById(req.params.id),
+        Array.isArray(req.body?.invoices) ? persistence.loadInvoiceNumbers() : Promise.resolve(undefined),
+      ]);
+      if (!freshOrder) {
+        res.status(404).json({ error: 'Commande introuvable.' });
+        return;
+      }
+      const existingOrderIndex = store.orders.findIndex((item) => item.id === freshOrder.id);
+      if (existingOrderIndex >= 0) store.orders[existingOrderIndex] = freshOrder;
+      else store.orders.unshift(freshOrder);
+      persistedInvoiceNumbers = invoiceNumbers;
+    }
 
     const idx = store.orders.findIndex(order => order.id === req.params.id || order.reference === req.params.id);
     if (idx === -1) {
@@ -4352,6 +4411,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const order = store.orders[idx];
     const body = req.body || {};
     const hasPermission = (permission: StaffPermission) => user.role === 'Super-Admin' || user.permissions?.includes(permission) === true;
+    const previousCollectionDueDate = order.collectionDueDate;
     const sameValue = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
     const currentInvoices = order.invoices || [];
     const currentInstallments = order.installments || [];
@@ -4364,7 +4424,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
 
     const invoiceIds = new Set<string>();
-    const invoiceNumbers = new Set(store.orders.flatMap(item => (item.invoices || []).map(invoice => invoice.number)));
+    const invoiceNumbers = new Set(persistedInvoiceNumbers || store.orders.flatMap(item => (item.invoices || []).map(invoice => invoice.number)));
     const newInvoices: InvoiceRecord[] = [];
     for (const raw of invoices) {
       if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !raw.id.trim() || invoiceIds.has(raw.id)) {
@@ -4555,7 +4615,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       order.partialDeliveryNotes = body.partialDeliveryNotes.trim().slice(0, 2000) || undefined;
     }
 
-    appendStaffLog(user, {
+    const financeLog = appendStaffLog(user, {
       category: 'orders',
       severity: 'info',
       actionLabel: 'Mise à jour financière et logistique',
@@ -4564,7 +4624,53 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       targetLabel: `${order.reference} · ${order.customer.facilityName}`,
       details: `${newInvoices.length} document(s) créé(s), ${newInstallments.length} versement(s) ajouté(s) pour ${order.reference}.`,
     });
-    await saveStore(store, persistence);
+    let clientFinanceNotification: AppNotification | undefined;
+    const dueDateChanged = previousCollectionDueDate !== order.collectionDueDate;
+    if (order.userId && (newInstallments.length > 0 || newInvoices.length > 0 || dueDateChanged)) {
+      const paidAmount = getOrderPaidAmount(order);
+      const remainingBalance = getOrderRemainingBalance(order);
+      const paymentLines = newInstallments.map((installment) =>
+        installment.amount.toLocaleString('fr-FR') + ' FCFA re\u00e7us (' + (installment.type === 'acompte' ? 'acompte' : 'solde') + ').'
+      );
+      if (newInvoices.length > 0) {
+        paymentLines.push('Document(s) ' + newInvoices.map((invoice) => invoice.number).join(', ') + ' \u00e9mis.');
+      }
+      if (dueDateChanged) {
+        paymentLines.push(order.collectionDueDate
+          ? '\u00c9ch\u00e9ance fix\u00e9e au ' + order.collectionDueDate.split('-').reverse().join('/') + '.'
+          : 'L\u2019\u00e9ch\u00e9ance de paiement a \u00e9t\u00e9 retir\u00e9e.');
+      }
+      paymentLines.push(remainingBalance > 0
+        ? 'Total re\u00e7u : ' + paidAmount.toLocaleString('fr-FR') + ' FCFA. Reste \u00e0 payer : ' + remainingBalance.toLocaleString('fr-FR') + ' FCFA.'
+        : 'Commande sold\u00e9e le ' + new Date().toLocaleDateString('fr-FR', { timeZone: 'Africa/Libreville' }) + '.');
+      clientFinanceNotification = {
+        id: 'notif-' + randomUUID(),
+        timestamp: new Date().toISOString(),
+        type: 'payment_updated',
+        title: remainingBalance <= 0 ? 'Commande sold\u00e9e' : dueDateChanged && newInstallments.length === 0 ? '\u00c9ch\u00e9ance mise \u00e0 jour' : 'Paiement mis \u00e0 jour',
+        orderId: order.id,
+        orderReference: order.reference,
+        message: paymentLines.join(' '),
+        targetRole: 'client',
+        userId: order.userId,
+        read: false,
+      };
+      store.notifications.unshift(clientFinanceNotification);
+    }
+    if (persistence) {
+      await persistence.persistOrderFinance({
+        order,
+        notifications: clientFinanceNotification ? [clientFinanceNotification] : [],
+        staffLog: financeLog,
+        couriers: body.courier !== undefined ? store.couriers : undefined,
+      });
+      if (!process.env.VERCEL) saveStoreLocal(store);
+    } else {
+      saveStoreLocal(store);
+    }
+    if (clientFinanceNotification) {
+      scheduleBackgroundTask(sendPushForNotification(clientFinanceNotification), `notification financi\u00e8re ${order.reference}`);
+    }
     res.json(redactOrderFinancialFields(order, user));
   }));
 
@@ -4709,7 +4815,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
     const customerPaymentNotification = wasPaid !== isPaid && store.orders[idx].userId ? store.notifications[0] : null;
     await saveStore(store, persistence);
-    if (customerPaymentNotification) await sendPushForNotification(customerPaymentNotification);
+    if (customerPaymentNotification) {
+      scheduleBackgroundTask(sendPushForNotification(customerPaymentNotification), `notification de paiement ${store.orders[idx].reference}`);
+    }
     res.json(store.orders[idx]);
   }));
 
@@ -4773,7 +4881,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
     const customerMobilePaymentNotification = store.orders[idx].userId ? store.notifications[0] : null;
     await saveStore(store, persistence);
-    if (customerMobilePaymentNotification) await sendPushForNotification(customerMobilePaymentNotification);
+    if (customerMobilePaymentNotification) {
+      scheduleBackgroundTask(sendPushForNotification(customerMobilePaymentNotification), `notification de preuve de paiement ${store.orders[idx].reference}`);
+    }
     res.json(store.orders[idx]);
   }));
 
@@ -4958,6 +5068,79 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       .slice(0, 30);
     res.json(recentNotifications);
   });
+
+  app.get('/api/cron/collection-due-reminders', asyncHandler(async (req, res) => {
+    const cronSecret = process.env.CRON_SECRET?.trim() || '';
+    const expectedAuthorization = 'Bearer ' + cronSecret;
+    const suppliedAuthorization = String(req.headers.authorization || '');
+    const expectedBuffer = Buffer.from(expectedAuthorization);
+    const suppliedBuffer = Buffer.from(suppliedAuthorization);
+    if (!cronSecret || expectedBuffer.length !== suppliedBuffer.length || !timingSafeEqual(expectedBuffer, suppliedBuffer)) {
+      res.status(401).json({ error: 'Autorisation du traitement planifi\u00e9 refus\u00e9e.' });
+      return;
+    }
+    if (!persistence) {
+      res.status(503).json({ error: 'Les rappels d\u2019\u00e9ch\u00e9ance n\u00e9cessitent la base Supabase.' });
+      return;
+    }
+
+    store.orders = await persistence.loadOrders();
+    const dateParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Libreville', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date());
+    const datePart = (type: Intl.DateTimeFormatPartTypes) => dateParts.find((part) => part.type === type)?.value || '0';
+    const today = datePart('year') + '-' + datePart('month') + '-' + datePart('day');
+    const todayUtc = Date.parse(today + 'T00:00:00.000Z');
+    const reminderDays = new Set([7, 3, 1, 0]);
+    const existingNotificationIds = new Set(store.notifications.map((notification) => notification.id));
+    const reminders: AppNotification[] = [];
+
+    for (const order of store.orders) {
+      if (!order.userId || !order.collectionDueDate || order.status === 'Annul\u00e9e' || getOrderRemainingBalance(order) <= 0) continue;
+      const dueUtc = Date.parse(order.collectionDueDate + 'T00:00:00.000Z');
+      if (!Number.isFinite(dueUtc)) continue;
+      const daysRemaining = Math.round((dueUtc - todayUtc) / 86400000);
+      if (!reminderDays.has(daysRemaining)) continue;
+      const id = 'due-' + order.id + '-' + order.collectionDueDate + '-' + daysRemaining;
+      if (existingNotificationIds.has(id)) continue;
+      const remaining = getOrderRemainingBalance(order);
+      const dueText = daysRemaining === 0
+        ? 'arrive \u00e0 \u00e9ch\u00e9ance aujourd\u2019hui'
+        : 'arrive \u00e0 \u00e9ch\u00e9ance dans ' + daysRemaining + ' jour' + (daysRemaining > 1 ? 's' : '');
+      reminders.push({
+        id,
+        timestamp: new Date().toISOString(),
+        type: 'payment_updated',
+        title: daysRemaining === 0 ? '\u00c9ch\u00e9ance de paiement aujourd\u2019hui' : '\u00c9ch\u00e9ance de paiement \u00e0 venir',
+        orderId: order.id,
+        orderReference: order.reference,
+        message: 'Votre commande ' + order.reference + ' ' + dueText + ' (' + order.collectionDueDate.split('-').reverse().join('/') + '). Solde restant : ' + remaining.toLocaleString('fr-FR') + ' FCFA.',
+        targetRole: 'client',
+        userId: order.userId,
+        read: false,
+      });
+      existingNotificationIds.add(id);
+    }
+
+    if (reminders.length > 0) {
+      store.notifications.unshift(...reminders);
+      await saveNotificationBatch(store, persistence, reminders);
+      const messagesByClient = new Map<string, string[]>();
+      for (const notification of reminders) {
+        if (!notification.userId) continue;
+        const messages = messagesByClient.get(notification.userId) || [];
+        messages.push(notification.message);
+        messagesByClient.set(notification.userId, messages);
+      }
+      scheduleBackgroundTask(
+        Promise.all(Array.from(messagesByClient, ([userId, messages]) =>
+          sendPushNotifications([userId], 'Rappel de paiement Gloryday Pharma', messages.join(' '), '/#dashboard')
+        )),
+        'notifications Push des \u00e9ch\u00e9ances clients'
+      );
+    }
+    res.json({ success: true, checkedAt: new Date().toISOString(), remindersCreated: reminders.length });
+  }));
 
   app.post('/api/events/announcement', asyncHandler(async (req, res) => {
     const title = String(req.body?.title || '').trim();

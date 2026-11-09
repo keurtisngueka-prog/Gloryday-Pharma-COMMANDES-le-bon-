@@ -925,7 +925,68 @@ export class SupabaseStorePersistence {
     return operation;
   }
 
-  async loadOrders(clientUserId?: string): Promise<Order[]> {
+  async loadProductsByIds(productIds: string[]): Promise<Product[]> {
+    const ids = Array.from(new Set(productIds.map((id) => String(id || '').trim()).filter(Boolean))).slice(0, 100);
+    if (ids.length === 0) return [];
+
+    const operation = this.queue.then(async () => {
+      const [productsResult, variantsResult] = await Promise.all([
+        this.client.from('products').select('*').in('id', ids),
+        this.client.from('product_variants').select('*').in('product_id', ids).order('id', { ascending: true }),
+      ]);
+      assertNoError('requested product refresh', productsResult.error);
+      assertNoError('requested variant refresh', variantsResult.error);
+
+      const variantsByProduct = new Map<string, Row[]>();
+      for (const variant of rows(variantsResult.data)) {
+        const productId = String(variant.product_id);
+        const list = variantsByProduct.get(productId) || [];
+        list.push(variant);
+        variantsByProduct.set(productId, list);
+      }
+
+      const products = rows(productsResult.data).map((row): Product => {
+        const extra = dataObject(row.app_data);
+        return {
+          ...extra,
+          id: String(row.id),
+          name: String(row.name),
+          category: String(row.category),
+          subcategory: row.subcategory || undefined,
+          specialty: extra.specialty,
+          specifications: extra.specifications,
+          variants: (variantsByProduct.get(String(row.id)) || []).map((variant) => ({
+            label: String(variant.label),
+            price: numberOr(variant.price),
+            originalPrice: variant.original_price == null ? undefined : numberOr(variant.original_price),
+            discountPercentage: variant.discount_percentage == null ? undefined : numberOr(variant.discount_percentage),
+          })),
+          status: row.status === 'rupture' ? 'rupture' : 'disponible',
+          image: row.image_url || undefined,
+          thumbnailUrl: extra.thumbnailUrl || row.image_url || undefined,
+          description: row.description || undefined,
+          isPromotion: Boolean(row.is_promotion),
+          originalPrice: numberOr(row.original_price),
+          discountPercentage: numberOr(row.discount_percentage),
+          stockQuantity: extra.stockQuantity,
+          quantityAvailable: extra.quantityAvailable,
+          alertThreshold: numberOr(row.alert_threshold, 15),
+          lowStockAlertThreshold: extra.lowStockAlertThreshold,
+          purchasePrice: numberOr(row.purchase_price),
+          purchasePriceVerified: extra.purchasePriceVerified === true,
+        };
+      }).filter((product) => !LEGACY_DEMO_PRODUCT_IDS.has(product.id));
+
+      if (this.baseline) {
+        this.baseline.products = mergeById(this.baseline.products || [], products, (item) => item.id);
+      }
+      return products;
+    });
+    this.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  async loadOrders(clientUserId?: string, orderId?: string): Promise<Order[]> {
     const operation = this.queue.then(async () => {
       const profileId = clientUserId ? this.profileIds.get(clientUserId) : undefined;
       if (clientUserId && !profileId) {
@@ -933,6 +994,7 @@ export class SupabaseStorePersistence {
       }
       let ordersQuery = this.client.from('orders').select('*').order('created_at', { ascending: false });
       if (profileId) ordersQuery = ordersQuery.eq('client_id', profileId);
+      if (orderId) ordersQuery = ordersQuery.eq('id', orderId);
       const ordersResult = await ordersQuery;
       assertNoError('actualisation des commandes', ordersResult.error);
 
@@ -1011,8 +1073,47 @@ export class SupabaseStorePersistence {
         } as Order;
       });
 
-      if (this.baseline && !clientUserId) this.baseline.orders = clone(orders);
+      if (this.baseline && !clientUserId) {
+        this.baseline.orders = orderId
+          ? mergeById(this.baseline.orders || [], orders, (item) => item.id)
+          : clone(orders);
+      }
       return orders;
+    });
+    this.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  async loadOrderById(orderId: string): Promise<Order | null> {
+    const normalizedId = String(orderId || '').trim();
+    if (!normalizedId) return null;
+    const orders = await this.loadOrders(undefined, normalizedId);
+    return orders.find((order) => order.id === normalizedId) || null;
+  }
+
+  async loadInvoiceNumbers(): Promise<string[]> {
+    const operation = this.queue.then(async () => {
+      const invoiceNumbers: string[] = [];
+      const pageSize = 500;
+      for (let offset = 0; ; offset += pageSize) {
+        const { data, error } = await this.client
+          .from('orders')
+          .select('id, app_data')
+          .order('id', { ascending: true })
+          .range(offset, offset + pageSize - 1);
+        assertNoError('lecture des numéros de documents existants', error);
+        const page = rows(data);
+        for (const row of page) {
+          const invoices = dataObject(row.app_data).invoices;
+          if (!Array.isArray(invoices)) continue;
+          for (const invoice of invoices) {
+            const number = String(dataObject(invoice).number || '').trim();
+            if (number) invoiceNumbers.push(number);
+          }
+        }
+        if (page.length < pageSize) break;
+      }
+      return invoiceNumbers;
     });
     this.queue = operation.then(() => undefined, () => undefined);
     return operation;
@@ -1302,6 +1403,94 @@ export class SupabaseStorePersistence {
     const operation = this.queue.then(() => this.createOrderAtomicallyInQueue(snapshot, store));
     this.queue = operation.then(() => undefined, () => undefined);
     return operation;
+  }
+
+  async persistOrderCreationSideEffects(input: {
+    quote?: CommercialQuote;
+    notifications: AppNotification[];
+    staffLog?: StaffActivityLog;
+  }): Promise<void> {
+    const quote = input.quote ? clone(input.quote) : undefined;
+    const notifications = clone(input.notifications);
+    const staffLog = input.staffLog ? clone(input.staffLog) : undefined;
+    const operation = this.queue.then(async () => {
+      if (!this.baseline) throw new Error('Supabase must be initialized before order side effects can be saved.');
+      const sideEffectsStore: PersistentServerStore = {
+        ...this.baseline,
+        quotes: quote ? [quote] : [],
+        notifications,
+        staffLogs: staffLog ? [staffLog] : [],
+      };
+
+      await Promise.all([
+        quote ? this.persistQuotes(sideEffectsStore) : Promise.resolve(),
+        this.persistNotifications(sideEffectsStore),
+        staffLog ? this.persistActivityLogs(sideEffectsStore) : Promise.resolve(),
+      ]);
+
+      const nextBaseline = clone(this.baseline);
+      if (quote) nextBaseline.quotes = mergeById(nextBaseline.quotes || [], [quote], (item) => item.id);
+      nextBaseline.notifications = mergeById(nextBaseline.notifications || [], notifications, (item) => item.id);
+      if (staffLog) nextBaseline.staffLogs = mergeById(nextBaseline.staffLogs || [], [staffLog], (item) => item.id).slice(0, 500);
+      this.baseline = nextBaseline;
+    });
+    this.queue = operation.catch(() => undefined);
+    await operation;
+  }
+
+  async persistOrderFinance(input: {
+    order: Order;
+    notifications: AppNotification[];
+    staffLog?: StaffActivityLog;
+    couriers?: Courier[];
+  }): Promise<void> {
+    const order = clone(input.order);
+    const notifications = clone(input.notifications);
+    const staffLog = input.staffLog ? clone(input.staffLog) : undefined;
+    const couriers = input.couriers ? clone(input.couriers) : undefined;
+    const operation = this.queue.then(async () => {
+      if (!this.baseline) throw new Error('Supabase must be initialized before order finance can be saved.');
+      const { error } = await this.client.from('orders').update({
+        estimated_total: Math.max(0, Math.trunc(numberOr(order.estimatedTotal))),
+        status: order.status,
+        is_paid: Boolean(order.isPaid),
+        delivery_stage: order.deliveryStage || 'preparation',
+        cancellation_reason: order.cancellationReason || null,
+        pdf_url: pdfUrlForDatabase(order.pdfUrl),
+        courier_name: order.courier?.name || null,
+        courier_phone: order.courier?.phone || null,
+        courier_vehicle: order.courier?.vehicle || null,
+        courier_matricule: order.courier?.matricule || null,
+        courier_current_zone: order.courier?.currentZone || null,
+        app_data: orderForDatabase(order),
+        updated_at: new Date().toISOString(),
+      }).eq('id', order.id);
+      assertNoError(`finance order save ${order.reference}`, error);
+
+      const sideEffectsStore: PersistentServerStore = {
+        ...this.baseline,
+        orders: [order],
+        notifications,
+        staffLogs: staffLog ? [staffLog] : [],
+        ...(couriers ? { couriers } : {}),
+      };
+      await Promise.all([
+        notifications.length > 0 ? this.persistNotifications(sideEffectsStore) : Promise.resolve(),
+        staffLog ? this.persistActivityLogs(sideEffectsStore) : Promise.resolve(),
+        couriers ? this.persistRuntimeSettings(sideEffectsStore) : Promise.resolve(),
+      ]);
+
+      const nextBaseline = clone(this.baseline);
+      nextBaseline.orders = mergeById(nextBaseline.orders || [], [order], (item) => item.id);
+      if (notifications.length > 0) {
+        nextBaseline.notifications = mergeById(nextBaseline.notifications || [], notifications, (item) => item.id);
+      }
+      if (staffLog) nextBaseline.staffLogs = mergeById(nextBaseline.staffLogs || [], [staffLog], (item) => item.id).slice(0, 500);
+      if (couriers) nextBaseline.couriers = mergeCourierDirectories(couriers);
+      this.baseline = nextBaseline;
+    });
+    this.queue = operation.catch(() => undefined);
+    await operation;
   }
 
   private async createOrderAtomicallyInQueue(

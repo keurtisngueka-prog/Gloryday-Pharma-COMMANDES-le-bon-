@@ -828,7 +828,9 @@ export default function App() {
       setConfirmedPdfDataUrl(undefined);
       setConfirmedPdfFailed(false);
 
-      await prepareConfirmedOrderPdf(newOrder);
+      // The order is already committed at this point. Show its confirmation
+      // immediately and prepare the downloadable PDF in the background.
+      void prepareConfirmedOrderPdf(newOrder);
       api.getOrders(currentUser.phone).then(setOrders).catch(() => {});
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : 'Erreur réseau ou serveur lors de la confirmation. Vérifiez « Mes commandes » avant de réessayer.', 'error');
@@ -1689,7 +1691,7 @@ export default function App() {
           if (n.type === 'promotion') {
             setActiveTab('catalog');
             setOnlyPromotions(true);
-          } else if (n.type === 'order_created' || n.type === 'status_changed') {
+          } else if (n.type === 'order_created' || n.type === 'status_changed' || n.type === 'payment_updated') {
             if (currentUser?.role !== 'client' && currentUser && canReadStaffOrders(currentUser)) {
               setActiveTab('admin-orders');
             } else {

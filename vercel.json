@@ -9,6 +9,12 @@
       "maxDuration": 60
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/collection-due-reminders",
+      "schedule": "0 7 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/:path*",

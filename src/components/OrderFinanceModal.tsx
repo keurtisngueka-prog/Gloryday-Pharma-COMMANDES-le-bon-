@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   X, 
   CreditCard, 
@@ -61,6 +61,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   ];
   const [activeTab, setActiveTab] = useState<'installments' | 'invoices' | 'delivery' | 'partial'>(availableTabs[0] || 'invoices');
   const [isSaving, setIsSaving] = useState(false);
+  const paymentSubmitLockRef = useRef(false);
   const [saveError, setSaveError] = useState('');
   const [couriers, setCouriers] = useState<Courier[]>([]);
   const [courierDirectoryError, setCourierDirectoryError] = useState('');
@@ -130,11 +131,16 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
   const handleAddInstallment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canManagePayments) return;
-    if (installmentAmount <= 0) return;
+    if (!canManagePayments || paymentSubmitLockRef.current) return;
+    if (!Number.isSafeInteger(installmentAmount) || installmentAmount <= 0 || installmentAmount > remainingDue) {
+      setSaveError(`Saisissez un montant entier compris entre 1 et ${remainingDue.toLocaleString('fr-FR')} FCFA.`);
+      return;
+    }
+    paymentSubmitLockRef.current = true;
+    try {
 
     const newInst: PaymentInstallment = {
-      id: `INST-${Date.now()}`,
+      id: globalThis.crypto?.randomUUID?.() || `INST-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       type: installmentType,
       amount: Number(installmentAmount),
       paymentMethod: installmentMethod,
@@ -158,6 +164,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
     if (!await saveUpdatedOrder(updatedOrder)) return;
     if (isNowFullyPaid) setCollectionDueDate('');
+    setInstallmentAmount(0);
 
     logAuditEvent(
       currentUser,
@@ -170,6 +177,9 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     );
 
     setInstallmentRef('');
+    } finally {
+      paymentSubmitLockRef.current = false;
+    }
   };
 
   const handleSaveCollectionDueDate = async () => {
@@ -240,7 +250,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     try {
       await downloadInvoiceProjectPdf(order, invoice);
     } catch (error) {
-      console.error('Impossible de générer le projet de facture PDF:', error);
+      console.error('Impossible de générer le PDF de facture:', error);
       setInvoiceDownloadError('Le PDF n’a pas pu être créé. Réessayez dans un instant.');
     } finally {
       setDownloadingInvoiceId(null);
@@ -456,6 +466,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                       <input
                         type="number"
                         min="1"
+                        step="1"
                         max={remainingDue}
                         value={installmentAmount}
                         onChange={(e) => setInstallmentAmount(Number(e.target.value))}
@@ -496,7 +507,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                     disabled={isSaving}
                     className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl cursor-pointer shadow-xs mt-1"
                   >
-                    Valider l'Encaissement
+                    {isSaving ? 'Enregistrement…' : 'Valider l’encaissement'}
                   </button>
                 </form>
               )}
@@ -509,7 +520,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
               <div className="space-y-1">
                 <span className="font-bold text-slate-700 text-[11px]">Documents de commande :</span>
                 <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[10px] text-amber-900">
-                  Les documents générés ici sont des projets internes. Vérifiez les mentions, la numérotation et le taux applicable avec votre comptable avant de les transmettre.
+                  La facture et l’avoir sont enregistrés dans le dossier de cette commande. Vérifiez les mentions et le taux applicable avant de transmettre le document.
                 </p>
                 {(!order.invoices || order.invoices.length === 0) ? (
                   <p className="text-slate-400 italic">Aucune facture ou note d'avoir générée pour cette commande.</p>
@@ -519,7 +530,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                       <div>
                         <div className="font-bold text-slate-900 font-mono">{inv.number}</div>
                         <div className="text-[10px] text-slate-500">
-                          {inv.type === 'facture' ? 'Projet de facture' : 'Projet d’avoir'} · Créé le {inv.issueDate}
+                          {inv.type === 'facture' ? 'Facture' : 'Avoir'} · Créé le {inv.issueDate}
                           {inv.reason && ` · Motif : ${inv.reason}`}
                         </div>
                       </div>
@@ -533,7 +544,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                           className="mt-1 inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-[#0d44e8] hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
                         >
                           <Download className="h-3 w-3" />
-                          {downloadingInvoiceId === inv.id ? 'Création…' : 'Télécharger le projet PDF'}
+                          {downloadingInvoiceId === inv.id ? 'Création…' : `Télécharger ${inv.type === 'facture' ? 'la facture' : 'l’avoir'} PDF`}
                         </button>
                       </div>
                     </div>
@@ -548,7 +559,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
               )}
 
               {canManageInvoices && <form onSubmit={handleCreateInvoiceOrCredit} className="p-3 border border-slate-200 rounded-xl space-y-2 bg-slate-50/50">
-                <span className="font-bold text-slate-800">Créer un projet de document :</span>
+                <span className="font-bold text-slate-800">Créer un document :</span>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-slate-600 mb-0.5">Type de Document</label>
@@ -557,8 +568,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                       onChange={(e: any) => setInvoiceType(e.target.value)}
                       className="w-full p-1.5 border border-slate-300 rounded-lg bg-white"
                     >
-                      <option value="facture">Projet de facture</option>
-                      <option value="avoir">Projet d'avoir / retour</option>
+                      <option value="facture">Facture</option>
+                      <option value="avoir">Avoir / retour</option>
                     </select>
                   </div>
                   <div>
@@ -593,7 +604,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                   disabled={isSaving}
                   className="w-full py-2 bg-[#0d44e8] hover:bg-blue-700 text-white font-bold rounded-xl cursor-pointer shadow-xs mt-1"
                 >
-                  Créer {invoiceType === 'facture' ? 'le projet de facture' : 'le projet d’avoir'}
+                  Créer {invoiceType === 'facture' ? 'la facture' : 'l’avoir'}
                 </button>
               </form>}
             </div>

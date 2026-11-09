@@ -56,7 +56,7 @@ export const NeighborhoodPicker: React.FC<NeighborhoodPickerProps> = ({
       neighborhood.estimatedMinutes,
       getNeighborhoodAdministrativeArea(neighborhood.id)
     ].join(' ')).includes(normalizedQuery);
-  });
+  }).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 
   const selectNeighborhood = (neighborhoodId: string) => {
     const neighborhood = getNeighborhoodById(neighborhoodId);
@@ -131,6 +131,9 @@ export const NeighborhoodPicker: React.FC<NeighborhoodPickerProps> = ({
 
       {isOpen && !disabled && (
         <div className="absolute inset-x-0 top-full z-[80] mt-1 max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+          <p role="status" className="sticky top-0 z-10 rounded-lg bg-white px-3 py-2 text-[10px] font-semibold text-slate-500">
+            {normalizedQuery ? `${filteredNeighborhoods.length} quartier(s) trouvé(s)` : `${filteredNeighborhoods.length} quartiers disponibles`}
+          </p>
           {filteredNeighborhoods.length > 0 ? (
             <ul id={listId} role="listbox" aria-label="Quartiers disponibles" className="space-y-0.5">
               {filteredNeighborhoods.map((neighborhood, index) => (

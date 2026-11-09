@@ -658,7 +658,7 @@ export const CartView: React.FC<CartViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
                 <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                  Mode de règlement
+                  Mode de règlement souhaité
                 </label>
                 <select
                   value={paymentMethod}
@@ -676,6 +676,9 @@ export const CartView: React.FC<CartViewProps> = ({
                     </option>
                   )}
                 </select>
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                  Ce choix indique au service le règlement prévu ; il ne confirme pas le paiement. Gloryday vérifie chaque encaissement et décide de l’autorisation ainsi que de l’échéance du paiement à terme selon les conditions validées du compte.
+                </p>
                 {hasAccountCreditLine && currentUser?.paymentTerms === 'acompte_solde' && (
                   <p className="mt-1 text-[10px] font-medium text-blue-700">
                     Votre compte exige un acompte. Sélectionnez un mode de règlement direct pour enregistrer la commande, puis l’équipe suivra le solde.
