@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { CartItem, Coordinates, CustomerInfo, Order, User } from '../types';
 import { PhoneNumberInput } from './PhoneNumberInput';
-import { getOrderRemainingBalance } from '../utils/orderFinance';
+import { FREE_DELIVERY_THRESHOLD_FCFA, getOrderRemainingBalance } from '../utils/orderFinance';
 import { calculateCartVolumeSummary, calculateItemVolumePrice } from '../utils/volumeDiscount';
 import { 
   buildNeighborhoodDeliveryAddress,
@@ -117,9 +117,9 @@ export const CartView: React.FC<CartViewProps> = ({
   const selectedNeighborhood = getNeighborhoodById(neighborhoodId);
   const deliveryWindow = computeDeliveryTimeWindow(neighborhoodId);
 
-  // Free delivery for orders >= 50,000 FCFA or for pickup
+  // Free delivery for orders >= 30,000 FCFA or for pickup
   const baseDeliveryFee = deliveryMode === 'retrait' ? 0 : (selectedNeighborhood?.baseDeliveryFee || 0);
-  const deliveryFee = itemsSubtotal >= 50000 ? 0 : baseDeliveryFee;
+  const deliveryFee = itemsSubtotal >= FREE_DELIVERY_THRESHOLD_FCFA ? 0 : baseDeliveryFee;
   const estimatedTotal = itemsSubtotal + deliveryFee;
   const hasAccountCreditLine = Boolean(
     currentUser?.role === 'client'
@@ -610,7 +610,7 @@ export const CartView: React.FC<CartViewProps> = ({
                       <span>Arrivée estimée : <strong>{deliveryWindow.timeWindow}</strong></span>
                     </span>
                     <span className="text-[10px] font-bold text-emerald-800">
-                      {itemsSubtotal >= 50000 ? 'Livraison offerte' : `${baseDeliveryFee.toLocaleString('fr-FR')} F`}
+                      {itemsSubtotal >= FREE_DELIVERY_THRESHOLD_FCFA ? 'Livraison offerte dès 30 000 FCFA' : `${baseDeliveryFee.toLocaleString('fr-FR')} F`}
                     </span>
                   </div>
                 )}

@@ -142,8 +142,37 @@ export interface OrderItem {
   total: number;
   isQuote: boolean;
   isDeferredStock?: boolean;
+  /** Quantity removed from available stock when the order was created. */
+  stockReservedQuantity?: number;
   discountPercent?: number;
   savings?: number;
+}
+
+export interface DeliveryFulfillmentLine {
+  itemIndex: number;
+  quantity: number;
+}
+
+export interface DeliveryFulfillment {
+  id: string;
+  fulfilledAt: string;
+  lines: DeliveryFulfillmentLine[];
+  notes?: string;
+  recordedById: string;
+  recordedByName: string;
+}
+
+export interface InvoiceLineItem {
+  itemIndex: number;
+  productId: string;
+  productName: string;
+  variant: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  savings?: number;
+  discountPercent?: number;
+  isQuote?: boolean;
 }
 
 export type DeliveryStage = 'preparation' | 'picked_up' | 'in_transit' | 'delivered';
@@ -213,6 +242,9 @@ export interface InvoiceRecord {
   tvaAmount: number;
   totalHT: number;
   totalTTC: number;
+  /** Immutable item snapshot. For partial deliveries only delivered, unbilled quantities are included. */
+  lineItems?: InvoiceLineItem[];
+  deliveryFee?: number;
   reason?: string;
 }
 
@@ -283,6 +315,7 @@ export interface Order {
   deliveryProof?: DeliveryProof;
   isPartialDelivery?: boolean;
   partialDeliveryNotes?: string;
+  deliveryFulfillments?: DeliveryFulfillment[];
   pdfUrl?: string;
   assignedCommercialId?: string;
   mobilePayment?: MobilePaymentDetails;

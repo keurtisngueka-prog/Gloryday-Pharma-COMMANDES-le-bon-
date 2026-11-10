@@ -1,26 +1,36 @@
 import type { Order } from '../types';
+import { getOrderBillingTotal } from './orderFulfillment';
 
-export function getOrderPaidAmount(order: Pick<Order, 'estimatedTotal' | 'isPaid' | 'amountPaid' | 'installments' | 'status'>): number {
+export const FREE_DELIVERY_THRESHOLD_FCFA = 30_000;
+
+type FinanceOrder = Pick<Order, 'estimatedTotal' | 'isPaid' | 'amountPaid' | 'installments' | 'status'> &
+  Partial<Pick<Order, 'invoices' | 'deliveryFulfillments'>>;
+
+export function getOrderPaidAmount(order: FinanceOrder): number {
   if (order.status === 'Annulée') return 0;
-  const total = Math.max(0, Math.trunc(Number(order.estimatedTotal) || 0));
-  if (order.isPaid) return total;
+  const total = getOrderBillingTotal(order);
   if (order.installments?.length) {
-    return Math.min(total, order.installments.reduce(
+    const confirmed = order.installments.reduce(
       (sum, installment) => sum + (installment.status === 'valide' ? Math.max(0, Math.trunc(Number(installment.amount) || 0)) : 0),
       0,
-    ));
+    );
+    return (order.deliveryFulfillments || []).length ? confirmed : Math.min(total, confirmed);
+  }
+  if (order.isPaid && (!Number.isFinite(Number(order.amountPaid)) || Number(order.amountPaid) <= 0)) {
+    return Math.max(total, Math.max(0, Math.trunc(Number(order.estimatedTotal) || 0)));
   }
   if (Number.isFinite(Number(order.amountPaid))) {
-    return Math.min(total, Math.max(0, Math.trunc(Number(order.amountPaid))));
+    const paid = Math.max(0, Math.trunc(Number(order.amountPaid)));
+    return (order.deliveryFulfillments || []).length ? paid : Math.min(total, paid);
   }
-  return order.isPaid ? total : 0;
+  return order.isPaid ? Math.max(total, Math.max(0, Math.trunc(Number(order.estimatedTotal) || 0))) : 0;
 }
 
-export function getOrderRemainingBalance(order: Parameters<typeof getOrderPaidAmount>[0]): number {
-  return Math.max(0, Math.max(0, Math.trunc(Number(order.estimatedTotal) || 0)) - getOrderPaidAmount(order));
+export function getOrderRemainingBalance(order: FinanceOrder): number {
+  return Math.max(0, getOrderBillingTotal(order) - getOrderPaidAmount(order));
 }
 
-export function isCollectionOverdue(order: Pick<Order, 'collectionDueDate' | 'status' | 'estimatedTotal' | 'isPaid' | 'amountPaid' | 'installments'>): boolean {
+export function isCollectionOverdue(order: FinanceOrder & Pick<Order, 'collectionDueDate'>): boolean {
   if (!order.collectionDueDate || getOrderRemainingBalance(order) <= 0) return false;
   const dateParts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Libreville',

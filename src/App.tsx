@@ -581,6 +581,11 @@ export default function App() {
 
   // Auth Handlers
   const handleAuthSuccess = (user: User) => {
+    const firstName = (user.contactName || '').trim().split(/\s+/)[0];
+    const welcomeMessage = user.role === 'client'
+      ? `Bonjour${firstName ? ` ${firstName}` : ''} ! Gloryday Pharma vous souhaite une belle journée.`
+      : `Bonjour${firstName ? ` ${firstName}` : ''} ! Toute l’équipe Gloryday vous souhaite une belle journée de travail.`;
+    showToast(welcomeMessage, 'success');
     const generation = ++authGeneration.current;
     lastEventTimestamp.current = 0;
     setNotifications([]);
@@ -964,6 +969,7 @@ export default function App() {
     if (!previousOrder || !sameValue(previousOrder.deliveryProof, updatedOrder.deliveryProof)) patch.deliveryProof = updatedOrder.deliveryProof || null;
     if (!previousOrder || !sameValue(previousOrder.isPartialDelivery, updatedOrder.isPartialDelivery)) patch.isPartialDelivery = updatedOrder.isPartialDelivery;
     if (!previousOrder || !sameValue(previousOrder.partialDeliveryNotes, updatedOrder.partialDeliveryNotes)) patch.partialDeliveryNotes = updatedOrder.partialDeliveryNotes || '';
+    if (!previousOrder || !sameValue(previousOrder.deliveryFulfillments || [], updatedOrder.deliveryFulfillments || [])) patch.deliveryFulfillments = updatedOrder.deliveryFulfillments || [];
     if (Object.keys(patch).length === 0) return;
     const savedOrder = await api.updateOrderFinance(updatedOrder.id, patch);
     setOrders(prev => prev.map(order => order.id === savedOrder.id ? savedOrder : order));

@@ -56,8 +56,8 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
 
   // Edit Credit / Terms Modal
   const [isEditTermsOpen, setIsEditTermsOpen] = useState(false);
-  const [creditLimitInput, setCreditLimitInput] = useState<number>(500000);
-  const [minimumCreditOrderAmountInput, setMinimumCreditOrderAmountInput] = useState<number>(50000);
+  const [creditLimitInput, setCreditLimitInput] = useState('500000');
+  const [minimumCreditOrderAmountInput, setMinimumCreditOrderAmountInput] = useState('50000');
   const [paymentTermsInput, setPaymentTermsInput] = useState<PaymentTerms>('30_jours');
   const [accountStatusInput, setAccountStatusInput] = useState<ClientAccountStatus>('actif');
 
@@ -69,7 +69,7 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
   // Healthcare structures state
   const [structures, setStructures] = useState<HealthcareStructure[]>(() => getHealthcareStructures());
   const [quotaModalStructure, setQuotaModalStructure] = useState<HealthcareStructure | null>(null);
-  const [quotaInput, setQuotaInput] = useState<number>(3);
+  const [quotaInput, setQuotaInput] = useState('3');
 
   // Pending director requests
   const pendingDirectors = useMemo(() => {
@@ -130,7 +130,9 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
     e.preventDefault();
     if (!quotaModalStructure) return;
 
-    const updated = updateStructureQuota(quotaModalStructure.id, quotaInput);
+    const cleanQuota = Number(quotaInput);
+    if (!Number.isSafeInteger(cleanQuota) || cleanQuota < 1 || cleanQuota > 50) return;
+    const updated = updateStructureQuota(quotaModalStructure.id, cleanQuota);
     if (updated) {
       setStructures(getHealthcareStructures());
       logAuditEvent(
@@ -138,9 +140,9 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
         'modification_parametres',
         'Plafond Structure',
         quotaModalStructure.id,
-        `Ajustement du plafond de comptes pour « ${quotaModalStructure.name} » : ${quotaModalStructure.maxAccounts} ➔ ${quotaInput} comptes`,
+        `Ajustement du plafond de comptes pour « ${quotaModalStructure.name} » : ${quotaModalStructure.maxAccounts} ➔ ${cleanQuota} comptes`,
         String(quotaModalStructure.maxAccounts),
-        String(quotaInput)
+        String(cleanQuota)
       );
     }
     setQuotaModalStructure(null);
@@ -148,8 +150,8 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
 
   const handleOpenEditTerms = (client: User) => {
     setSelectedClient(client);
-    setCreditLimitInput(client.creditLimit ?? 0);
-    setMinimumCreditOrderAmountInput(client.minimumCreditOrderAmount ?? 50000);
+    setCreditLimitInput(String(client.creditLimit ?? 0));
+    setMinimumCreditOrderAmountInput(String(client.minimumCreditOrderAmount ?? 50000));
     setPaymentTermsInput(client.paymentTerms || '30_jours');
     setAccountStatusInput(client.accountStatus || 'actif');
     setIsEditTermsOpen(true);
@@ -164,8 +166,8 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
 
     const updated: User = {
       ...selectedClient,
-      creditLimit: Number(creditLimitInput),
-      minimumCreditOrderAmount: Number(minimumCreditOrderAmountInput),
+      creditLimit: Math.max(0, Number(creditLimitInput) || 0),
+      minimumCreditOrderAmount: Math.max(0, Number(minimumCreditOrderAmountInput) || 0),
       paymentTerms: paymentTermsInput,
       accountStatus: accountStatusInput
     };
@@ -177,7 +179,7 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
       'statut_client',
       'Client B2B',
       selectedClient.id,
-      `Mise à jour des conditions B2B pour ${selectedClient.facilityName} : Statut=${accountStatusInput}, Plafond=${creditLimitInput.toLocaleString('fr-FR')} FCFA, minimum commande à terme=${minimumCreditOrderAmountInput.toLocaleString('fr-FR')} FCFA (${paymentTermsInput})`,
+      `Mise à jour des conditions B2B pour ${selectedClient.facilityName} : Statut=${accountStatusInput}, Plafond=${Number(creditLimitInput).toLocaleString('fr-FR')} FCFA, minimum commande à terme=${Number(minimumCreditOrderAmountInput).toLocaleString('fr-FR')} FCFA (${paymentTermsInput})`,
       `Statut:${previousStatus} / Plafond:${previousLimit}`,
       `Statut:${accountStatusInput} / Plafond:${creditLimitInput} / Minimum:${minimumCreditOrderAmountInput}`
     );
@@ -570,7 +572,7 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
                       type="button"
                       onClick={() => {
                         setQuotaModalStructure(s);
-                        setQuotaInput(s.maxAccounts);
+                        setQuotaInput(String(s.maxAccounts));
                       }}
                       className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-[#0d44e8] font-bold text-xs cursor-pointer flex items-center gap-1 border border-blue-200"
                     >
@@ -608,9 +610,9 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
                     <button
                       key={q}
                       type="button"
-                      onClick={() => setQuotaInput(q)}
+                      onClick={() => setQuotaInput(String(q))}
                       className={`p-1.5 rounded-lg border font-bold text-center cursor-pointer ${
-                        quotaInput === q 
+                        Number(quotaInput) === q
                           ? 'bg-[#0d44e8] text-white border-[#0d44e8]' 
                           : 'bg-slate-50 text-slate-700 border-slate-200'
                       }`}
@@ -623,8 +625,9 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
                   type="number"
                   min={1}
                   max={50}
+                  required
                   value={quotaInput}
-                  onChange={(e) => setQuotaInput(Number(e.target.value))}
+                  onChange={(e) => setQuotaInput(e.target.value)}
                   className="w-full p-2 rounded-xl border border-slate-300 font-mono text-center font-bold text-base"
                 />
               </div>
@@ -670,9 +673,11 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
                 <input
                   type="number"
                   min={0}
+                  max={1_000_000_000}
                   step={50000}
+                  required
                   value={creditLimitInput}
-                  onChange={(e) => setCreditLimitInput(Number(e.target.value))}
+                  onChange={(e) => setCreditLimitInput(e.target.value)}
                   className="w-full p-2 border border-slate-300 rounded-xl font-mono"
                 />
               </div>
@@ -684,9 +689,11 @@ export const EnterpriseClientsModule: React.FC<EnterpriseClientsModuleProps> = (
                 <input
                   type="number"
                   min={0}
+                  max={1_000_000_000}
                   step={5000}
+                  required
                   value={minimumCreditOrderAmountInput}
-                  onChange={(e) => setMinimumCreditOrderAmountInput(Math.max(0, Number(e.target.value) || 0))}
+                  onChange={(e) => setMinimumCreditOrderAmountInput(e.target.value)}
                   className="w-full p-2 border border-slate-300 rounded-xl font-mono"
                 />
                 <p className="mt-1 text-[10px] text-slate-500">Le client verra le montant qui lui manque pour atteindre ce seuil.</p>

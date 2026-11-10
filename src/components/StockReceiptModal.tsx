@@ -38,6 +38,7 @@ export const StockReceiptModal: React.FC<StockReceiptModalProps> = ({ product, o
   const [reason, setReason] = useState('');
   const [lotNumber, setLotNumber] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
+  const [expiryNotApplicable, setExpiryNotApplicable] = useState(false);
   const [supplierName, setSupplierName] = useState('');
   const [supplierReference, setSupplierReference] = useState('');
   const [purchasePrice, setPurchasePrice] = useState('');
@@ -54,6 +55,7 @@ export const StockReceiptModal: React.FC<StockReceiptModalProps> = ({ product, o
     setReason('');
     setLotNumber('');
     setExpiryDate('');
+    setExpiryNotApplicable(false);
     setSupplierName('');
     setSupplierReference('');
     setPurchasePrice('');
@@ -92,7 +94,7 @@ export const StockReceiptModal: React.FC<StockReceiptModalProps> = ({ product, o
         reason: reason.trim(),
         movementId,
         lotNumber: lotNumber.trim() || undefined,
-        expiryDate: expiryDate || undefined,
+        expiryDate: expiryNotApplicable ? undefined : expiryDate || undefined,
         supplierName: supplierName.trim() || undefined,
         supplierReference: supplierReference.trim() || undefined,
         purchasePrice: purchasePrice === '' ? undefined : Number(purchasePrice),
@@ -104,6 +106,7 @@ export const StockReceiptModal: React.FC<StockReceiptModalProps> = ({ product, o
       setReason('');
       setLotNumber('');
       setExpiryDate('');
+      setExpiryNotApplicable(false);
       setSupplierName('');
       setSupplierReference('');
       setPurchasePrice('');
@@ -177,15 +180,33 @@ export const StockReceiptModal: React.FC<StockReceiptModalProps> = ({ product, o
                 className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
               />
             </label>
-            <label className="text-xs font-bold text-slate-700">
-              Date de péremption <span className="font-medium text-slate-400">(si applicable)</span>
+            <div className="text-xs font-bold text-slate-700">
+              <label htmlFor="stock-receipt-expiry-date" className="font-bold text-slate-700">
+                Date de péremption <span className="font-medium text-slate-400">(si applicable)</span>
+              </label>
               <input
+                id="stock-receipt-expiry-date"
                 type="date"
                 value={expiryDate}
+                disabled={expiryNotApplicable}
                 onChange={event => { setExpiryDate(event.target.value); setError(''); setSuccess(''); }}
-                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
               />
-            </label>
+              <label className="mt-2 flex cursor-pointer items-start gap-2 text-[11px] font-medium text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={expiryNotApplicable}
+                  onChange={event => {
+                    setExpiryNotApplicable(event.target.checked);
+                    if (event.target.checked) setExpiryDate('');
+                    setError('');
+                    setSuccess('');
+                  }}
+                  className="mt-0.5 rounded border-slate-300"
+                />
+                <span>Ce produit / conditionnement n’a pas de date de péremption.</span>
+              </label>
+            </div>
             <label className="text-xs font-bold text-slate-700">
               Fournisseur <span className="font-medium text-slate-400">(facultatif)</span>
               <input

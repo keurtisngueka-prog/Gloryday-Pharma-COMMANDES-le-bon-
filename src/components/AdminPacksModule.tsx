@@ -61,7 +61,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
   // Form states
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [price, setPrice] = useState<number>(50000);
+  const [price, setPrice] = useState('50000');
   const [image, setImage] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -129,7 +129,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
     setEditingPack(null);
     setTitle('');
     setDescription('');
-    setPrice(45000);
+    setPrice('45000');
     setImage('');
     setProductSearch('');
     setPhotoError('');
@@ -142,7 +142,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
     setEditingPack(pack);
     setTitle(pack.title);
     setDescription(pack.description);
-    setPrice(pack.price);
+    setPrice(String(pack.price));
     setImage(pack.image);
     setProductSearch('');
     setPhotoError('');
@@ -190,7 +190,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
         'creation_pack',
         'Pack Dotation',
         editingPack.id,
-        `Modification du pack ${title} (${price.toLocaleString('fr-FR')} FCFA)`
+        `Modification du pack ${title} (${Number(price).toLocaleString('fr-FR')} FCFA)`
       );
     } else {
       await onCreatePack({
@@ -206,7 +206,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
         'creation_pack',
         'Pack Dotation',
         'NEW_PACK',
-        `Création du pack promotionnel ${title} (${price.toLocaleString('fr-FR')} FCFA)`
+        `Création du pack promotionnel ${title} (${Number(price).toLocaleString('fr-FR')} FCFA)`
       );
     }
 
@@ -421,7 +421,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
                       type="number"
                       min="1"
                       step="1"
-                      value={it.quantity}
+                      value={it.quantity || ''}
                       onChange={(e) => {
                         const newItems = [...items];
                         newItems[idx].quantity = Number(e.target.value);
@@ -456,9 +456,9 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
                 </div>
                 {unpricedItemCount > 0 && <p className="mt-1 text-[10px] text-amber-800">{unpricedItemCount} ligne(s) sont sans prix catalogue ; le total calculé est incomplet.</p>}
                 <label className="mt-3 block font-semibold text-slate-700">Prix final du pack (FCFA)
-                  <input type="number" min="0" step="1" required value={price} onChange={event => setPrice(Number(event.target.value))} className="mt-1 w-full rounded-xl border border-indigo-200 bg-white p-2.5 font-mono text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100" />
+                  <input type="number" min="0" step="1" required value={price} onChange={event => setPrice(event.target.value)} className="mt-1 w-full rounded-xl border border-indigo-200 bg-white p-2.5 font-mono text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100" />
                 </label>
-                {packCatalogValue > 0 && price < packCatalogValue && <p className="mt-1 text-[10px] font-semibold text-emerald-700">Économie client : {(packCatalogValue - price).toLocaleString('fr-FR')} FCFA par rapport à la valeur catalogue.</p>}
+                {packCatalogValue > 0 && Number(price) < packCatalogValue && <p className="mt-1 text-[10px] font-semibold text-emerald-700">Économie client : {(packCatalogValue - Number(price)).toLocaleString('fr-FR')} FCFA par rapport à la valeur catalogue.</p>}
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">

@@ -1,3 +1,5 @@
+import { FREE_DELIVERY_THRESHOLD_FCFA } from './orderFinance';
+
 export interface SystemSettings {
   companyName: string;
   headquartersAddress: string;
@@ -47,7 +49,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   moovMoneyPhone: '066 24 03 99',
   moovMoneyMerchantName: 'GLORYDAY PHARMA',
   moovUssdPrefix: '*555*2*1*',
-  freeDeliveryThreshold: 150000,
+  freeDeliveryThreshold: FREE_DELIVERY_THRESHOLD_FCFA,
   standardDeliveryFeeLibreville: 3000,
   enableAutoWhatsAppOnStageChange: false,
   customPreparationTemplate: 'Votre commande {REF} pour {ETABLISSEMENT} est en cours de préparation par notre équipe.',
@@ -69,7 +71,7 @@ export function getSystemSettings(): SystemSettings {
       delete parsed.adminPassword;
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(parsed));
     }
-    return { ...DEFAULT_SYSTEM_SETTINGS, ...parsed };
+    return { ...DEFAULT_SYSTEM_SETTINGS, ...parsed, freeDeliveryThreshold: FREE_DELIVERY_THRESHOLD_FCFA };
   } catch {
     return DEFAULT_SYSTEM_SETTINGS;
   }

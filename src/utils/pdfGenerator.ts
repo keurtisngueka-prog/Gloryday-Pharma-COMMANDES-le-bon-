@@ -608,7 +608,19 @@ export async function generateInvoiceProjectPdf(
   let y = 112;
   drawTableHeader(y);
   y += 9;
-  (order.items || []).forEach((item, index) => {
+  const invoiceItems = invoice.lineItems?.length
+    ? invoice.lineItems.map((item) => ({
+        productId: item.productId,
+        productName: item.productName,
+        variant: item.variant,
+        quantity: item.quantity,
+        price: item.unitPrice,
+        total: item.lineTotal,
+        savings: item.savings || 0,
+        isQuote: item.isQuote || false,
+      }))
+    : (order.items || []);
+  invoiceItems.forEach((item, index) => {
     const label = item.variant && item.variant !== 'Standard'
       ? `${text(item.productName)} (${text(item.variant)})`
       : text(item.productName || 'Article');
@@ -653,7 +665,7 @@ export async function generateInvoiceProjectPdf(
     y += rowHeight;
   });
 
-  const deliveryFee = Math.max(0, Math.trunc(Number(order.deliveryFee ?? order.customer.deliveryFee) || 0));
+  const deliveryFee = Math.max(0, Math.trunc(Number(invoice.deliveryFee ?? order.deliveryFee ?? order.customer.deliveryFee) || 0));
   if (deliveryFee > 0) {
     const rowHeight = 10;
     if (y + rowHeight > pageHeight - 110) {
@@ -863,8 +875,9 @@ export async function downloadDeliveryNotePdf(order: Order): Promise<void> {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
     doc.text('Article / conditionnement', margin + 3, top + 5.5);
-    doc.text('Qté commandée', 124, top + 5.5, { align: 'center' });
-    doc.text('Qté remise', 157, top + 5.5, { align: 'center' });
+    doc.text('Commandée', 104, top + 5.5, { align: 'center' });
+    doc.text('Remise cumulée', 137, top + 5.5, { align: 'center' });
+    doc.text('Reste', 164, top + 5.5, { align: 'center' });
     doc.text('Lot / remarque', pageWidth - margin - 3, top + 5.5, { align: 'right' });
   };
 
@@ -891,9 +904,15 @@ export async function downloadDeliveryNotePdf(order: Order): Promise<void> {
     doc.setFontSize(8.5);
     doc.setTextColor(ink[0], ink[1], ink[2]);
     doc.text(lines, margin + 3, y + 4.5);
-    doc.text(String(Math.max(0, Number(item.quantity) || 0)), 124, y + 5, { align: 'center' });
+    const deliveredQuantity = (order.deliveryFulfillments || []).reduce((sum, fulfillment) => sum + fulfillment.lines
+      .filter((line) => line.itemIndex === index)
+      .reduce((lineSum, line) => lineSum + line.quantity, 0), 0);
+    const remainingQuantity = Math.max(0, (Number(item.quantity) || 0) - deliveredQuantity);
+    doc.text(String(Math.max(0, Number(item.quantity) || 0)), 104, y + 5, { align: 'center' });
+    doc.text(String(deliveredQuantity), 137, y + 5, { align: 'center' });
+    doc.text(String(remainingQuantity), 164, y + 5, { align: 'center' });
     doc.setDrawColor(148, 163, 184);
-    doc.line(147, y + rowHeight - 2, 167, y + rowHeight - 2);
+    doc.line(180, y + rowHeight - 2, 194, y + rowHeight - 2);
     doc.setDrawColor(226, 232, 240);
     doc.line(margin, y + rowHeight, pageWidth - margin, y + rowHeight);
     y += rowHeight;

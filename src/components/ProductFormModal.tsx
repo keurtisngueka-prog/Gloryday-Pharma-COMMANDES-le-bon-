@@ -148,12 +148,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         ? initialProduct.stockQuantity
         : 0
   );
-  const [alertThreshold, setAlertThreshold] = useState<number>(
-    typeof initialProduct?.alertThreshold === 'number'
+  const [alertThreshold, setAlertThreshold] = useState<string>(
+    String(typeof initialProduct?.alertThreshold === 'number'
       ? initialProduct.alertThreshold
       : typeof initialProduct?.lowStockAlertThreshold === 'number'
         ? initialProduct.lowStockAlertThreshold
-        : 10
+        : 10)
   );
   const [purchasePrice, setPurchasePrice] = useState<number>(
     initialProduct?.purchasePrice || 0
@@ -222,13 +222,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           ? initialProduct.stockQuantity
           : 0
     );
-    setAlertThreshold(
+    setAlertThreshold(String(
       typeof initialProduct?.alertThreshold === 'number'
         ? initialProduct.alertThreshold
         : typeof initialProduct?.lowStockAlertThreshold === 'number'
           ? initialProduct.lowStockAlertThreshold
           : 10
-    );
+    ));
     setPurchasePrice(initialProduct?.purchasePrice || 0);
     setPurchasePriceVerified(initialProduct?.purchasePriceVerified === true);
     setVariants(
@@ -447,8 +447,8 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         isPromotion,
         discountPercentage: isPromotion ? Number(discountPercentage) || 0 : undefined,
         originalPrice: isPromotion ? Number(originalPrice) || 0 : undefined,
-        alertThreshold: Number(alertThreshold) || 10,
-        lowStockAlertThreshold: Number(alertThreshold) || 10,
+        alertThreshold: Math.max(1, Math.trunc(Number(alertThreshold) || 10)),
+        lowStockAlertThreshold: Math.max(1, Math.trunc(Number(alertThreshold) || 10)),
         ...(canManagePurchasePrice ? {
           purchasePrice: Number(purchasePrice) || 0,
           purchasePriceVerified: purchasePriceVerified && Number(purchasePrice) > 0
@@ -1042,7 +1042,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   required
                   placeholder="ex: 10"
                   value={alertThreshold}
-                  onChange={(e) => setAlertThreshold(parseInt(e.target.value, 10) || 10)}
+                  onChange={(e) => setAlertThreshold(e.target.value)}
                   className="w-full p-2 rounded-lg border border-slate-300 font-mono text-xs bg-white"
                 />
               </div>}
@@ -1116,7 +1116,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                       type="number"
                       min="0"
                       placeholder="0 = sur devis"
-                      value={v.price}
+                      value={v.price || ''}
                       onChange={(e) => handleUpdateVariant(idx, 'price', e.target.value)}
                       className="w-full p-1.5 pr-8 rounded-lg border border-slate-300 bg-white font-bold text-right tabular-nums"
                     />

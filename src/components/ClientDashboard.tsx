@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { Order, OrderStatus, User, MobilePaymentDetails } from '../types';
 import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
+import { getOrderBillingTotal, getOrderDeliveredQuantity, getOrderRemainingQuantity } from '../utils/orderFulfillment';
 import { generateInternalPurchaseOrderPdf } from '../utils/pdfGenerator';
 import { 
   computeDeliveryTimeWindow, 
@@ -79,6 +80,15 @@ function toLocalDateKey(date: Date): string {
 function parseDateKey(dateKey: string): Date {
   const [y, m, d] = dateKey.split('-').map(Number);
   return new Date(y, (m || 1) - 1, d || 1, 12, 0, 0);
+}
+
+function summarizeOrderItems(order: Order): string {
+  return order.items.map((item, index) => {
+    const delivered = getOrderDeliveredQuantity(order, index);
+    const remaining = getOrderRemainingQuantity(order, index);
+    const progress = (order.deliveryFulfillments || []).length > 0 ? ` · remis ${delivered}/${item.quantity}${remaining ? ` · reliquat ${remaining}` : ''}` : '';
+    return `${item.quantity}x ${item.productName}${progress}`;
+  }).join(', ');
 }
 
 function resolveOrderDeliverySchedule(order: Order): ResolvedOrderSchedule {
@@ -587,17 +597,18 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-bold text-slate-600">Paiements en attente</span>
+            <span className="text-[13px] font-bold text-slate-600">Soldes des commandes</span>
             <div className="kpi-icon-badge w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center">
               <Smartphone className="w-4 h-4" />
             </div>
           </div>
           <div className="text-2xl font-black text-amber-800 tabular-nums">{unpaidOrders.length}</div>
-          <div className="text-[11px] text-amber-700 mt-1">
+          <div className="text-xs text-amber-700 mt-1">
             {unpaidOrders.length === 0
               ? 'Toutes vos commandes sont réglées'
-              : `${totalOutstanding.toLocaleString('fr-FR')} FCFA à régler${overdueOrders.length ? ` · ${overdueOrders.length} en retard` : ''}`}
+              : `${totalOutstanding.toLocaleString('fr-FR')} FCFA restent à régler${overdueOrders.length ? ` · ${overdueOrders.length} en retard` : ''}`}
           </div>
+          <div className="mt-1 text-[11px] text-slate-500">Ce montant concerne le paiement, indépendamment de la préparation ou de la livraison.</div>
         </div>
       </div>
 
@@ -1172,7 +1183,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
 
                           {/* Items list preview */}
                           <div className="text-[11px] text-slate-500 line-clamp-2">
-                            {order.items.map(i => `${i.quantity}x ${i.productName}`).join(', ')}
+                            {summarizeOrderItems(order)}
                           </div>
 
                           {/* Quick Action Buttons */}
@@ -1274,13 +1285,36 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                                        !!mp;
                 const paidAmount = getOrderPaidAmount(order);
                 const remainingBalance = getOrderRemainingBalance(order);
+                const billingTotal = getOrderBillingTotal(order);
+                const deliveryTrackingActive = (order.deliveryFulfillments || []).length > 0;
                 const collectionOverdue = isCollectionOverdue(order);
-                const paymentVerified = Boolean(order.isPaid || mp?.status === 'verified');
+                const pendingInstallments = (order.installments || []).filter(installment => installment.status === 'en_attente');
+                const rejectedInstallments = (order.installments || []).filter(installment => installment.status === 'rejete');
+                const hasPendingMobileReference = mp?.status === 'submitted' || (mp?.status === 'pending' && Boolean(mp.transactionReference));
+                const paymentStatusLabel = order.status === 'Annulée'
+                  ? 'Sans objet · commande annulée'
+                  : deliveryTrackingActive && billingTotal <= 0
+                    ? paidAmount > 0 ? 'Acompte reçu · en attente de facturation' : 'En attente de facturation des quantités remises'
+                  : remainingBalance <= 0
+                    ? deliveryTrackingActive && order.isPartialDelivery ? 'Facture soldée · reliquat en cours' : 'Soldée'
+                    : collectionOverdue
+                      ? 'Solde en retard'
+                      : hasPendingMobileReference
+                        ? 'Référence en vérification'
+                        : pendingInstallments.length > 0
+                          ? 'Acompte à valider'
+                          : paidAmount > 0
+                            ? 'Acompte confirmé'
+                            : rejectedInstallments.length > 0 || mp?.status === 'failed'
+                              ? 'Versement refusé · à régulariser'
+                            : order.customer.paymentMethod === 'en_compte'
+                              ? 'Paiement à terme'
+                              : 'Aucun versement confirmé';
 
                 return (
                   <div key={order.id} className="dashboard-row-interactive p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                     <div className="space-y-1.5">
-                      <div className="flex items-center gap-2 flex-wrap text-xs">
+                      <div className="flex items-center gap-2 flex-wrap text-[13px]">
                         <span className="font-mono font-black text-[#0d44e8]">
                           {order.reference}
                         </span>
@@ -1292,19 +1326,17 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                               ? 'text-rose-700'
                               : 'text-[#0d44e8]'
                         }`}>
-                          {order.status}
+                          <span className="text-slate-500">Commande :</span> {order.status}
                         </span>
                         <span aria-hidden="true" className="text-slate-300">·</span>
-                        {remainingBalance <= 0 ? (
+                        {remainingBalance <= 0 && order.status !== 'Annulée' ? (
                           <span className="font-bold text-emerald-700 flex items-center gap-1">
                             <Check className="w-3 h-3 text-emerald-600" />
-                            <span>Payée</span>
+                            <span><span className="text-slate-500">Règlement :</span> Soldée</span>
                           </span>
-                        ) : paidAmount > 0 ? (
-                          <span className="font-bold text-amber-800">Acompte reçu</span>
                         ) : (
-                          <span className="font-medium text-amber-800">
-                            En attente de paiement
+                          <span className={`font-bold ${collectionOverdue ? 'text-rose-700' : pendingInstallments.length > 0 || hasPendingMobileReference ? 'text-amber-800' : 'text-slate-700'}`}>
+                            <span className="text-slate-500">Règlement :</span> {paymentStatusLabel}
                           </span>
                         )}
 
@@ -1347,40 +1379,72 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                         <span>{order.items.length} article(s)</span>
                         <span aria-hidden="true">·</span>
                         <span className="text-slate-900 font-bold text-sm">
-                          {order.estimatedTotal.toLocaleString('fr-FR')} FCFA
+                          {deliveryTrackingActive ? `${billingTotal.toLocaleString('fr-FR')} FCFA facturés` : `${order.estimatedTotal.toLocaleString('fr-FR')} FCFA`}
                         </span>
                       </div>
 
-                      <div className="text-[11px] text-slate-400 line-clamp-1">
-                        {order.items.map(i => `${i.quantity}x ${i.productName}`).join(', ')}
+                      <div className="text-xs text-slate-500 line-clamp-1">
+                        {summarizeOrderItems(order)}
                       </div>
                       {order.status !== 'Annulée' && (
-                        <div className={`text-[11px] font-semibold ${collectionOverdue ? 'text-rose-700' : 'text-slate-600'}`}>
-                          Versé : {paidAmount.toLocaleString('fr-FR')} FCFA · Reste à payer : {remainingBalance.toLocaleString('fr-FR')} FCFA
+                        <div className={`text-xs font-semibold ${collectionOverdue ? 'text-rose-700' : 'text-slate-600'}`}>
+                          {deliveryTrackingActive ? 'Total facturé à date' : 'Total commande'} : {(deliveryTrackingActive ? billingTotal : order.estimatedTotal).toLocaleString('fr-FR')} FCFA · Confirmé/encaissé : {paidAmount.toLocaleString('fr-FR')} FCFA · Solde restant : {remainingBalance.toLocaleString('fr-FR')} FCFA
+                          {deliveryTrackingActive && <span className="block mt-0.5 text-slate-500">Montant initial du bon de commande : {order.estimatedTotal.toLocaleString('fr-FR')} FCFA. Les articles non remis ne sont pas facturés.</span>}
                           {order.collectionDueDate && remainingBalance > 0 && (
                             <span className="block mt-0.5">
-                              {collectionOverdue ? 'Échéance dépassée le ' : 'À régler avant le '}{formatCollectionDueDate(order.collectionDueDate)}
+                              {collectionOverdue ? 'Échéance de recouvrement dépassée : ' : 'Échéance de recouvrement : '}{formatCollectionDueDate(order.collectionDueDate)}
                             </span>
                           )}
                         </div>
+                      )}
+                      {order.status !== 'Annulée' && ((order.installments?.length || 0) > 0 || Boolean(mp?.transactionReference)) && (
+                        <details className="mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs">
+                          <summary className="cursor-pointer font-bold text-slate-700">Détail des avances et justificatifs ({(order.installments?.length || 0) + (mp?.transactionReference ? 1 : 0)})</summary>
+                          <div className="mt-2 space-y-2">
+                            {(order.installments || []).map(installment => {
+                              const paymentDate = new Date(installment.paidAt);
+                              const paymentDateLabel = Number.isNaN(paymentDate.getTime())
+                                ? ''
+                                : paymentDate.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+                              const installmentStatus = installment.status === 'valide'
+                                ? 'Validé et compté dans le montant encaissé'
+                                : installment.status === 'rejete'
+                                  ? 'Refusé · non compté dans le montant encaissé'
+                                  : 'En attente de validation · non compté dans le montant encaissé';
+                              return (
+                                <div key={installment.id} className="flex flex-col gap-0.5 rounded-lg bg-slate-50 px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between">
+                                  <span>{installment.type === 'acompte' ? 'Acompte' : 'Versement du solde'}{paymentDateLabel ? ` · ${paymentDateLabel}` : ''} · {installmentStatus}</span>
+                                  <strong className="shrink-0 tabular-nums">{installment.amount.toLocaleString('fr-FR')} FCFA</strong>
+                                </div>
+                              );
+                            })}
+                            {mp?.transactionReference && (
+                              <div className="rounded-lg bg-amber-50 px-2.5 py-2 text-amber-900">
+                                <p className="font-bold">Justificatif {mp.provider === 'airtel_money' ? 'Airtel Money' : 'Moov Money'} · {mp.status === 'verified' ? 'référence vérifiée' : mp.status === 'failed' ? 'référence refusée' : 'en attente de vérification'}</p>
+                                <p className="mt-0.5">Référence : <span className="font-mono">{mp.transactionReference}</span>{mp.amount ? ` · Montant déclaré : ${mp.amount.toLocaleString('fr-FR')} FCFA` : ''}</p>
+                                <p className="mt-0.5">{mp.status === 'verified' ? 'Référence validée par Gloryday Pharma ; le montant confirmé figure dans le résumé de la commande.' : mp.status === 'failed' ? 'Référence refusée ; le montant n’est pas compté comme encaissé.' : 'Référence non encore validée ; le montant n’est pas compté comme encaissé.'}</p>
+                              </div>
+                            )}
+                          </div>
+                        </details>
                       )}
                     </div>
 
                     {/* Actions buttons */}
                     <div className="flex items-center gap-1.5 self-end lg:self-center flex-wrap">
-                      {isMobilePayment && (
+                      {isMobilePayment && remainingBalance > 0 && (
                         <button
                           type="button"
                           onClick={() => setSelectedPaymentOrder(order)}
                           className={`py-1.5 px-3 rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer border shadow-2xs transition-colors whitespace-nowrap shrink-0 ${
-                            paymentVerified
+                            mp?.status === 'verified'
                               ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
                               : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
                           }`}
-                          title={paymentVerified ? 'Paiement vérifié par Gloryday Pharma.' : mp?.transactionReference ? 'Référence transmise, en attente de vérification.' : 'Transmettre une référence de paiement pour vérification.'}
+                          title={mp?.status === 'verified' ? 'Référence de paiement vérifiée. Le solde restant est affiché séparément.' : mp?.transactionReference ? 'Référence transmise, en attente de vérification.' : 'Transmettre une référence de paiement pour vérification.'}
                         >
-                          <ShieldCheck className={`w-3.5 h-3.5 ${paymentVerified ? 'text-emerald-600' : 'text-amber-600'}`} />
-                          <span>{paymentVerified ? 'Paiement vérifié' : mp?.transactionReference ? 'Réf. en attente' : 'Soumettre une référence'}</span>
+                          <ShieldCheck className={`w-3.5 h-3.5 ${mp?.status === 'verified' ? 'text-emerald-600' : 'text-amber-600'}`} />
+                          <span>{mp?.status === 'verified' ? 'Référence vérifiée' : mp?.status === 'failed' ? 'Corriger le justificatif' : mp?.transactionReference ? 'Référence à vérifier' : 'Transmettre un justificatif'}</span>
                         </button>
                       )}
 

@@ -16,7 +16,8 @@ import {
   sanitizeVolumeDiscountSettings,
   setActiveVolumeDiscountSettings
 } from './src/utils/volumeDiscount.js';
-import { getOrderPaidAmount, getOrderRemainingBalance } from './src/utils/orderFinance.js';
+import { FREE_DELIVERY_THRESHOLD_FCFA, getOrderPaidAmount, getOrderRemainingBalance } from './src/utils/orderFinance.js';
+import { getInvoiceReadyLineItems, getOrderBillingTotal, getInvoiceReadyTotal } from './src/utils/orderFulfillment.js';
 import { ALL_CONFIGURABLE_PERMISSIONS, getDefaultStaffPermissions, normalizeStaffPermissions } from './src/permissions.js';
 import {
   createSupabaseStorePersistence,
@@ -3525,7 +3526,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
 
     const activeDiscountSettings = sanitizeVolumeDiscountSettings(store.volumeDiscounts);
     const volumeSummary = calculateCartVolumeSummary(items, activeDiscountSettings);
-    const deliveryFee = customer.deliveryMode === 'retrait' || volumeSummary.netTotal >= 50000 ? 0 : neighborhood?.baseDeliveryFee || 0;
+    const deliveryFee = customer.deliveryMode === 'retrait' || volumeSummary.netTotal >= FREE_DELIVERY_THRESHOLD_FCFA ? 0 : neighborhood?.baseDeliveryFee || 0;
     const finalTotal = volumeSummary.netTotal + deliveryFee;
     customer.deliveryFee = deliveryFee;
 
@@ -3622,6 +3623,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
           total: it.isQuote ? 0 : calc.totalWithDiscount,
           isQuote: it.isQuote,
           isDeferredStock: Boolean(it.isDeferredStock),
+          stockReservedQuantity: it.isDeferredStock ? 0 : it.quantity,
           discountPercent: calc.discountPercent,
           savings: calc.savings
         };
@@ -4430,8 +4432,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const currentInstallments = order.installments || [];
     const invoices = Array.isArray(body.invoices) ? body.invoices : [];
     const installments = Array.isArray(body.installments) ? body.installments : [];
+    const submittedFulfillments = Array.isArray(body.deliveryFulfillments) ? body.deliveryFulfillments : [];
     if ((body.invoices !== undefined && (!Array.isArray(body.invoices) || invoices.length > 200)) ||
-        (body.installments !== undefined && (!Array.isArray(body.installments) || installments.length > 200))) {
+        (body.installments !== undefined && (!Array.isArray(body.installments) || installments.length > 200)) ||
+        (body.deliveryFulfillments !== undefined && (!Array.isArray(body.deliveryFulfillments) || submittedFulfillments.length > 200))) {
       res.status(400).json({ error: 'La liste des documents ou des paiements est invalide.' });
       return;
     }
@@ -4460,7 +4464,38 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         return;
       }
       invoiceNumbers.add(number);
-      const totalTTC = Math.max(0, Math.trunc(order.estimatedTotal));
+      const deliveryTracked = (order.deliveryFulfillments || []).length > 0;
+      const startsDeliveryTracking = submittedFulfillments.some((fulfillment: any) =>
+        typeof fulfillment?.id === 'string' && !(order.deliveryFulfillments || []).some((saved) => saved.id === fulfillment.id)
+      );
+      if (type === 'facture' && startsDeliveryTracking && !deliveryTracked) {
+        res.status(409).json({ error: 'Enregistrez d’abord la remise réelle des articles, puis créez la facture à partir des quantités livrées.' });
+        return;
+      }
+      const lineItems = type === 'facture' ? getInvoiceReadyLineItems(order) : [];
+      if (type === 'facture' && !deliveryTracked && currentInvoices.some((invoice) => invoice.type === 'facture')) {
+        res.status(409).json({ error: 'Une facture existe déjà pour cette commande. Évitez de la facturer une seconde fois ; utilisez un avoir si une correction est nécessaire.' });
+        return;
+      }
+      if (type === 'facture' && deliveryTracked && currentInvoices.some((invoice) => invoice.type === 'facture' && !invoice.lineItems?.length)) {
+        res.status(409).json({ error: 'Une ancienne facture sans détail par article existe déjà. Cette commande doit être vérifiée avant toute nouvelle facture partielle.' });
+        return;
+      }
+      const totalTTC = type === 'avoir'
+        ? getOrderBillingTotal(order)
+        : deliveryTracked
+          ? getInvoiceReadyTotal(order)
+          : Math.max(0, Math.trunc(order.estimatedTotal));
+      if (type === 'facture' && totalTTC <= 0) {
+        res.status(409).json({ error: deliveryTracked
+          ? 'Aucune quantité livrée et non facturée. Enregistrez d’abord une livraison réelle avant d’émettre la facture.'
+          : 'Le total de cette commande ne permet pas d’émettre une facture.' });
+        return;
+      }
+      const lineItemsTotal = lineItems.reduce((sum, item) => sum + item.lineTotal, 0);
+      const deliveryFee = type === 'facture' && (deliveryTracked || order.deliveryFee)
+        ? Math.max(0, totalTTC - lineItemsTotal)
+        : 0;
       const totalHT = tvaRate > 0 ? Math.round(totalTTC / (1 + tvaRate)) : totalTTC;
       newInvoices.push({
         id: raw.id.slice(0, 120),
@@ -4474,6 +4509,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         tvaAmount: totalTTC - totalHT,
         totalHT,
         totalTTC,
+        lineItems: type === 'facture' ? lineItems : undefined,
+        deliveryFee,
         reason: type === 'avoir' ? reason : undefined,
       });
     }
@@ -4522,13 +4559,14 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     if (newInstallments.length > 0) {
       const totalPaid = getOrderPaidAmount(order) + newInstallments
         .reduce((sum, installment) => sum + (installment.status === 'valide' ? installment.amount : 0), 0);
-      if (totalPaid > order.estimatedTotal) {
+      const payableTotal = getOrderBillingTotal({ ...order, invoices: [...currentInvoices, ...newInvoices] });
+      if (totalPaid > payableTotal) {
         res.status(409).json({ error: 'Le montant des versements dépasse le total de la commande.' });
         return;
       }
       order.installments = [...currentInstallments, ...newInstallments];
       order.amountPaid = totalPaid;
-      order.isPaid = totalPaid >= order.estimatedTotal;
+      order.isPaid = totalPaid >= payableTotal;
       if (order.isPaid) order.collectionDueDate = undefined;
     }
 
@@ -4552,7 +4590,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       order.collectionDueDate = rawDueDate || undefined;
     }
 
-    if (newInvoices.length > 0) order.invoices = [...currentInvoices, ...newInvoices];
+    if (newInvoices.length > 0) {
+      order.invoices = [...currentInvoices, ...newInvoices];
+      order.isPaid = getOrderPaidAmount(order) >= getOrderBillingTotal(order);
+    }
 
     if (body.courier !== undefined) {
       const requestedCourier = body.courier === null ? undefined : body.courier;
@@ -4628,6 +4669,110 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       order.partialDeliveryNotes = body.partialDeliveryNotes.trim().slice(0, 2000) || undefined;
     }
 
+    let newFulfillments: NonNullable<Order['deliveryFulfillments']> = [];
+    if (body.deliveryFulfillments !== undefined) {
+      const existingFulfillments = order.deliveryFulfillments || [];
+      const existingById = new Map(existingFulfillments.map((fulfillment) => [fulfillment.id, fulfillment]));
+      const submittedIds = new Set<string>();
+      if (submittedFulfillments.length < existingFulfillments.length) {
+        res.status(409).json({ error: 'L’historique des livraisons ne peut pas être supprimé.' });
+        return;
+      }
+      if (existingFulfillments.length === 0 && currentInvoices.some((invoice) => invoice.type === 'facture')) {
+        res.status(409).json({ error: 'Une facture a déjà été émise pour cette commande. Vérifiez les quantités avec la comptabilité avant d’activer le suivi des reliquats.' });
+        return;
+      }
+      for (const raw of submittedFulfillments) {
+        if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || submittedIds.has(raw.id)) {
+          res.status(400).json({ error: 'Une opération de livraison est invalide ou en double.' });
+          return;
+        }
+        submittedIds.add(raw.id);
+        const existing = existingById.get(raw.id);
+        if (existing) {
+          const sameLines = Array.isArray(raw.lines) && sameValue(
+            raw.lines.map((line: any) => ({ itemIndex: Number(line.itemIndex), quantity: Number(line.quantity) })).sort((a: any, b: any) => a.itemIndex - b.itemIndex),
+            [...existing.lines].map((line) => ({ itemIndex: line.itemIndex, quantity: line.quantity })).sort((a, b) => a.itemIndex - b.itemIndex),
+          );
+          const sameNotes = (typeof raw.notes === 'string' ? raw.notes.trim() || undefined : undefined) === existing.notes;
+          if (!sameLines || !sameNotes) {
+            res.status(409).json({ error: 'Une livraison déjà enregistrée ne peut pas être modifiée.' });
+            return;
+          }
+          continue;
+        }
+        if (!hasPermission('logistics_manage')) {
+          res.status(403).json({ error: 'Vous ne pouvez pas enregistrer les quantités livrées.' });
+          return;
+        }
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw.id)) {
+          res.status(400).json({ error: 'L’identifiant de l’enregistrement de livraison est invalide.' });
+          return;
+        }
+        const requestedLines = Array.isArray(raw.lines) ? raw.lines : null;
+        const notes = typeof raw.notes === 'string' ? raw.notes.trim().slice(0, 2000) : '';
+        if (!requestedLines || requestedLines.length > order.items.length || (requestedLines.length === 0 && !notes)) {
+          res.status(400).json({ error: 'Indiquez au moins une quantité remise ou une note expliquant le reliquat.' });
+          return;
+        }
+        const lineIndexes = new Set<number>();
+        const validatedLines: NonNullable<Order['deliveryFulfillments']>[number]['lines'] = [];
+        for (const line of requestedLines) {
+          const itemIndex = Number(line?.itemIndex);
+          const quantity = Number(line?.quantity);
+          if (!Number.isInteger(itemIndex) || itemIndex < 0 || itemIndex >= order.items.length || lineIndexes.has(itemIndex) ||
+              !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 10000) {
+            res.status(400).json({ error: 'Une quantité remise est invalide ou répétée.' });
+            return;
+          }
+          const orderItem = order.items[itemIndex];
+          if (orderItem.isQuote || orderItem.isDeferredStock || Number(orderItem.price) <= 0) {
+            res.status(409).json({ error: `« ${orderItem.productName} » est encore sur devis ou en réapprovisionnement. Confirmez d’abord son prix et son stock, puis créez la commande de livraison correspondante.` });
+            return;
+          }
+          const alreadyDelivered = existingFulfillments.reduce((sum, fulfillment) => sum + fulfillment.lines
+            .filter((savedLine) => savedLine.itemIndex === itemIndex)
+            .reduce((lineSum, savedLine) => lineSum + savedLine.quantity, 0), 0)
+            + newFulfillments.reduce((sum, fulfillment) => sum + fulfillment.lines
+              .filter((savedLine) => savedLine.itemIndex === itemIndex)
+              .reduce((lineSum, savedLine) => lineSum + savedLine.quantity, 0), 0);
+          if (alreadyDelivered + quantity > orderItem.quantity) {
+            res.status(409).json({ error: `La quantité livrée pour « ${orderItem.productName} » dépasserait la quantité commandée.` });
+            return;
+          }
+          lineIndexes.add(itemIndex);
+          validatedLines.push({ itemIndex, quantity });
+        }
+        newFulfillments.push({
+          id: raw.id,
+          fulfilledAt: new Date().toISOString(),
+          lines: validatedLines,
+          notes: notes || undefined,
+          recordedById: user.id,
+          recordedByName: user.contactName || user.facilityName || 'Collaborateur Gloryday',
+        });
+      }
+      if (submittedIds.size !== existingFulfillments.length + newFulfillments.length) {
+        res.status(409).json({ error: 'L’historique transmis ne correspond pas à celui de la commande.' });
+        return;
+      }
+      if (newFulfillments.length > 0) {
+        order.deliveryFulfillments = [...existingFulfillments, ...newFulfillments];
+        const fullyResolved = order.items.every((item, itemIndex) => {
+          const delivered = order.deliveryFulfillments!.reduce((sum, fulfillment) => sum + fulfillment.lines
+            .filter((line) => line.itemIndex === itemIndex)
+            .reduce((lineSum, line) => lineSum + line.quantity, 0), 0);
+          return delivered >= item.quantity;
+        });
+        order.isPartialDelivery = !fullyResolved;
+        order.partialDeliveryNotes = newFulfillments[newFulfillments.length - 1]?.notes;
+        if (order.status !== 'Annulée') {
+          order.status = fullyResolved ? 'Livrée' : 'En préparation';
+          order.deliveryStage = fullyResolved ? 'delivered' : 'preparation';
+        }
+      }
+    }
+
     const financeLog = appendStaffLog(user, {
       category: 'orders',
       severity: 'info',
@@ -4639,12 +4784,26 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     });
     let clientFinanceNotification: AppNotification | undefined;
     const dueDateChanged = previousCollectionDueDate !== order.collectionDueDate;
-    if (order.userId && (newInstallments.length > 0 || newInvoices.length > 0 || dueDateChanged)) {
+    if (order.userId && (newInstallments.length > 0 || newInvoices.length > 0 || dueDateChanged || newFulfillments.length > 0)) {
       const paidAmount = getOrderPaidAmount(order);
       const remainingBalance = getOrderRemainingBalance(order);
       const paymentLines = newInstallments.map((installment) =>
         installment.amount.toLocaleString('fr-FR') + ' FCFA re\u00e7us (' + (installment.type === 'acompte' ? 'acompte' : 'solde') + ').'
       );
+      if (newFulfillments.length > 0) {
+        const latest = newFulfillments[newFulfillments.length - 1];
+        const handedOver = latest.lines.map((line) => `${line.quantity} × ${order.items[line.itemIndex]?.productName || 'article'}`).join(', ');
+        const remaining = order.items.flatMap((item, itemIndex) => {
+          const delivered = (order.deliveryFulfillments || []).reduce((sum, fulfillment) => sum + fulfillment.lines
+            .filter((line) => line.itemIndex === itemIndex)
+            .reduce((lineSum, line) => lineSum + line.quantity, 0), 0);
+          const quantity = Math.max(0, item.quantity - delivered);
+          return quantity > 0 ? [`${quantity} × ${item.productName}`] : [];
+        });
+        paymentLines.push(handedOver ? `Livraison enregistrée : ${handedOver}.` : 'Un reliquat a été enregistré ; aucun article n’a été déclaré remis.');
+        paymentLines.push(remaining.length ? `Articles restant à fournir : ${remaining.join(', ')}.` : 'Toutes les quantités commandées ont été remises.');
+        if (latest.notes) paymentLines.push(`Note : ${latest.notes}`);
+      }
       if (newInvoices.length > 0) {
         paymentLines.push('Document(s) ' + newInvoices.map((invoice) => invoice.number).join(', ') + ' \u00e9mis.');
       }
@@ -4659,8 +4818,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       clientFinanceNotification = {
         id: 'notif-' + randomUUID(),
         timestamp: new Date().toISOString(),
-        type: 'payment_updated',
-        title: remainingBalance <= 0 ? 'Commande sold\u00e9e' : dueDateChanged && newInstallments.length === 0 ? '\u00c9ch\u00e9ance mise \u00e0 jour' : 'Paiement mis \u00e0 jour',
+        type: newFulfillments.length > 0 ? 'status_changed' : 'payment_updated',
+        title: newFulfillments.length > 0 ? 'Avancement de livraison' : remainingBalance <= 0 ? 'Commande sold\u00e9e' : dueDateChanged && newInstallments.length === 0 ? '\u00c9ch\u00e9ance mise \u00e0 jour' : 'Paiement mis \u00e0 jour',
         orderId: order.id,
         orderReference: order.reference,
         message: paymentLines.join(' '),
@@ -5247,10 +5406,11 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     fs.createReadStream(targetPath).pipe(res);
   });
 
-  app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (res.headersSent) return next(err);
-    console.error('Request failed:', err);
-    res.status(500).json({ error: 'Une erreur est survenue pendant l’enregistrement. Réessayez dans un instant.' });
+    const requestId = randomUUID();
+    console.error(`[request:${requestId}] ${req.method} ${req.originalUrl} failed:`, err);
+    res.status(500).json({ error: `Une erreur est survenue pendant l’enregistrement. Réessayez dans un instant. Référence : ${requestId}` });
   });
 
   // ==========================================

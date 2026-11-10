@@ -195,8 +195,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [clientsModuleView, setClientsModuleView] = useState<'directory' | 'purchase-history'>('directory');
   const [clientDirectorySearch, setClientDirectorySearch] = useState('');
   const [creditTermsClient, setCreditTermsClient] = useState<User | null>(null);
-  const [creditLimitDraft, setCreditLimitDraft] = useState(0);
-  const [creditMinimumDraft, setCreditMinimumDraft] = useState(50000);
+  const [creditLimitDraft, setCreditLimitDraft] = useState('0');
+  const [creditMinimumDraft, setCreditMinimumDraft] = useState('50000');
   const [creditPaymentTermsDraft, setCreditPaymentTermsDraft] = useState<PaymentTerms>('comptant');
   const [creditAccountStatusDraft, setCreditAccountStatusDraft] = useState<ClientAccountStatus>('actif');
   const [savingCreditTerms, setSavingCreditTerms] = useState(false);
@@ -208,7 +208,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [discountSavedMsg, setDiscountSavedMsg] = useState('');
 
   // Inline stock draft quantities per product
-  const [stockDrafts, setStockDrafts] = useState<Record<string, number>>({});
+  const [stockDrafts, setStockDrafts] = useState<Record<string, string>>({});
   const [savingStockId, setSavingStockId] = useState<string | null>(null);
   const [stockSaveError, setStockSaveError] = useState<{ productId: string; message: string } | null>(null);
   const savingStockIdsRef = useRef(new Set<string>());
@@ -281,8 +281,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const openCreditTerms = (client: User) => {
     setCreditTermsClient(client);
-    setCreditLimitDraft(Math.max(0, Number(client.creditLimit) || 0));
-    setCreditMinimumDraft(Math.max(0, Number(client.minimumCreditOrderAmount ?? 50000) || 0));
+    setCreditLimitDraft(String(Math.max(0, Number(client.creditLimit) || 0)));
+    setCreditMinimumDraft(String(Math.max(0, Number(client.minimumCreditOrderAmount ?? 50000) || 0)));
     setCreditPaymentTermsDraft(client.paymentTerms || 'comptant');
     setCreditAccountStatusDraft(client.accountStatus || 'actif');
     setCreditTermsError('');
@@ -295,8 +295,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setCreditTermsError('');
     try {
       await api.updateClientCreditTerms(creditTermsClient.id, {
-        creditLimit: Math.trunc(creditLimitDraft),
-        minimumCreditOrderAmount: Math.trunc(creditMinimumDraft),
+        creditLimit: Math.trunc(Number(creditLimitDraft)),
+        minimumCreditOrderAmount: Math.trunc(Number(creditMinimumDraft)),
         paymentTerms: creditPaymentTermsDraft,
         accountStatus: creditAccountStatusDraft,
       });
@@ -1363,8 +1363,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <input
                       type="number"
                       min={1}
-                      value={discountSettings.tier1Qty}
-                      onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier1Qty: Math.max(1, Number(e.target.value)) }))}
+                      required
+                      value={discountSettings.tier1Qty || ''}
+                      onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier1Qty: Number(e.target.value) }))}
                       className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-bold text-slate-900"
                     />
                   </label>
@@ -1374,7 +1375,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       type="number"
                       min={0}
                       max={80}
-                      value={discountSettings.tier1Percent}
+                      value={discountSettings.tier1Percent || ''}
                       onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier1Percent: Math.max(0, Number(e.target.value)) }))}
                       className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-bold text-emerald-700"
                     />
@@ -1390,8 +1391,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <input
                       type="number"
                       min={2}
-                      value={discountSettings.tier2Qty}
-                      onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier2Qty: Math.max(2, Number(e.target.value)) }))}
+                      required
+                      value={discountSettings.tier2Qty || ''}
+                      onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier2Qty: Number(e.target.value) }))}
                       className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-bold text-slate-900"
                     />
                   </label>
@@ -1401,7 +1403,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       type="number"
                       min={0}
                       max={80}
-                      value={discountSettings.tier2Percent}
+                      value={discountSettings.tier2Percent || ''}
                       onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier2Percent: Math.max(0, Number(e.target.value)) }))}
                       className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-bold text-emerald-700"
                     />
@@ -1417,8 +1419,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <input
                       type="number"
                       min={3}
-                      value={discountSettings.tier3Qty}
-                      onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier3Qty: Math.max(3, Number(e.target.value)) }))}
+                      required
+                      value={discountSettings.tier3Qty || ''}
+                      onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier3Qty: Number(e.target.value) }))}
                       className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-bold text-slate-900"
                     />
                   </label>
@@ -1428,7 +1431,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       type="number"
                       min={0}
                       max={80}
-                      value={discountSettings.tier3Percent}
+                      value={discountSettings.tier3Percent || ''}
                       onChange={(e) => setDiscountSettings(prev => ({ ...prev, tier3Percent: Math.max(0, Number(e.target.value)) }))}
                       className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-bold text-emerald-700"
                     />
@@ -1507,7 +1510,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="divide-y divide-slate-100">
               {displayedProducts.map((p) => {
                 const currentQty = p.quantityAvailable ?? p.stockQuantity ?? 0;
-                const draftQty = stockDrafts[p.id] !== undefined ? stockDrafts[p.id] : currentQty;
+                const draftQty = stockDrafts[p.id] !== undefined ? stockDrafts[p.id] : String(currentQty);
                 const isQuoteOnly = p.isQuote || p.variants.every(v => v.price === 0);
                 return (
                   <div key={p.id} className="dashboard-row-interactive p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
@@ -1581,13 +1584,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           type="number"
                           min={0}
                           value={draftQty}
-                          onChange={(e) => setStockDrafts(prev => ({ ...prev, [p.id]: Math.max(0, Number(e.target.value)) }))}
+                          onChange={(e) => setStockDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
                           className="w-16 px-2 py-1 rounded-lg bg-white border border-slate-300 text-center font-bold text-slate-900 text-xs"
                         />
                         <button
                           type="button"
-                          disabled={savingStockId === p.id}
-                          onClick={() => void handleInlineStockSave(p, draftQty)}
+                          disabled={savingStockId === p.id || draftQty === '' || !Number.isSafeInteger(Number(draftQty)) || Number(draftQty) < 0}
+                          onClick={() => void handleInlineStockSave(p, Number(draftQty))}
                           className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] cursor-pointer disabled:opacity-50"
                         >
                           {savingStockId === p.id ? '...' : 'Corriger'}
@@ -1878,11 +1881,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="text-xs font-bold text-slate-700">
                 Plafond d’encours (FCFA)
-                <input type="number" min={0} max={1_000_000_000} step={50000} value={creditLimitDraft} onChange={(event) => setCreditLimitDraft(Math.max(0, Number(event.target.value) || 0))} className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 font-mono text-sm" />
+                <input type="number" min={0} max={1_000_000_000} step={50000} required value={creditLimitDraft} onChange={(event) => setCreditLimitDraft(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 font-mono text-sm" />
               </label>
               <label className="text-xs font-bold text-slate-700">
                 Minimum par commande à terme (FCFA)
-                <input type="number" min={0} max={1_000_000_000} step={5000} value={creditMinimumDraft} onChange={(event) => setCreditMinimumDraft(Math.max(0, Number(event.target.value) || 0))} className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 font-mono text-sm" />
+                <input type="number" min={0} max={1_000_000_000} step={5000} required value={creditMinimumDraft} onChange={(event) => setCreditMinimumDraft(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 font-mono text-sm" />
                 <span className="mt-1 block text-[10px] font-medium text-slate-500">Le panier client indique le montant restant pour atteindre ce seuil.</span>
               </label>
               <label className="text-xs font-bold text-slate-700">
@@ -1913,7 +1916,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             <footer className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button type="button" onClick={() => setCreditTermsClient(null)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50">Annuler</button>
-              <button type="submit" disabled={savingCreditTerms || (creditLimitDraft > 0 && creditMinimumDraft > creditLimitDraft)} className="rounded-xl bg-indigo-700 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50">
+              <button type="submit" disabled={savingCreditTerms || (Number(creditLimitDraft) > 0 && Number(creditMinimumDraft) > Number(creditLimitDraft))} className="rounded-xl bg-indigo-700 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50">
                 {savingCreditTerms ? 'Enregistrement…' : 'Enregistrer les conditions'}
               </button>
             </footer>

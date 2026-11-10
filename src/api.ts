@@ -594,7 +594,7 @@ export const api = {
   },
 
   async updateOrderFinance(orderId: string, patch: Partial<Pick<Order,
-    'installments' | 'invoices' | 'isPartialDelivery' | 'partialDeliveryNotes'
+    'installments' | 'invoices' | 'isPartialDelivery' | 'partialDeliveryNotes' | 'deliveryFulfillments'
   >> & {
     courier?: Order['courier'] | null;
     deliveryProof?: Order['deliveryProof'] | null;

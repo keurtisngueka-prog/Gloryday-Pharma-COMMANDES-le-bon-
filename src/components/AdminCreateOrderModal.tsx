@@ -48,7 +48,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
   const [productPickerOpen, setProductPickerOpen] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState('');
   const [selectedVariant, setSelectedVariant] = useState('');
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState('1');
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [deliveryMode, setDeliveryMode] = useState<'livraison' | 'retrait'>('livraison');
   const [neighborhoodId, setNeighborhoodId] = useState('');
@@ -89,7 +89,11 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
   };
 
   const addLine = () => {
-    if (!product || !variant || !Number.isInteger(quantity) || quantity < 1) return;
+    const requestedQuantity = Number(quantity);
+    if (!product || !variant || !Number.isSafeInteger(requestedQuantity) || requestedQuantity < 1 || requestedQuantity > 10000) {
+      setError('Saisissez une quantité entière comprise entre 1 et 10 000.');
+      return;
+    }
     const nextLine: DraftLine = {
       key: `${product.id}:${variant.label}`,
       productId: product.id,
@@ -97,19 +101,19 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
       category: product.category,
       variant: variant.label,
       price: Number(variant.price) || 0,
-      quantity,
+      quantity: requestedQuantity,
       isQuote: Number(variant.price) <= 0 || Boolean(product.isQuote),
     };
     setLines(previous => {
       const existing = previous.findIndex(line => line.key === nextLine.key);
       if (existing < 0) return [...previous, nextLine];
-      return previous.map((line, index) => index === existing ? { ...line, quantity: line.quantity + quantity } : line);
+      return previous.map((line, index) => index === existing ? { ...line, quantity: line.quantity + requestedQuantity } : line);
     });
     setProductSearch('');
     setProductPickerOpen(false);
     setSelectedProductId('');
     setSelectedVariant('');
-    setQuantity(1);
+    setQuantity('1');
     setAddedLineMessage(`${product.name} · ${variant.label} ajouté à la commande.`);
   };
 
@@ -266,8 +270,8 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
                       <option value="">Choisir</option>{(product?.variants || []).map(item => <option key={item.label} value={item.label}>{item.label} · {item.price > 0 ? formatMoney(item.price) : 'Sur devis'}</option>)}
                     </select>
                   </label>
-                  <label className="text-[11px] font-bold text-slate-600">Qté<input type="number" min={1} max={10000} step={1} value={quantity} onChange={event => setQuantity(Math.max(1, Math.trunc(Number(event.target.value) || 1)))} className="mt-1 w-full rounded-xl border border-slate-300 px-2.5 py-2 text-sm" /></label>
-                  <button type="button" disabled={!variant} onClick={addLine} title={!variant ? 'Choisissez d’abord un produit et son conditionnement.' : 'Ajouter le produit à la liste de commande'} className="col-span-2 inline-flex min-h-10 items-center justify-center gap-1 rounded-xl bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300 sm:col-span-1"><Plus className="h-4 w-4" />Ajouter à la commande</button>
+                  <label className="text-[11px] font-bold text-slate-600">Qté<input type="number" min={1} max={10000} step={1} required value={quantity} onChange={event => setQuantity(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-2.5 py-2 text-sm" /></label>
+                  <button type="button" disabled={!variant || !Number.isSafeInteger(Number(quantity)) || Number(quantity) < 1 || Number(quantity) > 10000} onClick={addLine} title={!variant ? 'Choisissez d’abord un produit et son conditionnement.' : 'Ajouter le produit à la liste de commande'} className="col-span-2 inline-flex min-h-10 items-center justify-center gap-1 rounded-xl bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300 sm:col-span-1"><Plus className="h-4 w-4" />Ajouter à la commande</button>
                 </div>
               </div>
               {product && !product.variants?.length && <p role="alert" className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Ce produit n’a aucun conditionnement enregistré ; il ne peut pas être ajouté à une commande.</p>}

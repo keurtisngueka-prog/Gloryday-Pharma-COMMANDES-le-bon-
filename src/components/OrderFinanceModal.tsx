@@ -16,10 +16,12 @@ import {
 } from 'lucide-react';
 import { Order, User, Courier, PaymentInstallment, InvoiceRecord } from '../types';
 import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
+import { getOrderBillingTotal } from '../utils/orderFulfillment';
 import { normalizeCourierPhone } from '../utils/courierDirectory';
 import { logAuditEvent } from '../utils/auditLogger';
 import { downloadDeliveryNotePdf, downloadInvoiceProjectPdf } from '../utils/pdfGenerator';
 import { api } from '../api';
+import { getInvoiceReadyLineItems, getInvoiceReadyTotal, getOrderDeliveredQuantity, getOrderRemainingQuantity } from '../utils/orderFulfillment';
 
 interface OrderFinanceModalProps {
   order: Order;
@@ -62,12 +64,14 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   const [activeTab, setActiveTab] = useState<'installments' | 'invoices' | 'delivery' | 'partial'>(availableTabs[0] || 'invoices');
   const [isSaving, setIsSaving] = useState(false);
   const paymentSubmitLockRef = useRef(false);
+  const invoiceSubmitLockRef = useRef(false);
+  const deliverySubmitLockRef = useRef(false);
   const [saveError, setSaveError] = useState('');
   const [couriers, setCouriers] = useState<Courier[]>([]);
   const [courierDirectoryError, setCourierDirectoryError] = useState('');
 
   // Installment State
-  const [installmentAmount, setInstallmentAmount] = useState<number>(Math.round(order.estimatedTotal / 2));
+  const [installmentAmount, setInstallmentAmount] = useState(String(Math.round(order.estimatedTotal / 2)));
   const [installmentType, setInstallmentType] = useState<'acompte' | 'solde'>('acompte');
   const [installmentMethod, setInstallmentMethod] = useState<'especes' | 'airtel_money' | 'moov_money' | 'virement' | 'cheque'>('airtel_money');
   const [installmentRef, setInstallmentRef] = useState('');
@@ -89,8 +93,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   const [photoProof, setPhotoProof] = useState(order.deliveryProof?.photoUrl || '');
 
   // Partial Delivery State
-  const [isPartial, setIsPartial] = useState(order.isPartialDelivery || false);
   const [partialNotes, setPartialNotes] = useState(order.partialDeliveryNotes || '');
+  const [deliveryQuantities, setDeliveryQuantities] = useState<Record<number, string>>({});
 
   useEffect(() => {
     if (!canManageLogistics) return;
@@ -113,6 +117,9 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
   const totalPaid = getOrderPaidAmount(order);
   const remainingDue = getOrderRemainingBalance(order);
+  const deliveryTrackingActive = (order.deliveryFulfillments || []).length > 0;
+  const invoiceReadyLines = getInvoiceReadyLineItems(order);
+  const invoiceReadyTotal = deliveryTrackingActive ? getInvoiceReadyTotal(order) : order.estimatedTotal;
   const collectionOverdue = canViewPayments && isCollectionOverdue({ ...order, collectionDueDate: collectionDueDate || undefined });
 
   const saveUpdatedOrder = async (updatedOrder: Order): Promise<boolean> => {
@@ -132,7 +139,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   const handleAddInstallment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManagePayments || paymentSubmitLockRef.current) return;
-    if (!Number.isSafeInteger(installmentAmount) || installmentAmount <= 0 || installmentAmount > remainingDue) {
+    const cleanInstallmentAmount = Number(installmentAmount);
+    if (!Number.isSafeInteger(cleanInstallmentAmount) || cleanInstallmentAmount <= 0 || cleanInstallmentAmount > remainingDue) {
       setSaveError(`Saisissez un montant entier compris entre 1 et ${remainingDue.toLocaleString('fr-FR')} FCFA.`);
       return;
     }
@@ -142,7 +150,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     const newInst: PaymentInstallment = {
       id: globalThis.crypto?.randomUUID?.() || `INST-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       type: installmentType,
-      amount: Number(installmentAmount),
+      amount: cleanInstallmentAmount,
       paymentMethod: installmentMethod,
       transactionReference: installmentRef.trim() || undefined,
       status: 'valide',
@@ -152,7 +160,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
     const updatedInstallments = [...(order.installments || []), newInst];
     const newTotalPaid = totalPaid + newInst.amount;
-    const isNowFullyPaid = newTotalPaid >= order.estimatedTotal;
+    const isNowFullyPaid = newTotalPaid >= getOrderBillingTotal(order);
 
     const updatedOrder: Order = {
       ...order,
@@ -164,14 +172,14 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
     if (!await saveUpdatedOrder(updatedOrder)) return;
     if (isNowFullyPaid) setCollectionDueDate('');
-    setInstallmentAmount(0);
+    setInstallmentAmount('');
 
     logAuditEvent(
       currentUser,
       'validation_paiement',
       'Paiement Échelonné Commande',
       order.reference,
-      `Enregistrement ${installmentType.toUpperCase()} de ${installmentAmount.toLocaleString('fr-FR')} FCFA (${installmentMethod}) pour ${order.customer.facilityName}`,
+      `Enregistrement ${installmentType.toUpperCase()} de ${cleanInstallmentAmount.toLocaleString('fr-FR')} FCFA (${installmentMethod}) pour ${order.customer.facilityName}`,
       `Reste dû: ${remainingDue}`,
       `Nouveau total payé: ${newTotalPaid}`
     );
@@ -200,7 +208,9 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   };
   const handleCreateInvoiceOrCredit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canManageInvoices) return;
+    if (!canManageInvoices || invoiceSubmitLockRef.current) return;
+    invoiceSubmitLockRef.current = true;
+    try {
     const isFacture = invoiceType === 'facture';
     const documentYear = new Date().getFullYear();
     const orderCode = order.reference.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
@@ -209,9 +219,17 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       ? `FAC-${documentYear}-${orderCode}-${sequence}`
       : `AVOIR-${documentYear}-${orderCode}-${sequence}`;
 
-    const totalTTC = order.estimatedTotal;
+    const deliveryTrackingActive = (order.deliveryFulfillments || []).length > 0;
+    const totalTTC = isFacture
+      ? deliveryTrackingActive ? getInvoiceReadyTotal(order) : order.estimatedTotal
+      : getOrderBillingTotal(order);
     const totalHT = tvaRate > 0 ? Math.round(totalTTC / (1 + tvaRate)) : totalTTC;
     const tvaAmount = totalTTC - totalHT;
+    const lineItems = isFacture ? getInvoiceReadyLineItems(order) : [];
+    if (isFacture && totalTTC <= 0) {
+      setSaveError('Aucune quantité livrée non facturée ne peut être mise sur cette facture.');
+      return;
+    }
 
     const newDoc: InvoiceRecord = {
       id: `DOC-${Date.now()}`,
@@ -225,6 +243,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       tvaAmount,
       totalHT,
       totalTTC,
+      lineItems: isFacture ? lineItems : undefined,
+      deliveryFee: isFacture ? Math.max(0, totalTTC - lineItems.reduce((sum, line) => sum + line.lineTotal, 0)) : 0,
       reason: isFacture ? undefined : (creditReason.trim() || 'Retour dispositifs / ajustement tarifaire')
     };
 
@@ -242,6 +262,9 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       order.reference,
       `Émission de ${invoiceType === 'facture' ? 'Facture' : 'Avoir'} ${num} (${totalTTC.toLocaleString('fr-FR')} FCFA TTC)`
     );
+    } finally {
+      invoiceSubmitLockRef.current = false;
+    }
   };
 
   const handleDownloadInvoiceProject = async (invoice: InvoiceRecord) => {
@@ -290,8 +313,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
         photoUrl: photoProof.trim() || undefined,
         timestamp: new Date().toISOString()
       },
-      isPartialDelivery: isPartial,
-      partialDeliveryNotes: isPartial ? partialNotes.trim() : undefined
+      isPartialDelivery: order.isPartialDelivery,
+      partialDeliveryNotes: order.partialDeliveryNotes
     };
 
     if (!await saveUpdatedOrder(updatedOrder)) return;
@@ -305,6 +328,71 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     );
 
     onClose();
+  };
+
+  const handleSaveDeliveryFulfillment = async () => {
+    if (!canManageLogistics || isSaving || deliverySubmitLockRef.current) return;
+    deliverySubmitLockRef.current = true;
+    try {
+    const lines = Object.entries(deliveryQuantities).flatMap(([rawIndex, rawQuantity]) => {
+      const itemIndex = Number(rawIndex);
+      const quantity = Number(rawQuantity);
+      return Number.isSafeInteger(quantity) && quantity > 0 ? [{ itemIndex, quantity }] : [];
+    });
+    const notes = partialNotes.trim();
+    if (!lines.length && !notes) {
+      setSaveError('Saisissez une quantité réellement remise ou expliquez le reliquat à fournir.');
+      return;
+    }
+    const overLimit = lines.find((line) => line.quantity > getOrderRemainingQuantity(order, line.itemIndex));
+    if (overLimit) {
+      setSaveError(`La quantité dépasse le reliquat de « ${order.items[overLimit.itemIndex]?.productName || 'cet article'} ».`);
+      return;
+    }
+    if (lines.some((line) => {
+      const item = order.items[line.itemIndex];
+      return !item || item.isQuote || item.isDeferredStock || Number(item.price) <= 0;
+    })) {
+      setSaveError('Un article sur devis ou en réapprovisionnement doit d’abord être chiffré et confirmé avant l’enregistrement de sa remise.');
+      return;
+    }
+    const fulfillmentId = globalThis.crypto?.randomUUID?.() || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+      const value = Math.floor(Math.random() * 16);
+      return (char === 'x' ? value : (value & 0x3) | 0x8).toString(16);
+    });
+    const fulfillment = {
+      id: fulfillmentId,
+      fulfilledAt: new Date().toISOString(),
+      lines,
+      notes: notes || undefined,
+      recordedById: currentUser.id,
+      recordedByName: currentUser.contactName || currentUser.facilityName || 'Collaborateur Gloryday',
+    };
+    const deliveryFulfillments = [...(order.deliveryFulfillments || []), fulfillment];
+    const isPartialDelivery = order.items.some((_, itemIndex) => {
+      const delivered = deliveryFulfillments.reduce((sum, record) => sum + record.lines
+        .filter((line) => line.itemIndex === itemIndex)
+        .reduce((lineSum, line) => lineSum + line.quantity, 0), 0);
+      return delivered < order.items[itemIndex].quantity;
+    });
+    if (!await saveUpdatedOrder({
+      ...order,
+      deliveryFulfillments,
+      isPartialDelivery,
+      partialDeliveryNotes: notes || undefined,
+    })) return;
+    setDeliveryQuantities({});
+    setPartialNotes('');
+    logAuditEvent(
+      currentUser,
+      'statut_commande',
+      'Quantités remises / reliquat',
+      order.reference,
+      `${lines.reduce((sum, line) => sum + line.quantity, 0)} unité(s) remises ; ${isPartialDelivery ? 'reliquat conservé à fournir' : 'commande entièrement remise'}. ${notes}`
+    );
+    } finally {
+      deliverySubmitLockRef.current = false;
+    }
   };
 
   return (
@@ -366,7 +454,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
               activeTab === 'partial' ? 'bg-[#0f0f12] text-white' : 'text-slate-600 hover:bg-slate-200'
             }`}
           >
-            Livraison Partielle
+            Remises & reliquats
           </button>}
         </div>
 
@@ -468,8 +556,9 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                         min="1"
                         step="1"
                         max={remainingDue}
+                        required
                         value={installmentAmount}
-                        onChange={(e) => setInstallmentAmount(Number(e.target.value))}
+                        onChange={(e) => setInstallmentAmount(e.target.value)}
                         className="w-full p-1.5 border border-slate-300 rounded-lg font-mono bg-white"
                       />
                     </div>
@@ -522,6 +611,13 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                 <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[10px] text-amber-900">
                   La facture et l’avoir sont enregistrés dans le dossier de cette commande. Vérifiez les mentions et le taux applicable avant de transmettre le document.
                 </p>
+                {deliveryTrackingActive && (
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-[11px] text-blue-950">
+                    <strong>Facturable à ce jour : {invoiceReadyTotal.toLocaleString('fr-FR')} FCFA.</strong>
+                    <span className="block">Ce total ne comprend que les quantités réellement remises et pas encore facturées. Le reliquat apparaîtra sur une facture après sa livraison.</span>
+                    {invoiceReadyLines.length > 0 && <span className="mt-1 block">{invoiceReadyLines.map((line) => `${line.quantity} × ${line.productName}`).join(' · ')}</span>}
+                  </div>
+                )}
                 {(!order.invoices || order.invoices.length === 0) ? (
                   <p className="text-slate-400 italic">Aucune facture ou note d'avoir générée pour cette commande.</p>
                 ) : (
@@ -601,7 +697,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
                 <button
                   type="submit"
-                  disabled={isSaving}
+                  disabled={isSaving || (invoiceType === 'facture' && (deliveryTrackingActive ? invoiceReadyTotal <= 0 : (order.invoices || []).some((invoice) => invoice.type === 'facture')))}
                   className="w-full py-2 bg-[#0d44e8] hover:bg-blue-700 text-white font-bold rounded-xl cursor-pointer shadow-xs mt-1"
                 >
                   Créer {invoiceType === 'facture' ? 'la facture' : 'l’avoir'}
@@ -617,7 +713,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="flex items-center gap-1.5 text-xs font-bold text-blue-950"><FileText className="h-3.5 w-3.5" />Bon de livraison PDF</div>
-                    <p className="mt-1 text-[10px] text-blue-800">Document avec le logo Gloryday, les quantités commandées et les espaces de contrôle et de signature.</p>
+                    <p className="mt-1 text-[10px] text-blue-800">Document avec le logo Gloryday, les quantités commandées, remises et restant à fournir, avec espace de signature.</p>
                   </div>
                   <button
                     type="button"
@@ -703,43 +799,73 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
           {/* TAB 4: PARTIAL DELIVERY */}
           {activeTab === 'partial' && canManageLogistics && (
             <div className="space-y-3">
-              <label className="flex items-center gap-2 p-3 border border-slate-200 rounded-xl bg-slate-50 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={isPartial}
-                  onChange={(e) => setIsPartial(e.target.checked)}
-                  className="rounded text-[#0d44e8] w-4 h-4"
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                Saisissez uniquement les unités effectivement remises. Le stock des lignes disponibles a déjà été réservé à la commande : cette étape ne le déduit pas une seconde fois. Les quantités non remises restent au reliquat, et une facture ne portera que sur les unités remises et pas encore facturées.
+              </div>
+              <div className="space-y-2">
+                {order.items.map((item, itemIndex) => {
+                  const delivered = getOrderDeliveredQuantity(order, itemIndex);
+                  const remaining = getOrderRemainingQuantity(order, itemIndex);
+                  const isDeferred = item.isQuote || item.isDeferredStock || Number(item.price) <= 0;
+                  return (
+                    <div key={`${item.productId}-${item.variant}-${itemIndex}`} className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_115px_150px] sm:items-center">
+                      <div>
+                        <strong className="block text-sm text-slate-900">{item.productName}</strong>
+                        <span className="text-xs text-slate-500">{item.variant} · commandé {item.quantity} · déjà remis {delivered} · reste {remaining}</span>
+                        {isDeferred && <span className="mt-0.5 block text-[11px] font-semibold text-amber-700">À chiffrer / réapprovisionner avant remise</span>}
+                      </div>
+                      <label className="text-xs font-semibold text-slate-600">
+                        Remis aujourd’hui
+                        <input
+                          type="number"
+                          min="0"
+                          max={remaining}
+                          step="1"
+                          value={deliveryQuantities[itemIndex] ?? ''}
+                          disabled={isDeferred || remaining === 0}
+                          onChange={(event) => setDeliveryQuantities((current) => ({ ...current, [itemIndex]: event.target.value }))}
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm tabular-nums disabled:bg-slate-100"
+                          aria-label={`Quantité remise aujourd’hui pour ${item.productName}`}
+                        />
+                      </label>
+                      <span className={`rounded-full px-2.5 py-1 text-center text-[11px] font-bold ${remaining === 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
+                        {remaining === 0 ? 'Entièrement remis' : 'Reliquat à fournir'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div>
+                <label className="mb-1 block font-semibold text-slate-700">Note sur le reliquat ou la livraison</label>
+                <textarea
+                  rows={3}
+                  placeholder="Ex. : rupture fournisseur ; client informé, 4 boîtes remises aujourd’hui et 2 prévues vendredi."
+                  value={partialNotes}
+                  onChange={(event) => setPartialNotes(event.target.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-white p-2"
                 />
-                <div>
-                  <strong className="text-slate-900 block">Marquer comme Livraison Partielle</strong>
-                  <span className="text-slate-500 text-[11px]">
-                    Cochez cette case si un ou plusieurs articles sont en rupture temporaire et feront l'objet d'un reliquat.
-                  </span>
-                </div>
-              </label>
-
-              {isPartial && (
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Détail des Reliquats & Ruptures
-                  </label>
-                  <textarea
-                    rows={3}
-                    placeholder="Ex: 5 boîtes de compresses livrées sur 10. Reliquat de 5 boîtes programmé demain matin."
-                    value={partialNotes}
-                    onChange={(e) => setPartialNotes(e.target.value)}
-                    className="w-full p-2 border border-slate-300 rounded-xl bg-white"
-                  />
-                </div>
+              </div>
+              {(order.deliveryFulfillments || []).length > 0 && (
+                <details className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                  <summary className="cursor-pointer font-bold text-slate-700">Historique des remises ({order.deliveryFulfillments!.length})</summary>
+                  <div className="mt-2 space-y-2">
+                    {order.deliveryFulfillments!.map((record) => (
+                      <div key={record.id} className="rounded-lg bg-white p-2">
+                        <strong>{new Date(record.fulfilledAt).toLocaleString('fr-FR')} · {record.recordedByName}</strong>
+                        <p>{record.lines.map((line) => `${line.quantity} × ${order.items[line.itemIndex]?.productName || 'article'}`).join(', ') || 'Signalement de reliquat, sans remise'}</p>
+                        {record.notes && <p className="text-slate-500">{record.notes}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </details>
               )}
-
               <button
                 type="button"
-                onClick={handleSaveDeliveryProofAndCourier}
+                onClick={() => void handleSaveDeliveryFulfillment()}
                 disabled={isSaving}
                 className="w-full py-2 bg-slate-900 hover:bg-black text-white font-bold rounded-xl cursor-pointer shadow-xs"
               >
-                Enregistrer le Statut Partiel
+                {isSaving ? 'Enregistrement…' : 'Enregistrer la remise et le reliquat'}
               </button>
             </div>
           )}

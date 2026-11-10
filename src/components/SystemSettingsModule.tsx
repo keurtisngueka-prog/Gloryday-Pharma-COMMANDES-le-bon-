@@ -16,6 +16,7 @@ import {
   SystemSettings 
 } from '../utils/systemSettingsStorage';
 import { recordAuditLog } from '../utils/auditLogger';
+import { FREE_DELIVERY_THRESHOLD_FCFA } from '../utils/orderFinance';
 
 interface SystemSettingsModuleProps {
   actorName?: string;
@@ -304,10 +305,12 @@ export const SystemSettingsModule: React.FC<SystemSettingsModuleProps> = ({
             </label>
             <input
               type="number"
-              value={formData.freeDeliveryThreshold}
-              onChange={(e) => setFormData({ ...formData, freeDeliveryThreshold: Number(e.target.value) })}
-              className="w-full p-2.5 rounded-xl border border-slate-300 bg-white font-mono font-bold tabular-nums"
+              value={FREE_DELIVERY_THRESHOLD_FCFA}
+              readOnly
+              aria-describedby="free-delivery-threshold-help"
+              className="w-full p-2.5 rounded-xl border border-slate-300 bg-slate-100 font-mono font-bold tabular-nums text-slate-600"
             />
+            <p id="free-delivery-threshold-help" className="mt-1 text-[11px] font-normal normal-case text-slate-500">La livraison est offerte à partir de 30 000 FCFA d’articles, hors retrait. Ce seuil est appliqué au calcul des commandes.</p>
           </div>
 
           <div>
