@@ -542,7 +542,7 @@ export interface DirectMessage {
 export interface AppNotification {
   id: string;
   timestamp: string;
-  type: 'order_created' | 'status_changed' | 'payment_updated' | 'quote_created' | 'inactivity_reminder' | 'admin_message' | 'promotion' | 'password_recovery';
+  type: 'order_created' | 'status_changed' | 'payment_updated' | 'account_terms_updated' | 'quote_created' | 'inactivity_reminder' | 'admin_message' | 'promotion' | 'password_recovery';
   title?: string;
   orderId?: string;
   orderReference?: string;

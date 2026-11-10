@@ -1661,6 +1661,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 15,
     description: 'Bandelettes réactives pour lecteur On Call Plus nécessitant 1 µl de sang avec résultat rapide en 10 secondes.'
+    ,image: 'https://image.made-in-china.com/202f0j00GeyqUCEcnlkj/on-Call-Plus-Blood-Testing-Product-Test-Strip-with-Blood-Glucose-Meter.webp'
   },
   {
     id: 'tdr-02',
@@ -1745,6 +1746,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 5,
     description: 'Bandelettes micro-cuvettes réactives de dosage instantané du taux d\'hémoglobine totale (Hb) et hématocrite calculé (Hct).'
+    ,image: 'https://image.made-in-china.com/2f0j00LhIpUqJPYOuf/Strips-of-Mission-Hb-Plus-Hemoglobin-Meter-Mission-Hb-Plus-.webp'
   },
   {
     id: 'tdr-08',
@@ -1773,6 +1775,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 20,
     description: 'Test différentiel rapide détectant à la fois P. falciparum (HRP-2) et les autres espèces plasmodiales Pan (P. vivax, ovale, malariae).'
+    ,image: 'https://image.made-in-china.com/2f0j00PZNcQqrFbgka/Testsealabs-Medical-Supply-Malaria-Pf-pan-Antigen-Diagnostic-Rapid-Test-Kit-For-Human.webp'
   },
   {
     id: 'tdr-10',
@@ -1801,6 +1804,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 10,
     description: 'Cassettes de dépistage immunochromatographique des anticorps dirigés contre les virus de l\'immunodéficience humaine types 1 et 2.'
+    ,image: 'https://image.made-in-china.com/2f0j00hQpqBmOEfyoW/High-Accuracy-Wholesale-Testsealbs-HIV-1-2-O-Elisa-Antibody-Test-Cassette-Antigen-Rapit-Test-Strips-Kit.jpg'
   },
   {
     id: 'tdr-12',
@@ -1815,6 +1819,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 10,
     description: 'Test rapide sur sang/sérum/plasma pour la détection qualitative précoce de l\'antigène de surface du virus de l\'hépatite B (Ag HBs).'
+    ,image: 'https://image.made-in-china.com/2f0j00VEwcMqAdKFbj/Testsealabs-Hbsag-Hepatitis-B-Surface-Antigen-Test-Cassette-Rapid-Test-Kit-ISO-Quality-System-Certification.jpg'
   },
   {
     id: 'tdr-13',
@@ -1829,6 +1834,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 10,
     description: 'Dispositif de dépistage rapide des anticorps spécifiques dirigés contre le virus de l\'hépatite C (VHC).'
+    ,image: 'https://image.made-in-china.com/2f0j00oYMULyDdggup/One-Step-Infectious-Disease-Test-Hepatitis-C-HCV-Test-Kit.jpg'
   },
   {
     id: 'tdr-14',
@@ -1843,6 +1849,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 10,
     description: 'Test sérologique tréponémique rapide sur sang, sérum ou plasma pour détection des anticorps anti-Treponema pallidum.'
+    ,image: 'https://image.made-in-china.com/2f0j00sUeGnOkmluzc/Syphilis-Test-Strips-Vdrl-Syphilis-Tp-One-Step-Test-Device.webp'
   },
   {
     id: 'tdr-15',
@@ -1857,6 +1864,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 10,
     description: 'Test combiné simultané 2-en-1 préconisé en consultation prénatale (CPN) pour dépister conjointement le VIH et la syphilis.'
+    ,image: 'https://image.made-in-china.com/2f0j00GIwbRPpdLJcM/One-Step-Test-Cassette-Aids-HIV-1-2-Syphilis-Tp-Rapid-Diagnostic-Kit.webp'
   },
   {
     id: 'tdr-16',
@@ -1871,6 +1879,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 15,
     description: 'Test de grossesse urinaire haute sensibilité (25 mUI/ml) en format cassette individuelle avec résultat en 3 à 5 minutes.'
+    ,image: 'https://image.made-in-china.com/2f0j00SBckbGManLuO/Pregnancy-HCG-Cassette-HCG-Casette-HCG-Test-Cassette.jpg'
   },
   {
     id: 'tdr-17',
@@ -1899,6 +1908,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 5,
     description: 'Test rapide par écouvillonnage endocervical ou urétral pour la détection qualitative directe de l\'antigène Chlamydia trachomatis.'
+    ,image: 'https://image.made-in-china.com/2f0j00wfdGbsaEhguF/Infectious-Diseases-Diagnostic-Device-Chlamydia-Rapid-Test-Cassette-Kit.jpg'
   },
   {
     id: 'tdr-19',
@@ -1913,6 +1923,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 5,
     description: 'Test immunochromatographique rapide pour le diagnostic présomptif d\'infection à gonocoque sur prélèvements génitaux.'
+    ,image: 'https://image.made-in-china.com/2f0j00oYBRjnelAgpS/One-Step-Rapid-Gonorrhea-Test-Kits.jpg'
   },
   {
     id: 'tdr-20',
@@ -1927,6 +1938,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 5,
     description: 'Différenciation rapide des anticorps IgG (immunité acquise) et IgM (infection récente) dirigés contre Toxoplasma gondii.'
+    ,image: 'https://image.made-in-china.com/2f0j00FOGhEiuIgWgM/Evancare-CE-Marked-One-Step-Testing-Toxoplasma-Toxo-Igg-Igm-Rapid-Test.jpg'
   },
   {
     id: 'tdr-21',
@@ -1955,6 +1967,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 5,
     description: 'Diagnostic sérologique rapide des anticorps IgG et IgM anti-cytomégalovirus sur sérum, plasma ou sang total.'
+    ,image: 'https://image.made-in-china.com/2f0j00kgLbSKynyrcM/Torch-Toxo-Cmv-Hsv1-2-Rubella-Teat-Kit-Rubella-Ab-Igg-Igm-Rapid-Test-Cassette.jpg'
   },
   {
     id: 'tdr-23',
@@ -1983,6 +1996,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 10,
     description: 'Détection directe non invasive de l\'antigène fécal d\'H. pylori confirmant l\'infection active et le contrôle post-éradication.'
+    ,image: 'https://image.made-in-china.com/365f3j00TWBEitrKaMgA/Factory-Sale-H-Pylori-Stool-Antigen-Test-H-Pylori-Test-Cassette.webp'
   },
   {
     id: 'tdr-25',
@@ -1997,6 +2011,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 10,
     description: 'Détection qualitative rapide des anticorps IgG et IgM spécifiques de Salmonella typhi pour le diagnostic des fièvres entériques.'
+    ,image: 'https://image.made-in-china.com/203f0j00gGqfMamWYpzA/Lateral-Flow-Assay-Salmonella-Typhoid-Antigen-Rapid-Test-Cassette.webp'
   },
   {
     id: 'tdr-26',
@@ -2011,6 +2026,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 5,
     description: 'Diagnostic rapide différentiel étiologique des diarrhées aiguës virales de l\'enfant et du nourrisson sur échantillon de selle.'
+    ,image: 'https://image.made-in-china.com/202f0j00LwJCgytBSmbE/Best-Selling-Feces-Rotavirus-Adenovirus-Antigen-Combo-Rapid-Test-Kit.webp'
   },
   {
     id: 'tdr-27',
@@ -2025,6 +2041,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockQuantity: 0,
     alertThreshold: 10,
     description: 'Test immunologique spécifique de l\'hémoglobine humaine sans régime alimentaire préalable pour le dépistage des saignements digestifs.'
+    ,image: 'https://image.made-in-china.com/2f0j00MnrWJAClPizw/CE-Mark-Medical-Diagnostic-Test-Kits-Tumor-Marker-Rapid-Test-Colloidal-Gold-Afp-Test-Kit-Cea-Psa-Fob.jpg'
   },
   {
     id: 'tdr-28',
@@ -4123,5 +4140,81 @@ export const INITIAL_PRODUCTS: Product[] = [
     description: 'Système complet d\'anesthésie par inhalation avec mélangeur de gaz O2/N2O/Air, ventilateur de réanimation volumétrique et circuits patient.'
   }
 ];
+
+/** Product images researched from matching supplier listings and manufacturer catalogs. */
+const RESEARCHED_PRODUCT_IMAGES: Record<string, string> = {
+  'tdr-02': 'https://cdn.gdar.com.mx/archivos/Ecommerce-Accu-Chek-Tiras-Active-50-4015630064076-638158869642149843-1.jpg',
+  'tdr-03': 'https://www.accu-chek.co.uk/sites/g/files/papvje266/files/styles/image_400x400/public/2023-11/accu-chek-instant-test-strips-400x400v2.png?itok=6WJKBcNY',
+  'tdr-04': 'https://image.made-in-china.com/202f0j00CRofFUEaIDrB/Urinalysis-Reagent-Strips-10-Parameters-100-Tests-Per-Bottle.webp',
+  'tdr-05': 'https://image.made-in-china.com/202f0j00YTZomvDGANgj/urinalysis-dip-sticks-urine-test-trip-4-parameter-reagent-strip.webp',
+  'tdr-06': 'https://image.made-in-china.com/202f0j00tbzqfuiyuQoa/Protein-and-Glucose-Urine-Test-Kit-Urine-Test-Strips-Diabetes-Test-Strips.webp',
+  'tdr-08': 'https://image.made-in-china.com/202f0j00HjNWtuTSspRP/Testsealabs-High-Quality-Malaria-P-f-Antigen-Rapid-Diagnostic-Test-Kit-At-Home.webp',
+  'tdr-10': 'https://www.globalpointofcare.abbott/ww/en/product-details/determine-hiv-1-2/_jcr_content/root/container/columncontrol/tab_item_no_1/image.coreimg.jpeg/1747333521010/determine-hiv-1-2-pp-imga-375.jpeg',
+  'tdr-11': 'https://image.made-in-china.com/2f0j00CUqGodmRZzgB/HIV-Test-Kit-Cassette-Style-Anti-HIV-1-2-Rapid-Screen-Test.webp',
+  'tdr-17': 'https://image.made-in-china.com/202f0j00aAmokytFkCzL/Rapid-Detection-Room-Temperature-Low-False-Rate-HCG-Test-Strip.webp',
+  'tdr-21': 'https://cdn11.bigcommerce.com/s-ryt90hjx0j/images/stencil/608x608/products/13936/15066/sd-bioline-rubella-igg-igm__95263.1624359618.jpg?c=1',
+  'tdr-22': 'https://image.made-in-china.com/202f0j00buPkQLwmEgqj/Cmv-Cytomegalovirus-Ab-Igm-Igg-Test-Cassette.webp',
+  'tdr-23': 'https://thietbiytegiasi.vn/upload/product/hpy-citest-3098.jpeg',
+  'tdr-25': 'https://www.frenovobio.com/uploads/image/20210929/10/typhoid-fever-igg-igm_1632882583.jpg',
+  'tdr-27': 'https://image.made-in-china.com/2f0j00oIyksNFqQPrC/High-Quality-Diagnostic-Fecal-Occult-Blood-Test.jpg',
+  'tdr-28': 'https://image.made-in-china.com/2f0j00LCziZITEIaYK/Testsealabs-Cardiac-Markers-TnI-One-Step-Troponin-I-Rapid-Test-Kit.jpg',
+  'tdr-29': 'https://image.made-in-china.com/202f0j00EZlqtJjLZWrC/Diagnostic-Kit-for-D-Dimer-FICA-D-Dimer-Rapid-Test.webp',
+  'tdr-30': 'https://image.made-in-china.com/203f0j00JzakWQDsrNow/CE-High-Sensitive-Crp-Rapid-Test-Kit-C-Reactive-Protein-Diagnosis.webp',
+  'tdr-31': 'https://image.made-in-china.com/202f0j00gjKqVAbGwZkS/Testsealabs-High-Sensitivity-PSA-Prostate-Specific-Antigen-Rapid-Test-Kit.webp',
+  'tdr-32': 'https://www.gimaitaly.com/images/prodotti/big/24056.jpg',
+  'tdr-33': 'https://wondfo.com.ua/content/images/49/1800x1800l80mc0/test-na-5-narkotikov-amfetamin-metamfetamin-marikhuana-morfin-kokain-w2005-p265-23686081886904.png',
+  'tdr-34': 'https://www.socimed.com/img/p/5/2/4/4/3/52443-large_default.webp',
+  'tdr-35': 'https://diahem.com/wp-content/uploads/2021/02/ihd_802033100_view.jpg',
+  'tdr-36': 'https://diahem.com/wp-content/uploads/2021/02/ihd_801325100_view.jpg',
+  'tdr-37': 'https://diahem.com/wp-content/uploads/2021/02/ihd_801350100_view.jpg',
+  'tdr-38': 'https://diahem.com/wp-content/uploads/2021/02/ihd_801375100_view.jpg',
+  'tdr-39': 'https://qca.es/4656-large_default/rpr-carbon-100-tests.jpg',
+  'tdr-40': 'https://www.bio-rad.com/sites/default/files/2024-05/Syphilis-Agglutination-Tests-TPHA-product-detail.png',
+  'tdr-41': 'https://www.africa-lab.shop/210528-medium_default/widal-et-felix-antigenes-febriles-incl-controles-8.jpg',
+  'tdr-42': 'https://www.medicalogy.com/images/product/reagen-hemoglobin-drapkin-500-ml.jpg',
+  'tdr-43': 'https://www.socimed.com/img/p/3/9/5/0/0/39500-home_default.webp',
+  'tdr-44': 'https://prolabscientific.com/images/product/XS-2340.jpg',
+  'tdr-45': 'https://cdn11.bigcommerce.com/s-miy8j1e3ug/images/stencil/2560w/products/310582/229867/60d5ef09-85dc-479a-88cc-4ac49ec0c026__37421.1735202778.jpg?c=1',
+  'tdr-46': 'https://toliopoulos.gr/wp-content/uploads/2022/04/kedrelaio-immersion-oil.jpg',
+  'tdr-47': 'https://cdn.qukasoft.com/f/639537/cG96WmFtNG0vcUp3ZUdGdEg4MXZKZWxESUE9PQ/p/imersiyon-yag-500ml-immersiyon-yagi-mikroskop-icin-immersion-oil-zurih-lab-73277969-sw1024sh1024.webp',
+  'tdr-48': 'https://anamollabs.com/wp-content/uploads/turk.jpg',
+  'tdr-49': 'https://materlab.com/128-large_default/immunoquick-malaria4-contact.jpg',
+  'bio-01': 'https://coralclinicalsystems.com/uploads/product/uric-acid_image_7920220324.112902.jpg',
+  'bio-02': 'https://www.med-us.shop/images/uploader/re/reagentas-alb0102-albumin-1.jpg',
+  'bio-03': 'https://5.imimg.com/data5/SELLER/Default/2024/8/440525380/VF/PG/FO/46104667/biosci-true-detect-amylase-test-reagent-1000x1000.jpg',
+  'bio-04': 'https://cdn11.bigcommerce.com/s-k069xfmhqb/images/stencil/original/products/100274/186585/5390013093_AST_Reagent_Set_67mL_and_17mL__62038.1759263928.png?c=1',
+  'bio-05': 'https://www.biomed.de/media/catalog/product/cache/f3020b7489dcfc4d1d147cf4dad07b7f/A/L/ALT-GPT-AU-Reagenz-Klinische-Chemie-BIOMED.png',
+  'bio-06': 'https://cdn.dotpe.in/longtail/store-items/7714311/yovA3gzH.webp',
+  'bio-07': 'https://cdn11.bigcommerce.com/s-k069xfmhqb/images/stencil/1280x1280/products/100123/186643/Direct_Bilirubin_Reagent_Set_5390010750__44075.1759263997.png?c=1',
+  'bio-08': 'https://cdn.dotpe.in/longtail/store-items/7714311/JOU3frY4.webp',
+  'bio-09': 'https://img.medicalexpo.es/images_me/photo-g/4588227-20851177.webp',
+  'bio-10': 'https://www.med-us.shop/images/uploader/re/reagentas-tc0102-total-cholesterol-1.jpg',
+  'bio-11': 'https://static.wixstatic.com/media/d94ef6_73d616b1dab3427f8ade05af1db216a4~mv2_d_3888_2592_s_4_2.jpg/v1/fill/w_3888%2Ch_2592%2Cal_c%2Cq_90%2Cusm_0.66_1.00_0.01%2Cenc_auto/H513-100%20HDL%20Choleserol%20.jpg',
+  'bio-12': 'https://coralclinicalsystems.com/uploads/product/ldld_image_8520220324.150408.jpg',
+  'bio-13': 'https://coralclinicalsystems.com/uploads/product/creatine-kinase-nac-act_image_1120211127.172835.jpg',
+  'bio-14': 'https://coralclinicalsystems.com/uploads/product/creatine-kinase-ckmb_image_1220211129.114148.jpg',
+  'bio-15': 'https://coralclinicalsystems.com/uploads/product/coralyzer-200-chloride_image_10720220331.162532.jpg',
+  'bio-16': 'https://www.appsheet.com/template/gettablefileurl?appName=APPDISTRIBUIDORESWEB-2753577&fileName=RECURSOS_Images%2F261010013.IMAGEN.171946.png&tableName=RECURSOS',
+  'bio-17': 'https://anamollabs.com/wp-content/uploads/creatinine.jpg',
+  'bio-18': 'https://www.med-us.shop/images/uploader/re/reagentas-crp-800s-c-reactive-protein-kit-1.jpg',
+  'bio-19': 'https://coralclinicalsystems.com/uploads/product/iron-tibc_image_4820220401.121850.jpg',
+  'bio-20': 'https://centerlab.vtexassets.com/arquivos/ids/162590/FERRITINA%20TURBIQUEST-Photoroom.png?v=638881837182170000',
+  'bio-21': 'https://cdn11.bigcommerce.com/s-k069xfmhqb/images/stencil/1280x1280/products/100332/186637/GGT_Reagent_12-G7571-100__59266.1759263991.png?c=1',
+  'bio-22': 'https://cashryte.com/image/cache/catalog/Lab%20reagent/Glucose-pap-1-500x500.jpg',
+  'bio-23': 'https://down-id.img.susercontent.com/file/id-11134207-7r98r-lof7liecpgg014',
+  'bio-24': 'https://img.medicalexpo.es/images_me/photo-g/91797-15074257.jpg',
+  'c-01': 'https://erp.meditec.hn/web/image/product.template/6459/image_1024?unique=f80f89c',
+  'c-02': 'https://www.megro.de/media/22/dc/57/1765831113/fre_63057.jpg?ts=1777322823',
+  'c-03': 'https://www.newtechgloves.com/picts/products/tnw800-needles27g.png',
+  'c-04': 'https://assets.kogan.com/images/universal/UNV-DN18GX1.0LV/1-acda698af6-dn18gx10lv.png?auto=webp&bg-color=fff&canvas=1200%2C800&dpr=1&enable=upscale&fit=bounds&height=800&quality=90&width=1200',
+  'c-05': 'https://www.distrimed.com/images/imagesmulti/825341_6_b.jpg',
+  'c-06': 'https://cdn11.bigcommerce.com/s-ecdnjzysa5/products/3492/images/6354/3692_1__53326.1695618471.386.513.jpg?c=1',
+  'c-07': 'https://image.made-in-china.com/202f0j00aMIbsCvKlLoe/Hospital-Orthopedic-Bandage-Undercast-Padding-100-Cotton-Orthopedic-Wool.webp',
+};
+
+for (const product of INITIAL_PRODUCTS) {
+  const researchedImage = RESEARCHED_PRODUCT_IMAGES[product.id];
+  if (researchedImage) product.image = researchedImage;
+}
 
 export const INITIAL_PACKS: Pack[] = [];

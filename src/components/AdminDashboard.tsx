@@ -201,6 +201,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [creditAccountStatusDraft, setCreditAccountStatusDraft] = useState<ClientAccountStatus>('actif');
   const [savingCreditTerms, setSavingCreditTerms] = useState(false);
   const [creditTermsError, setCreditTermsError] = useState('');
+  const [creditTermsFeedback, setCreditTermsFeedback] = useState('');
   const [isRefreshingData, setIsRefreshingData] = useState(false);
   // Volume discount settings state
   const [discountSettings, setDiscountSettings] = useState<VolumeDiscountSettings>(() => getActiveVolumeDiscountSettings());
@@ -280,6 +281,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const openCreditTerms = (client: User) => {
+    setCreditTermsFeedback('');
     setCreditTermsClient(client);
     setCreditLimitDraft(String(Math.max(0, Number(client.creditLimit) || 0)));
     setCreditMinimumDraft(String(Math.max(0, Number(client.minimumCreditOrderAmount ?? 50000) || 0)));
@@ -300,6 +302,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         paymentTerms: creditPaymentTermsDraft,
         accountStatus: creditAccountStatusDraft,
       });
+      setCreditTermsFeedback('Conditions enregistrées. Le client est informé dans son espace ; une alerte push sera envoyée si son appareil y est abonné.');
       setCreditTermsClient(null);
       onRefresh();
     } catch (error) {
@@ -409,6 +412,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   return (
     <div className="admin-dashboard-enter admin-dashboard-shell max-w-7xl mx-auto pb-24 space-y-5 px-3 sm:px-0">
+      {creditTermsFeedback && (
+        <div role="status" aria-live="polite" className="fixed right-4 top-20 z-[70] flex max-w-md items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900 shadow-xl">
+          <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+          <span>{creditTermsFeedback}</span>
+          <button type="button" onClick={() => setCreditTermsFeedback('')} className="ml-1 rounded-lg px-2 py-1 text-xs font-bold text-emerald-800 hover:bg-emerald-100">Fermer</button>
+        </div>
+      )}
       {/* 1. TOP COMMAND CENTER BANNER */}
       <div className="admin-dashboard-header bg-gradient-to-r from-slate-950 via-[#0f172a] to-slate-950 text-white rounded-3xl p-5 sm:p-6 shadow-xl border border-slate-800 relative overflow-hidden">
         {/* Subtle decorative glow */}
@@ -476,7 +486,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* 2. SUB-TABS NAVIGATION WITH DYNAMIC BADGES */}
-      <nav aria-label="Sections du tableau de bord" className="admin-dashboard-nav flex gap-1.5 overflow-x-auto text-xs font-bold scrollbar-none">
+      <nav aria-label="Sections du tableau de bord" tabIndex={0} className="admin-dashboard-nav flex gap-1.5 overflow-x-auto text-xs font-bold">
         {hasPerm('stats_view') && (
           <button
             type="button"

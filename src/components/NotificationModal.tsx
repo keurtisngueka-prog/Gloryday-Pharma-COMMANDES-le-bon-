@@ -5,6 +5,7 @@ import {
   CheckCircle2, 
   Clock, 
   DollarSign, 
+  CreditCard,
   Package, 
   Sparkles, 
   AlertTriangle, 
@@ -211,6 +212,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                   {n.type === 'order_created' && <Package className="w-4 h-4" />}
                   {n.type === 'status_changed' && <CheckCircle2 className="w-4 h-4" />}
                   {n.type === 'payment_updated' && <DollarSign className="w-4 h-4" />}
+                  {n.type === 'account_terms_updated' && <CreditCard className="w-4 h-4" />}
                   {n.type === 'promotion' && <Sparkles className="w-4 h-4" />}
                   {n.type === 'inactivity_reminder' && <AlertTriangle className="w-4 h-4" />}
                   {n.type === 'quote_created' && <FileText className="w-4 h-4" />}

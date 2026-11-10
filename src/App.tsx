@@ -1697,6 +1697,8 @@ export default function App() {
           if (n.type === 'promotion') {
             setActiveTab('catalog');
             setOnlyPromotions(true);
+          } else if (n.type === 'account_terms_updated' && currentUser?.role === 'client') {
+            setActiveTab('cart');
           } else if (n.type === 'order_created' || n.type === 'status_changed' || n.type === 'payment_updated') {
             if (currentUser?.role !== 'client' && currentUser && canReadStaffOrders(currentUser)) {
               setActiveTab('admin-orders');

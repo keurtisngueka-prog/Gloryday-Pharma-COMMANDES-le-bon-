@@ -3112,6 +3112,38 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       .reduce((sum, order) => sum + getOrderRemainingBalance(order), 0);
     account.user.outstandingBalance = outstandingBalance;
 
+    const termsChanged = previous.creditLimit !== creditLimit
+      || previous.minimumCreditOrderAmount !== minimumCreditOrderAmount
+      || previous.paymentTerms !== paymentTerms
+      || previous.accountStatus !== accountStatus;
+    const paymentTermsLabel = paymentTerms === 'comptant'
+      ? 'Paiement comptant'
+      : paymentTerms === 'acompte_solde'
+        ? 'Acompte puis règlement du solde'
+        : `Règlement à ${paymentTerms.replace('_jours', ' jours')}`;
+    const accountStatusLabel = accountStatus === 'actif'
+      ? 'Actif'
+      : accountStatus === 'en_attente'
+        ? 'En attente'
+        : accountStatus === 'suspendu'
+          ? 'Suspendu'
+          : 'Bloqué';
+    const isTermPaymentEnabled = accountStatus === 'actif' && paymentTerms !== 'comptant' && creditLimit > 0;
+    const accountTermsNotification: AppNotification | null = termsChanged
+      ? {
+          id: `notif-${randomUUID()}`,
+          timestamp: new Date().toISOString(),
+          type: 'account_terms_updated',
+          title: 'Conditions de paiement mises à jour',
+          message: `Vos conditions de paiement ont été mises à jour. Compte : ${accountStatusLabel}. ${paymentTermsLabel}. Plafond : ${creditLimit.toLocaleString('fr-FR')} FCFA ; encours actuel : ${outstandingBalance.toLocaleString('fr-FR')} FCFA ; disponible estimé : ${Math.max(0, creditLimit - outstandingBalance).toLocaleString('fr-FR')} FCFA. Minimum par commande à terme : ${minimumCreditOrderAmount.toLocaleString('fr-FR')} FCFA.${isTermPaymentEnabled ? ' Les commandes à terme restent soumises aux vérifications dans le panier.' : ' Le paiement à terme n’est pas activé pour le moment.'}`,
+          userId: account.user.id,
+          targetRole: 'client',
+          read: false,
+          actionUrl: '/#cart',
+        }
+      : null;
+    if (accountTermsNotification) store.notifications.unshift(accountTermsNotification);
+
     appendStaffLog((req as AuthenticatedRequest).authenticatedUser, {
       category: 'system',
       severity: 'info',
@@ -3124,6 +3156,12 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       details: `Plafond ${creditLimit.toLocaleString('fr-FR')} FCFA · seuil minimum ${minimumCreditOrderAmount.toLocaleString('fr-FR')} FCFA · délai ${paymentTerms} · statut ${accountStatus}.`,
     });
     await saveStore(store, persistence);
+    if (accountTermsNotification) {
+      scheduleBackgroundTask(
+        sendPushForNotification(accountTermsNotification, '/#cart'),
+        `notification des conditions de paiement client ${account.user.id}`
+      );
+    }
     res.json(buildClientPurchaseSummary(account.user, store.orders));
   }));
 

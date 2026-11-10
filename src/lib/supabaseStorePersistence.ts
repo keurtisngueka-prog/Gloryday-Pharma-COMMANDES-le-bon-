@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
-import { LEGACY_DEMO_PRODUCT_IDS, LEGACY_DEMO_PACK_IDS } from '../data/initialProducts.js';
+import { INITIAL_PRODUCTS, LEGACY_DEMO_PRODUCT_IDS, LEGACY_DEMO_PACK_IDS } from '../data/initialProducts.js';
 import type {
   AppNotification,
   CartItem,
@@ -22,6 +22,12 @@ import type {
   CollectionReminder,
   OrderDraft
 } from '../types.js';
+
+const INITIAL_PRODUCT_IMAGES = new Map<string, string>();
+for (const product of INITIAL_PRODUCTS) {
+  const image = product.image || product.thumbnailUrl;
+  if (image) INITIAL_PRODUCT_IMAGES.set(product.id, image);
+}
 
 export interface ClientWorkspace {
   cartItems: CartItem[];
@@ -563,8 +569,8 @@ export class SupabaseStorePersistence {
           discountPercentage: variant.discount_percentage == null ? undefined : numberOr(variant.discount_percentage),
         })),
         status: row.status === 'rupture' ? 'rupture' : 'disponible',
-        image: row.image_url || undefined,
-        thumbnailUrl: extra.thumbnailUrl || row.image_url || undefined,
+        image: row.image_url || INITIAL_PRODUCT_IMAGES.get(String(row.id)) || undefined,
+        thumbnailUrl: extra.thumbnailUrl || row.image_url || INITIAL_PRODUCT_IMAGES.get(String(row.id)) || undefined,
         description: row.description || undefined,
         isPromotion: Boolean(row.is_promotion),
         originalPrice: numberOr(row.original_price),
@@ -903,8 +909,8 @@ export class SupabaseStorePersistence {
             discountPercentage: variant.discount_percentage == null ? undefined : numberOr(variant.discount_percentage),
           })),
           status: row.status === 'rupture' ? 'rupture' : 'disponible',
-          image: row.image_url || undefined,
-          thumbnailUrl: extra.thumbnailUrl || row.image_url || undefined,
+          image: row.image_url || INITIAL_PRODUCT_IMAGES.get(String(row.id)) || undefined,
+          thumbnailUrl: extra.thumbnailUrl || row.image_url || INITIAL_PRODUCT_IMAGES.get(String(row.id)) || undefined,
           description: row.description || undefined,
           isPromotion: Boolean(row.is_promotion),
           originalPrice: numberOr(row.original_price),
@@ -962,8 +968,8 @@ export class SupabaseStorePersistence {
             discountPercentage: variant.discount_percentage == null ? undefined : numberOr(variant.discount_percentage),
           })),
           status: row.status === 'rupture' ? 'rupture' : 'disponible',
-          image: row.image_url || undefined,
-          thumbnailUrl: extra.thumbnailUrl || row.image_url || undefined,
+          image: row.image_url || INITIAL_PRODUCT_IMAGES.get(String(row.id)) || undefined,
+          thumbnailUrl: extra.thumbnailUrl || row.image_url || INITIAL_PRODUCT_IMAGES.get(String(row.id)) || undefined,
           description: row.description || undefined,
           isPromotion: Boolean(row.is_promotion),
           originalPrice: numberOr(row.original_price),
