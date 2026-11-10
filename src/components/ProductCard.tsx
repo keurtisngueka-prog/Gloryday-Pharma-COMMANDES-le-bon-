@@ -7,7 +7,7 @@ import {
   FileText, 
   Eye, 
   X, 
-  ExternalLink,
+  Maximize2,
   MessageCircle,
   Package,
   Activity,
@@ -36,6 +36,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const [quantity, setQuantity] = useState(1);
   const [justAdded, setJustAdded] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [isImageExpanded, setIsImageExpanded] = useState(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
   const selectedVariant = product.variants[selectedVariantIndex] || product.variants[0];
@@ -49,13 +50,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   // Handle escape key to close bottom sheet
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsDetailOpen(false);
+      if (e.key === 'Escape') {
+        if (isImageExpanded) setIsImageExpanded(false);
+        else setIsDetailOpen(false);
+      }
     };
     if (isDetailOpen) {
       window.addEventListener('keydown', handleKeyDown);
     }
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isDetailOpen]);
+  }, [isDetailOpen, isImageExpanded]);
 
   const handleQuickAdd = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -291,15 +295,14 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                       alt={product.name} 
                       className="w-full h-full object-contain p-2"
                     />
-                    <a
-                      href={activePhoto}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => setIsImageExpanded(true)}
                       className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black text-white text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 backdrop-blur-xs transition-colors"
                     >
-                      <ExternalLink className="w-3 h-3" />
+                      <Maximize2 className="w-3 h-3" />
                       Grand format
-                    </a>
+                    </button>
                   </div>
                   {allImages.length > 1 && (
                     <div className="flex gap-2 overflow-x-auto pb-1">
@@ -523,6 +526,33 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {isImageExpanded && activePhoto && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Image agrandie : ${product.name}`}
+          onClick={() => setIsImageExpanded(false)}
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/95 p-3 sm:p-8 animate-in fade-in duration-150"
+        >
+          <div className="absolute inset-x-0 top-0 flex items-center justify-between gap-3 p-3 sm:p-5 text-white">
+            <p className="min-w-0 truncate text-sm font-semibold">{product.name}</p>
+            <button
+              type="button"
+              onClick={() => setIsImageExpanded(false)}
+              aria-label="Fermer l’image agrandie"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <img
+            src={activePhoto}
+            alt={product.name}
+            onClick={(event) => event.stopPropagation()}
+            className="max-h-[86vh] max-w-[96vw] select-none object-contain"
+          />
         </div>
       )}
     </>
