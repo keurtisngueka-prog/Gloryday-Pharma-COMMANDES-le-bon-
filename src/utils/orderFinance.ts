@@ -1,5 +1,5 @@
 import type { Order } from '../types';
-import { getOrderBillingTotal } from './orderFulfillment';
+import { getOrderBillingTotal } from './orderFulfillment.js';
 
 export const FREE_DELIVERY_THRESHOLD_FCFA = 30_000;
 
