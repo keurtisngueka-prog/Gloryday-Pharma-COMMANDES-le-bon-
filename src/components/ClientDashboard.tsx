@@ -86,7 +86,7 @@ function summarizeOrderItems(order: Order): string {
   return order.items.map((item, index) => {
     const delivered = getOrderDeliveredQuantity(order, index);
     const remaining = getOrderRemainingQuantity(order, index);
-    const progress = (order.deliveryFulfillments || []).length > 0 ? ` · remis ${delivered}/${item.quantity}${remaining ? ` · reliquat ${remaining}` : ''}` : '';
+    const progress = (order.deliveryFulfillments || []).length > 0 ? ` · remis ${delivered}/${item.quantity}${remaining ? ` · reste à livrer ${remaining}` : ''}` : '';
     return `${item.quantity}x ${item.productName}${progress}`;
   }).join(', ');
 }
@@ -1291,6 +1291,20 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 const pendingInstallments = (order.installments || []).filter(installment => installment.status === 'en_attente');
                 const rejectedInstallments = (order.installments || []).filter(installment => installment.status === 'rejete');
                 const hasPendingMobileReference = mp?.status === 'submitted' || (mp?.status === 'pending' && Boolean(mp.transactionReference));
+                const hasDeliveryFulfillments = (order.deliveryFulfillments || []).length > 0;
+                const pendingProductLines = order.items
+                  .map((item, itemIndex) => ({
+                    item,
+                    itemIndex,
+                    remainingQuantity: getOrderRemainingQuantity(order, itemIndex),
+                  }))
+                  .filter(({ item, remainingQuantity }) => remainingQuantity > 0 && !item.isQuote && (hasDeliveryFulfillments || Boolean(item.isDeferredStock)));
+                const nextPendingDelivery = hasDeliveryFulfillments
+                  && order.expectedDeliveryDate
+                  && /^\d{4}-\d{2}-\d{2}$/.test(order.expectedDeliveryDate)
+                  && order.expectedDeliveryDate >= todayKey
+                  ? `${parseDateKey(order.expectedDeliveryDate).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}${order.expectedDeliverySlot ? ` · ${order.expectedDeliverySlot}` : ''}`
+                  : null;
                 const paymentStatusLabel = order.status === 'Annulée'
                   ? 'Sans objet · commande annulée'
                   : deliveryTrackingActive && billingTotal <= 0
@@ -1386,6 +1400,27 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                       <div className="text-xs text-slate-500 line-clamp-1">
                         {summarizeOrderItems(order)}
                       </div>
+                      {order.status !== 'Annulée' && pendingProductLines.length > 0 && (
+                        <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5 text-xs text-amber-950">
+                          <div className="flex items-center gap-1.5 font-bold">
+                            <Package className="h-3.5 w-3.5 shrink-0 text-amber-700" />
+                            <span>Produits manquants dans votre commande</span>
+                          </div>
+                          <ul className="mt-1.5 space-y-1">
+                            {pendingProductLines.map(({ item, itemIndex, remainingQuantity }) => (
+                              <li key={`${order.id}-${item.productId}-${itemIndex}`} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                                <span>{item.productName}{item.variant ? ` · ${item.variant}` : ''}</span>
+                                <strong className="tabular-nums">{remainingQuantity} restant{remainingQuantity > 1 ? 's' : ''} à livrer</strong>
+                              </li>
+                            ))}
+                          </ul>
+                          <p className="mt-1.5 text-[11px] text-amber-800">
+                            {nextPendingDelivery
+                              ? <>Prochaine livraison prévue : <strong>{nextPendingDelivery}</strong></>
+                              : 'La date de livraison de ces produits n’est pas encore confirmée.'}
+                          </p>
+                        </div>
+                      )}
                       {order.status !== 'Annulée' && (
                         <div className={`text-xs font-semibold ${collectionOverdue ? 'text-rose-700' : 'text-slate-600'}`}>
                           {deliveryTrackingActive ? 'Total facturé à date' : 'Total commande'} : {(deliveryTrackingActive ? billingTotal : order.estimatedTotal).toLocaleString('fr-FR')} FCFA · Confirmé/encaissé : {paidAmount.toLocaleString('fr-FR')} FCFA · Solde restant : {remainingBalance.toLocaleString('fr-FR')} FCFA
