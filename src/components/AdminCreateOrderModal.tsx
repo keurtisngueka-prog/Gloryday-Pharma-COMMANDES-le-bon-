@@ -56,6 +56,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<'especes' | 'airtel_money' | 'moov_money' | 'virement' | 'cheque'>('virement');
   const [documentChoice, setDocumentChoice] = useState<DocumentChoice>('bon');
   const [tvaRate, setTvaRate] = useState(0);
+  const [includeStampOnInvoice, setIncludeStampOnInvoice] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [addedLineMessage, setAddedLineMessage] = useState('');
@@ -131,6 +132,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
       tvaAmount: order.estimatedTotal - totalHT,
       totalHT,
       totalTTC: order.estimatedTotal,
+      includeStamp: includeStampOnInvoice,
     };
     const saved = await api.updateOrderFinance(order.id, { invoices: [...(order.invoices || []), invoice] });
     onOrderCreated(saved);
@@ -313,6 +315,10 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
               {canManageInvoices && hasUnknownPrice && <p className="mt-2 text-[11px] text-amber-800">Une ligne nécessite un devis : la facture sera disponible après validation du prix et du stock.</p>}
               {documentChoice === 'facture' && canManageInvoices && <label className="mt-3 block max-w-xs text-[11px] font-bold text-slate-700">Taux TVA/CSS appliqué
                 <select value={tvaRate} onChange={event => setTvaRate(Number(event.target.value))} className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs"><option value={0}>0 %</option><option value={0.18}>18 %</option></select>
+              </label>}
+              {documentChoice === 'facture' && canManageInvoices && <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 bg-white p-3 text-[11px] text-slate-700">
+                <input type="checkbox" checked={includeStampOnInvoice} onChange={event => setIncludeStampOnInvoice(event.target.checked)} className="mt-0.5 accent-blue-700" />
+                <span><strong className="block">Inclure le cachet Gloryday sur le PDF</strong><span className="text-slate-500">Ce choix sera conservé pour cette facture.</span></span>
               </label>}
             </fieldset>
 

@@ -44,6 +44,7 @@ import type {
   OrderStatus,
   PaymentInstallment,
   InvoiceRecord,
+  ClientRemainderRequest,
   CourierInfo,
   DeliveryProof,
   DeliveryLocationPoint,
@@ -3286,11 +3287,21 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
           : store.messages;
     const canViewClientContacts = user.role === 'Super-Admin'
       || (user.permissions || []).some(permission => permission === 'clients_view' || permission === 'clients_manage');
-    res.json(canViewClientContacts ? messages : messages.map(({ recipientPhone: _recipientPhone, ...message }) => message));
+    res.json(canViewClientContacts ? messages : messages.map(({ recipientPhone: _recipientPhone, senderPhone: _senderPhone, ...message }) => message));
   });
 
   app.post('/api/messages', asyncHandler(async (req, res) => {
     const user = (req as AuthenticatedRequest).authenticatedUser!;
+    const orderId = typeof req.body?.orderId === 'string' ? req.body.orderId.trim().slice(0, 120) : '';
+    const linkedOrder = orderId ? store.orders.find((order) => order.id === orderId || order.reference === orderId) : undefined;
+    if (orderId && !linkedOrder) {
+      res.status(404).json({ error: 'La commande liée à ce message est introuvable.' });
+      return;
+    }
+    if (linkedOrder && user.role === 'client' && linkedOrder.userId !== user.id) {
+      res.status(403).json({ error: 'Vous ne pouvez écrire qu’au sujet de vos propres commandes.' });
+      return;
+    }
     let recipientId: string | undefined;
     let recipientFacilityName: string | undefined;
     let recipientPhone: string | undefined;
@@ -3310,6 +3321,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       recipientId = 'staff';
       recipientFacilityName = 'Direction Gloryday Pharma';
     }
+    if (linkedOrder && user.role !== 'client' && linkedOrder.userId !== recipientId) {
+      res.status(403).json({ error: 'Ce message ne peut être lié qu’au client de la commande.' });
+      return;
+    }
     const msg: DirectMessage = {
       ...req.body,
       id: `msg-${randomUUID()}`,
@@ -3319,6 +3334,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       recipientId,
       recipientFacilityName,
       recipientPhone,
+      senderPhone: user.role === 'client' ? user.phone : undefined,
+      orderId: linkedOrder?.id,
+      orderReference: linkedOrder?.reference,
       subject: String(req.body?.subject || '').trim().slice(0, 160),
       content: String(req.body?.content || '').trim().slice(0, 5000),
       channel: ['whatsapp', 'both'].includes(req.body?.channel) ? req.body.channel : 'in_app',
@@ -3339,12 +3357,37 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         message: msg.content,
         targetRole: 'client',
         userId: recipientId,
-        read: false
+        read: false,
+        orderId: msg.orderId,
+        orderReference: msg.orderReference,
+        actionUrl: '/#dashboard',
+      };
+      store.notifications.unshift(messagePushNotification);
+    } else if (user.role === 'client' && msg.channel === 'in_app') {
+      messagePushNotification = {
+        id: `notif-${randomUUID()}`,
+        timestamp: msg.createdAt,
+        type: 'admin_message',
+        title: msg.orderReference ? `Message client · ${msg.orderReference}` : msg.subject,
+        message: `${msg.senderName} : ${msg.content}`,
+        targetRole: 'Super-Admin',
+        read: false,
+        orderId: msg.orderId,
+        orderReference: msg.orderReference,
+        actionUrl: '/#admin',
       };
       store.notifications.unshift(messagePushNotification);
     }
     await saveDirectMessage(store, persistence, msg, messagePushNotification);
-    if (messagePushNotification) await sendPushForNotification(messagePushNotification);
+    if (messagePushNotification?.userId) {
+      await sendPushForNotification(messagePushNotification, messagePushNotification.actionUrl || '/#dashboard');
+    } else if (messagePushNotification) {
+      const adminUserIds = store.accounts.filter((account) => account.user.role === 'Super-Admin').map((account) => account.user.id);
+      scheduleBackgroundTask(
+        sendPushNotifications(adminUserIds, messagePushNotification.title || 'Message client', messagePushNotification.message, messagePushNotification.actionUrl || '/#admin'),
+        `message client ${msg.orderReference || msg.id}`
+      );
+    }
     res.status(201).json(msg);
   }));
 
@@ -3390,6 +3433,110 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       visibleOrders = visibleOrders.map(order => redactOrderFinancialFields(order, user));
     }
     res.json(visibleOrders);
+  }));
+
+  app.post('/api/orders/:id/remainder-choice', asyncHandler(async (req, res) => {
+    const user = (req as AuthenticatedRequest).authenticatedUser!;
+    if (user.role !== 'client') {
+      res.status(403).json({ error: 'Cette demande est réservée au compte client de la commande.' });
+      return;
+    }
+    if (persistence) {
+      const freshOrder = await persistence.loadOrderById(req.params.id);
+      if (!freshOrder) {
+        res.status(404).json({ error: 'Commande introuvable dans votre espace client.' });
+        return;
+      }
+      const existingOrderIndex = store.orders.findIndex((item) => item.id === freshOrder.id);
+      if (existingOrderIndex >= 0) store.orders[existingOrderIndex] = freshOrder;
+      else store.orders.unshift(freshOrder);
+    }
+    const order = store.orders.find((item) => item.id === req.params.id || item.reference === req.params.id);
+    if (!order || order.userId !== user.id) {
+      res.status(404).json({ error: 'Commande introuvable dans votre espace client.' });
+      return;
+    }
+    if (order.status === 'Annulée' || order.status === 'Livrée') {
+      res.status(409).json({ error: 'Cette commande ne peut plus recevoir de choix sur les articles manquants.' });
+      return;
+    }
+    if ((order.clientRemainderRequests || []).some((request) => request.status === 'pending')) {
+      res.status(409).json({ error: 'Votre demande précédente est déjà en cours de traitement par l’équipe.' });
+      return;
+    }
+    const choice = String(req.body?.choice || '');
+    const validChoices = ['continue_partial', 'wait_for_restock', 'cancel_remaining', 'request_equivalent'];
+    if (!validChoices.includes(choice)) {
+      res.status(400).json({ error: 'Choisissez une option valide pour les articles manquants.' });
+      return;
+    }
+    const outstanding = order.items.filter((item, itemIndex) => {
+      const delivered = (order.deliveryFulfillments || []).reduce((sum, fulfillment) => sum + fulfillment.lines
+        .filter((line) => line.itemIndex === itemIndex)
+        .reduce((lineSum, line) => lineSum + line.quantity, 0), 0);
+      return item.quantity - delivered > 0 && !item.isQuote && (order.deliveryFulfillments?.length || item.isDeferredStock);
+    });
+    if (outstanding.length === 0) {
+      res.status(409).json({ error: 'Aucun article manquant ne peut recevoir de consigne pour le moment.' });
+      return;
+    }
+
+    const choiceLabels: Record<string, string> = {
+      continue_partial: 'Poursuivre avec les articles disponibles',
+      wait_for_restock: 'Attendre les articles manquants',
+      cancel_remaining: 'Demander l’annulation des articles manquants',
+      request_equivalent: 'Demander une proposition d’article équivalent',
+    };
+    const request: ClientRemainderRequest = {
+      id: `remainder-${randomUUID()}`,
+      choice: choice as ClientRemainderRequest['choice'],
+      note: typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 500) || undefined : undefined,
+      requestedAt: new Date().toISOString(),
+      requestedByName: user.contactName || user.facilityName,
+      status: 'pending',
+    };
+    order.clientRemainderRequests = [...(order.clientRemainderRequests || []), request].slice(-20);
+    const outstandingSummary = outstanding.map((item) => {
+      const itemIndex = order.items.indexOf(item);
+      const delivered = (order.deliveryFulfillments || []).reduce((sum, fulfillment) => sum + fulfillment.lines
+        .filter((line) => line.itemIndex === itemIndex)
+        .reduce((lineSum, line) => lineSum + line.quantity, 0), 0);
+      return `${item.quantity - delivered} × ${item.productName}`;
+    }).join(', ');
+    const clientChoiceNotification: AppNotification = {
+      id: `notif-${randomUUID()}`,
+      timestamp: request.requestedAt,
+      type: 'admin_message',
+      title: `Choix client · ${order.reference}`,
+      orderId: order.id,
+      orderReference: order.reference,
+      message: `${user.facilityName} demande : ${choiceLabels[choice]}. Articles concernés : ${outstandingSummary}.${request.note ? ` Note : ${request.note}` : ''}`,
+      targetRole: 'Super-Admin',
+      read: false,
+      actionUrl: '/#admin',
+    };
+    store.notifications.unshift(clientChoiceNotification);
+    const staffLog = appendStaffLog(user, {
+      category: 'orders',
+      severity: 'info',
+      actionLabel: 'Choix client sur articles manquants',
+      targetType: 'order',
+      targetId: order.id,
+      targetLabel: `${order.reference} · ${order.customer.facilityName}`,
+      details: `${choiceLabels[choice]} · ${outstandingSummary}${request.note ? ` · ${request.note}` : ''}`,
+    });
+
+    if (persistence) {
+      await persistence.persistOrderFinance({ order, notifications: [clientChoiceNotification], staffLog });
+    } else {
+      saveStoreLocal(store);
+    }
+    const adminUserIds = store.accounts.filter((account) => account.user.role === 'Super-Admin').map((account) => account.user.id);
+    scheduleBackgroundTask(
+      sendPushNotifications(adminUserIds, clientChoiceNotification.title || 'Choix client', clientChoiceNotification.message, '/#admin'),
+      `choix client pour la commande ${order.reference}`
+    );
+    res.json(order);
   }));
 
   app.post('/api/orders', asyncHandler(async (req, res) => {
@@ -4471,11 +4618,51 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const invoices = Array.isArray(body.invoices) ? body.invoices : [];
     const installments = Array.isArray(body.installments) ? body.installments : [];
     const submittedFulfillments = Array.isArray(body.deliveryFulfillments) ? body.deliveryFulfillments : [];
+    const currentClientRemainderRequests = order.clientRemainderRequests || [];
+    const submittedClientRemainderRequests = Array.isArray(body.clientRemainderRequests) ? body.clientRemainderRequests : [];
     if ((body.invoices !== undefined && (!Array.isArray(body.invoices) || invoices.length > 200)) ||
         (body.installments !== undefined && (!Array.isArray(body.installments) || installments.length > 200)) ||
-        (body.deliveryFulfillments !== undefined && (!Array.isArray(body.deliveryFulfillments) || submittedFulfillments.length > 200))) {
+        (body.deliveryFulfillments !== undefined && (!Array.isArray(body.deliveryFulfillments) || submittedFulfillments.length > 200)) ||
+        (body.clientRemainderRequests !== undefined && (!Array.isArray(body.clientRemainderRequests) || submittedClientRemainderRequests.length > 20))) {
       res.status(400).json({ error: 'La liste des documents ou des paiements est invalide.' });
       return;
+    }
+    const remainderResponseUpdates: ClientRemainderRequest[] = [];
+    if (body.clientRemainderRequests !== undefined) {
+      if (user.role === 'client' || !(hasPermission('logistics_manage') || hasPermission('orders_manage')) || submittedClientRemainderRequests.length !== currentClientRemainderRequests.length) {
+        res.status(403).json({ error: 'Vous ne pouvez pas traiter les demandes de reliquat de cette commande.' });
+        return;
+      }
+      const normalizedRequests: ClientRemainderRequest[] = [];
+      for (const savedRequest of currentClientRemainderRequests) {
+        const rawRequest = submittedClientRemainderRequests.find((candidate: any) => candidate?.id === savedRequest.id);
+        if (!rawRequest || rawRequest.choice !== savedRequest.choice || rawRequest.requestedAt !== savedRequest.requestedAt || rawRequest.requestedByName !== savedRequest.requestedByName || (rawRequest.note || undefined) !== (savedRequest.note || undefined)) {
+          res.status(400).json({ error: 'L’historique des choix du client ne peut pas être remplacé ou supprimé.' });
+          return;
+        }
+        if (savedRequest.status === 'pending' && rawRequest.status === 'reviewed') {
+          const responseNote = typeof rawRequest.responseNote === 'string' ? rawRequest.responseNote.trim().slice(0, 500) : '';
+          if (!responseNote) {
+            res.status(400).json({ error: 'Ajoutez une réponse au client avant de marquer sa demande comme traitée.' });
+            return;
+          }
+          const reviewedRequest: ClientRemainderRequest = {
+            ...savedRequest,
+            status: 'reviewed',
+            reviewedAt: new Date().toISOString(),
+            reviewedByName: user.contactName || user.facilityName,
+            responseNote,
+          };
+          remainderResponseUpdates.push(reviewedRequest);
+          normalizedRequests.push(reviewedRequest);
+        } else if (rawRequest.status === savedRequest.status) {
+          normalizedRequests.push(savedRequest);
+        } else {
+          res.status(400).json({ error: 'Le statut de traitement de la demande client est invalide.' });
+          return;
+        }
+      }
+      order.clientRemainderRequests = normalizedRequests;
     }
 
     const invoiceIds = new Set<string>();
@@ -4494,6 +4681,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       const issueDate = typeof raw.issueDate === 'string' ? raw.issueDate : '';
       const tvaRate = Number(raw.tvaRate);
       const reason = typeof raw.reason === 'string' ? raw.reason.trim().slice(0, 500) : undefined;
+      if (raw.includeStamp !== undefined && typeof raw.includeStamp !== 'boolean') {
+        res.status(400).json({ error: 'Le choix du cachet sur le document est invalide.' });
+        return;
+      }
       const numberMatchesType = type === 'facture' ? /^FAC-\d{4}-[A-Z0-9-]+$/.test(number) : /^AVOIR-\d{4}-[A-Z0-9-]+$/.test(number);
       if (!type || !numberMatchesType || invoiceNumbers.has(number) ||
           !/^\d{4}-\d{2}-\d{2}$/.test(issueDate) || !Number.isFinite(Date.parse(issueDate)) ||
@@ -4549,6 +4740,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         totalTTC,
         lineItems: type === 'facture' ? lineItems : undefined,
         deliveryFee,
+        includeStamp: raw.includeStamp !== false,
         reason: type === 'avoir' ? reason : undefined,
       });
     }
@@ -4818,11 +5010,12 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       targetType: 'order',
       targetId: order.id,
       targetLabel: `${order.reference} · ${order.customer.facilityName}`,
-      details: `${newInvoices.length} document(s) créé(s), ${newInstallments.length} versement(s) ajouté(s) pour ${order.reference}.`,
+      details: `${newInvoices.length} document(s) créé(s), ${newInstallments.length} versement(s) ajouté(s), ${remainderResponseUpdates.length} demande(s) client traitée(s) pour ${order.reference}.`,
     });
     let clientFinanceNotification: AppNotification | undefined;
+    let hasOutstandingDeliveryItems = false;
     const dueDateChanged = previousCollectionDueDate !== order.collectionDueDate;
-    if (order.userId && (newInstallments.length > 0 || newInvoices.length > 0 || dueDateChanged || newFulfillments.length > 0)) {
+    if (order.userId && (newInstallments.length > 0 || newInvoices.length > 0 || dueDateChanged || newFulfillments.length > 0 || remainderResponseUpdates.length > 0)) {
       const paidAmount = getOrderPaidAmount(order);
       const remainingBalance = getOrderRemainingBalance(order);
       const paymentLines = newInstallments.map((installment) =>
@@ -4838,12 +5031,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
           const quantity = Math.max(0, item.quantity - delivered);
           return quantity > 0 ? [`${quantity} × ${item.productName}`] : [];
         });
+        hasOutstandingDeliveryItems = remaining.length > 0;
         paymentLines.push(handedOver ? `Livraison enregistrée : ${handedOver}.` : 'Un reliquat a été enregistré ; aucun article n’a été déclaré remis.');
         paymentLines.push(remaining.length ? `Articles restant à fournir : ${remaining.join(', ')}.` : 'Toutes les quantités commandées ont été remises.');
         if (latest.notes) paymentLines.push(`Note : ${latest.notes}`);
       }
       if (newInvoices.length > 0) {
         paymentLines.push('Document(s) ' + newInvoices.map((invoice) => invoice.number).join(', ') + ' \u00e9mis.');
+      }
+      for (const response of remainderResponseUpdates) {
+        paymentLines.push(`Réponse de ${response.reviewedByName || 'l’équipe Gloryday'} concernant les articles manquants : ${response.responseNote}`);
       }
       if (dueDateChanged) {
         paymentLines.push(order.collectionDueDate
@@ -4856,14 +5053,19 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       clientFinanceNotification = {
         id: 'notif-' + randomUUID(),
         timestamp: new Date().toISOString(),
-        type: newFulfillments.length > 0 ? 'status_changed' : 'payment_updated',
-        title: newFulfillments.length > 0 ? 'Avancement de livraison' : remainingBalance <= 0 ? 'Commande sold\u00e9e' : dueDateChanged && newInstallments.length === 0 ? '\u00c9ch\u00e9ance mise \u00e0 jour' : 'Paiement mis \u00e0 jour',
+        type: remainderResponseUpdates.length > 0 && newFulfillments.length === 0 ? 'admin_message' : newFulfillments.length > 0 ? 'status_changed' : 'payment_updated',
+        title: remainderResponseUpdates.length > 0
+          ? 'Réponse de Gloryday sur votre commande'
+          : newFulfillments.length > 0
+          ? hasOutstandingDeliveryItems ? 'Produits manquants dans votre commande' : 'Livraison mise \u00e0 jour'
+          : remainingBalance <= 0 ? 'Commande sold\u00e9e' : dueDateChanged && newInstallments.length === 0 ? '\u00c9ch\u00e9ance mise \u00e0 jour' : 'Paiement mis \u00e0 jour',
         orderId: order.id,
         orderReference: order.reference,
         message: paymentLines.join(' '),
         targetRole: 'client',
         userId: order.userId,
         read: false,
+        actionUrl: '/#dashboard',
       };
       store.notifications.unshift(clientFinanceNotification);
     }

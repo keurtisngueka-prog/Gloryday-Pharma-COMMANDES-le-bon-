@@ -546,8 +546,8 @@ export async function generateInvoiceProjectPdf(
     doc.text(text(`Motif : ${invoice.reason}`), metaX, 53, { align: 'right', maxWidth: 82 });
   }
 
-  const clientTop = 79;
-  const clientHeight = 28;
+  const clientTop = 76;
+  const clientHeight = 27;
   doc.setFillColor(pale[0], pale[1], pale[2]);
   doc.setDrawColor(rule[0], rule[1], rule[2]);
   doc.setLineWidth(0.25);
@@ -590,24 +590,27 @@ export async function generateInvoiceProjectPdf(
   const totalX = x[6] - 3;
   const drawTableHeader = (top: number) => {
     doc.setFillColor(stampBlue[0], stampBlue[1], stampBlue[2]);
-    doc.rect(margin, top, contentWidth, 9, 'F');
+    doc.rect(margin, top, contentWidth, 8, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFont('times', 'bold');
     doc.setFontSize(8);
-    doc.text('Référence', referenceX, top + 6);
-    doc.text('Désignation', designationX, top + 6);
-    doc.text('Qté', quantityX, top + 6, { align: 'center' });
-    doc.text('P.U. TTC', unitPriceX, top + 6, { align: 'right' });
-    doc.text('Remise', discountX, top + 6, { align: 'right' });
-    doc.text('Montant TTC', totalX, top + 6, { align: 'right' });
+    doc.text('Référence', referenceX, top + 5.5);
+    doc.text('Désignation', designationX, top + 5.5);
+    doc.text('Qté', quantityX, top + 5.5, { align: 'center' });
+    doc.text('P.U. TTC', unitPriceX, top + 5.5, { align: 'right' });
+    doc.text('Remise', discountX, top + 5.5, { align: 'right' });
+    doc.text('Montant TTC', totalX, top + 5.5, { align: 'right' });
     doc.setDrawColor(255, 255, 255);
     doc.setLineWidth(0.2);
-    x.forEach((edge) => doc.line(edge, top, edge, top + 9));
+    x.forEach((edge) => doc.line(edge, top, edge, top + 8));
   };
 
-  let y = 112;
+  const includeStamp = invoice.includeStamp !== false;
+  const finalContentReserve = includeStamp ? 108 : 76;
+  const finalContentLimit = pageHeight - finalContentReserve;
+  let y = 108;
   drawTableHeader(y);
-  y += 9;
+  y += 8;
   const invoiceItems = invoice.lineItems?.length
     ? invoice.lineItems.map((item) => ({
         productId: item.productId,
@@ -627,12 +630,12 @@ export async function generateInvoiceProjectPdf(
     doc.setFont('times', 'normal');
     doc.setFontSize(9);
     const labelLines = doc.splitTextToSize(label, columns[1] - 7);
-    const rowHeight = Math.max(10, labelLines.length * 4.5 + 4);
-    if (y + rowHeight > pageHeight - 110) {
+    const rowHeight = Math.max(9, labelLines.length * 4 + 2.5);
+    if (y + rowHeight > finalContentLimit) {
       doc.addPage();
       y = 20;
       drawTableHeader(y);
-      y += 9;
+      y += 8;
     }
     if (index % 2 === 1) {
       doc.setFillColor(pale[0], pale[1], pale[2]);
@@ -668,11 +671,11 @@ export async function generateInvoiceProjectPdf(
   const deliveryFee = Math.max(0, Math.trunc(Number(invoice.deliveryFee ?? order.deliveryFee ?? order.customer.deliveryFee) || 0));
   if (deliveryFee > 0) {
     const rowHeight = 10;
-    if (y + rowHeight > pageHeight - 110) {
+    if (y + rowHeight > finalContentLimit) {
       doc.addPage();
       y = 20;
       drawTableHeader(y);
-      y += 9;
+      y += 8;
     }
     doc.setFillColor(pale[0], pale[1], pale[2]);
     doc.rect(margin, y, contentWidth, rowHeight, 'F');
@@ -763,6 +766,7 @@ export async function generateInvoiceProjectPdf(
   totalRow('Total TTC', invoice.totalTTC, summaryY + 35, true);
 
   // Keep the stamp in its own lower-left area, without an extra container around it.
+  if (includeStamp) {
   const stampWidth = 78;
   const stampHeight = 24;
   const stampX = margin;
@@ -781,6 +785,7 @@ export async function generateInvoiceProjectPdf(
   doc.text(text('Consommables, r\u00e9actifs, \u00e9quipements m\u00e9dicaux'), stampX + stampWidth / 2, stampY + 14.5, { align: 'center' });
   doc.setFontSize(6.4);
   doc.text('+241 77 00 30 04 / +241 66 24 03 99', stampX + stampWidth / 2, stampY + 20, { align: 'center' });
+  }
   const pageCount = doc.getNumberOfPages();
   for (let page = 1; page <= pageCount; page += 1) {
     doc.setPage(page);

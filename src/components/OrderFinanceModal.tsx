@@ -80,11 +80,14 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   // Invoice State
   const [invoiceType, setInvoiceType] = useState<'facture' | 'avoir'>('facture');
   const [tvaRate, setTvaRate] = useState<number>(0); // 0% dispositifs médicaux ou 18%
+  const [includeStampOnInvoice, setIncludeStampOnInvoice] = useState(true);
   const [creditReason, setCreditReason] = useState('');
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [invoiceDownloadError, setInvoiceDownloadError] = useState('');
   const [downloadingDeliveryNote, setDownloadingDeliveryNote] = useState(false);
   const [deliveryNoteError, setDeliveryNoteError] = useState('');
+  const [remainderResponseNote, setRemainderResponseNote] = useState('');
+  const [isSavingRemainderResponse, setIsSavingRemainderResponse] = useState(false);
 
   // Delivery Proof State
   const [selectedCourierId, setSelectedCourierId] = useState(order.courier?.courierId || '');
@@ -121,6 +124,13 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   const invoiceReadyLines = getInvoiceReadyLineItems(order);
   const invoiceReadyTotal = deliveryTrackingActive ? getInvoiceReadyTotal(order) : order.estimatedTotal;
   const collectionOverdue = canViewPayments && isCollectionOverdue({ ...order, collectionDueDate: collectionDueDate || undefined });
+  const latestClientRemainderRequest = order.clientRemainderRequests?.[order.clientRemainderRequests.length - 1];
+  const clientRemainderChoiceLabels = {
+    continue_partial: 'Recevoir les articles disponibles puis le reste',
+    wait_for_restock: 'Attendre que les articles manquants soient disponibles',
+    cancel_remaining: 'Demander l’annulation des articles manquants',
+    request_equivalent: 'Demander une proposition d’article équivalent',
+  };
 
   const saveUpdatedOrder = async (updatedOrder: Order): Promise<boolean> => {
     setIsSaving(true);
@@ -133,6 +143,23 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       return false;
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleReviewClientRemainderRequest = async () => {
+    if (!canManageLogistics || !latestClientRemainderRequest || latestClientRemainderRequest.status !== 'pending' || !remainderResponseNote.trim() || isSavingRemainderResponse) return;
+    setIsSavingRemainderResponse(true);
+    setSaveError('');
+    try {
+      const updatedOrder: Order = {
+        ...order,
+        clientRemainderRequests: (order.clientRemainderRequests || []).map((request) => request.id === latestClientRemainderRequest.id
+          ? { ...request, status: 'reviewed', reviewedAt: new Date().toISOString(), reviewedByName: currentUser.contactName || currentUser.facilityName, responseNote: remainderResponseNote.trim() }
+          : request),
+      };
+      if (await saveUpdatedOrder(updatedOrder)) setRemainderResponseNote('');
+    } finally {
+      setIsSavingRemainderResponse(false);
     }
   };
 
@@ -245,6 +272,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       totalTTC,
       lineItems: isFacture ? lineItems : undefined,
       deliveryFee: isFacture ? Math.max(0, totalTTC - lineItems.reduce((sum, line) => sum + line.lineTotal, 0)) : 0,
+      includeStamp: includeStampOnInvoice,
       reason: isFacture ? undefined : (creditReason.trim() || 'Retour dispositifs / ajustement tarifaire')
     };
 
@@ -681,6 +709,18 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                   </div>
                 </div>
 
+                {invoiceType === 'facture' && (
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 bg-white p-2 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={includeStampOnInvoice}
+                      onChange={(event) => setIncludeStampOnInvoice(event.target.checked)}
+                      className="mt-0.5 accent-blue-700"
+                    />
+                    <span><strong className="block">Inclure le cachet Gloryday sur le PDF</strong><span className="text-slate-500">Ce choix sera conservé pour cette facture.</span></span>
+                  </label>
+                )}
+
                 {invoiceType === 'avoir' && (
                   <div>
                     <label className="block text-slate-600 mb-0.5">Motif du Retour / Avoir</label>
@@ -799,9 +839,28 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
           {/* TAB 4: PARTIAL DELIVERY */}
           {activeTab === 'partial' && canManageLogistics && (
             <div className="space-y-3">
+              {latestClientRemainderRequest && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-950">
+                  <div className="font-black">Choix transmis par le client · {latestClientRemainderRequest.status === 'pending' ? 'à traiter' : 'traité'}</div>
+                  <p className="mt-1">{latestClientRemainderRequest.requestedByName} demande : <strong>{clientRemainderChoiceLabels[latestClientRemainderRequest.choice]}</strong>.</p>
+                  <p className="mt-0.5 text-[10px] text-indigo-800">Reçu le {new Date(latestClientRemainderRequest.requestedAt).toLocaleString('fr-FR', { timeZone: 'Africa/Libreville' })}. Cette demande ne modifie pas la commande avant validation par l’équipe.</p>
+                  {latestClientRemainderRequest.note && <p className="mt-1 rounded-lg bg-white/70 p-2">Précision du client : {latestClientRemainderRequest.note}</p>}
+                  {latestClientRemainderRequest.status === 'pending' ? (
+                    <div className="mt-2 space-y-2">
+                      <label className="block text-[11px] font-bold">Réponse à transmettre au client
+                        <textarea rows={2} maxLength={500} value={remainderResponseNote} onChange={(event) => setRemainderResponseNote(event.target.value)} placeholder="Ex. : Nous avons noté votre choix. Les articles disponibles partent aujourd’hui ; le reste est prévu vendredi." className="mt-1 w-full rounded-lg border border-indigo-200 bg-white p-2 text-xs font-normal outline-none focus:border-indigo-500" />
+                      </label>
+                      <button type="button" onClick={() => void handleReviewClientRemainderRequest()} disabled={isSavingRemainderResponse || !remainderResponseNote.trim()} className="rounded-lg bg-indigo-700 px-3 py-2 text-[11px] font-bold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50">{isSavingRemainderResponse ? 'Enregistrement…' : 'Marquer comme traitée et informer le client'}</button>
+                    </div>
+                  ) : (
+                    <p className="mt-2 rounded-lg bg-white/70 p-2">Réponse envoyée par {latestClientRemainderRequest.reviewedByName || 'l’équipe'} : {latestClientRemainderRequest.responseNote}</p>
+                  )}
+                </div>
+              )}
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
                 Saisissez uniquement les unités effectivement remises. Le stock des lignes disponibles a déjà été réservé à la commande : cette étape ne le déduit pas une seconde fois. Les quantités non remises restent au reliquat, et une facture ne portera que sur les unités remises et pas encore facturées.
               </div>
+              <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-900">Après l’enregistrement, le client rattaché à un compte reçoit une notification dans son espace et sur son appareil si les notifications sont autorisées. Elle indique les quantités remises et les articles restant à recevoir. La commande d’origine est conservée ; pour un client sans compte, transmettez le bon de livraison mis à jour par votre canal habituel.</p>
               <div className="space-y-2">
                 {order.items.map((item, itemIndex) => {
                   const delivered = getOrderDeliveredQuantity(order, itemIndex);

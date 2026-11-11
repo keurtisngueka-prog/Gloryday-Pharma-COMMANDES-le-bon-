@@ -162,6 +162,20 @@ export interface DeliveryFulfillment {
   recordedByName: string;
 }
 
+export type ClientRemainderChoice = 'continue_partial' | 'wait_for_restock' | 'cancel_remaining' | 'request_equivalent';
+
+export interface ClientRemainderRequest {
+  id: string;
+  choice: ClientRemainderChoice;
+  note?: string;
+  requestedAt: string;
+  requestedByName: string;
+  status: 'pending' | 'reviewed';
+  reviewedAt?: string;
+  reviewedByName?: string;
+  responseNote?: string;
+}
+
 export interface InvoiceLineItem {
   itemIndex: number;
   productId: string;
@@ -245,6 +259,8 @@ export interface InvoiceRecord {
   /** Immutable item snapshot. For partial deliveries only delivered, unbilled quantities are included. */
   lineItems?: InvoiceLineItem[];
   deliveryFee?: number;
+  /** Whether the Gloryday company stamp should appear on the generated PDF. */
+  includeStamp?: boolean;
   reason?: string;
 }
 
@@ -316,6 +332,7 @@ export interface Order {
   isPartialDelivery?: boolean;
   partialDeliveryNotes?: string;
   deliveryFulfillments?: DeliveryFulfillment[];
+  clientRemainderRequests?: ClientRemainderRequest[];
   pdfUrl?: string;
   assignedCommercialId?: string;
   mobilePayment?: MobilePaymentDetails;
@@ -533,6 +550,9 @@ export interface DirectMessage {
   recipientId?: string;
   recipientFacilityName?: string;
   recipientPhone?: string;
+  senderPhone?: string;
+  orderId?: string;
+  orderReference?: string;
   subject: string;
   content: string;
   channel: 'in_app' | 'whatsapp' | 'both';

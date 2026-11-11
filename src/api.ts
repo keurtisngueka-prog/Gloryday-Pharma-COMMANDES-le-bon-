@@ -529,6 +529,17 @@ export const api = {
     return request<Order[]>(`/api/orders${query}`);
   },
 
+  async submitClientRemainderChoice(
+    orderId: string,
+    choice: import('./types').ClientRemainderChoice,
+    note?: string
+  ): Promise<Order> {
+    return request<Order>(`/api/orders/${encodeURIComponent(orderId)}/remainder-choice`, {
+      method: 'POST',
+      body: JSON.stringify({ choice, note })
+    });
+  },
+
   async updateOrderStatus(orderId: string, status: Order['status'], cancellationReason?: string): Promise<Order> {
     return request<Order>(`/api/orders/${orderId}/status`, {
       method: 'PATCH',
@@ -594,7 +605,7 @@ export const api = {
   },
 
   async updateOrderFinance(orderId: string, patch: Partial<Pick<Order,
-    'installments' | 'invoices' | 'isPartialDelivery' | 'partialDeliveryNotes' | 'deliveryFulfillments'
+    'installments' | 'invoices' | 'isPartialDelivery' | 'partialDeliveryNotes' | 'deliveryFulfillments' | 'clientRemainderRequests'
   >> & {
     courier?: Order['courier'] | null;
     deliveryProof?: Order['deliveryProof'] | null;

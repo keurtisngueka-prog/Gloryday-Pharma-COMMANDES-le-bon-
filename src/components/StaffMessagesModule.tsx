@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Inbox, LoaderCircle, MessageCircle, RefreshCw, Search } from 'lucide-react';
 import { api } from '../api';
 import type { DirectMessage, User } from '../types';
+import { DirectMessagingModal } from './DirectMessagingModal';
 
 interface StaffMessagesModuleProps {
   currentUser: User;
@@ -26,6 +27,7 @@ export const StaffMessagesModule: React.FC<StaffMessagesModuleProps> = ({ curren
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [replyMessage, setReplyMessage] = useState<DirectMessage | null>(null);
 
   const refresh = useCallback(async (quiet = false) => {
     if (quiet) setRefreshing(true);
@@ -56,6 +58,7 @@ export const StaffMessagesModule: React.FC<StaffMessagesModuleProps> = ({ curren
   }, [messages, query]);
 
   return (
+    <>
     <section className="space-y-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -104,11 +107,29 @@ export const StaffMessagesModule: React.FC<StaffMessagesModuleProps> = ({ curren
                   <time dateTime={message.createdAt}>{formatMessageDate(message.createdAt)}</time>
                 </div>
               </div>
+              {message.orderReference && <p className="mt-2 inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-800">Commande {message.orderReference}</p>}
               <p className="mt-3 whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-700">{message.content}</p>
+              {message.senderRole === 'client' && message.orderId && (
+                <button type="button" onClick={() => setReplyMessage(message)} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-700 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-blue-800">
+                  <MessageCircle className="h-3.5 w-3.5" /> Répondre au client dans le fil
+                </button>
+              )}
             </article>
           ))}
         </div>
       )}
     </section>
+    {replyMessage && (
+      <DirectMessagingModal
+        isOpen
+        onClose={() => setReplyMessage(null)}
+        targetClient={{ id: replyMessage.senderId, facilityName: replyMessage.senderName, phone: replyMessage.senderPhone }}
+        orderId={replyMessage.orderId}
+        orderReference={replyMessage.orderReference}
+        initialSubject={`Re : ${replyMessage.subject || `Commande ${replyMessage.orderReference || ''}`}`}
+        onSuccess={() => { setReplyMessage(null); void refresh(true); }}
+      />
+    )}
+    </>
   );
 };

@@ -970,6 +970,7 @@ export default function App() {
     if (!previousOrder || !sameValue(previousOrder.isPartialDelivery, updatedOrder.isPartialDelivery)) patch.isPartialDelivery = updatedOrder.isPartialDelivery;
     if (!previousOrder || !sameValue(previousOrder.partialDeliveryNotes, updatedOrder.partialDeliveryNotes)) patch.partialDeliveryNotes = updatedOrder.partialDeliveryNotes || '';
     if (!previousOrder || !sameValue(previousOrder.deliveryFulfillments || [], updatedOrder.deliveryFulfillments || [])) patch.deliveryFulfillments = updatedOrder.deliveryFulfillments || [];
+    if (!previousOrder || !sameValue(previousOrder.clientRemainderRequests || [], updatedOrder.clientRemainderRequests || [])) patch.clientRemainderRequests = updatedOrder.clientRemainderRequests || [];
     if (Object.keys(patch).length === 0) return;
     const savedOrder = await api.updateOrderFinance(updatedOrder.id, patch);
     setOrders(prev => prev.map(order => order.id === savedOrder.id ? savedOrder : order));

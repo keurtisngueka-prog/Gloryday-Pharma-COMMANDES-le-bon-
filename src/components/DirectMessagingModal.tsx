@@ -8,15 +8,21 @@ interface DirectMessagingModalProps {
   onClose: () => void;
   targetClient?: any | null;
   onSuccess: () => void;
+  orderId?: string;
+  orderReference?: string;
+  initialSubject?: string;
 }
 
 export const DirectMessagingModal: React.FC<DirectMessagingModalProps> = ({
   isOpen,
   onClose,
   targetClient,
-  onSuccess
+  onSuccess,
+  orderId,
+  orderReference,
+  initialSubject,
 }) => {
-  const [subject, setSubject] = useState(targetClient ? `Information - ${targetClient.facilityName}` : 'Communication Gloryday Pharma');
+  const [subject, setSubject] = useState(initialSubject || (targetClient ? `Information - ${targetClient.facilityName}` : 'Communication Gloryday Pharma'));
   const [content, setContent] = useState('');
   const [channel, setChannel] = useState<'in_app' | 'whatsapp' | 'both'>('in_app');
   const [whatsappUrl, setWhatsappUrl] = useState<string | null>(null);
@@ -31,6 +37,10 @@ export const DirectMessagingModal: React.FC<DirectMessagingModalProps> = ({
       setError('Veuillez renseigner un objet et un message');
       return;
     }
+    if ((channel === 'whatsapp' || channel === 'both') && targetClient && !targetClient.phone) {
+      setError('Le numéro du client n’est pas disponible pour ce compte. Choisissez le canal Dans le site.');
+      return;
+    }
     try {
       setSubmitting(true);
       setError(null);
@@ -38,6 +48,8 @@ export const DirectMessagingModal: React.FC<DirectMessagingModalProps> = ({
         recipientId: targetClient ? targetClient.id : undefined,
         recipientFacilityName: targetClient ? targetClient.facilityName : undefined,
         recipientPhone: targetClient ? targetClient.phone : undefined,
+        orderId,
+        orderReference,
         subject: subject.trim(),
         content: content.trim(),
         channel
@@ -85,7 +97,7 @@ export const DirectMessagingModal: React.FC<DirectMessagingModalProps> = ({
             <label className="block font-bold text-slate-700 uppercase mb-1">
               Canal de diffusion
             </label>
-            <div className="grid grid-cols-3 gap-1.5 font-semibold">
+            <div className={`grid ${targetClient && !targetClient.phone ? 'grid-cols-1' : 'grid-cols-3'} gap-1.5 font-semibold`}>
               <button
                 type="button"
                 onClick={() => setChannel('in_app')}
@@ -96,7 +108,7 @@ export const DirectMessagingModal: React.FC<DirectMessagingModalProps> = ({
                 <Bell className="w-3.5 h-3.5" />
                 In-App
               </button>
-              <button
+              {(!targetClient || targetClient.phone) && <button
                 type="button"
                 onClick={() => setChannel('whatsapp')}
                 className={`p-2 rounded-xl border flex items-center justify-center gap-1 ${
@@ -105,8 +117,8 @@ export const DirectMessagingModal: React.FC<DirectMessagingModalProps> = ({
               >
                 <MessageCircle className="w-3.5 h-3.5" />
                 WhatsApp
-              </button>
-              <button
+              </button>}
+              {(!targetClient || targetClient.phone) && <button
                 type="button"
                 onClick={() => setChannel('both')}
                 className={`p-2 rounded-xl border flex items-center justify-center gap-1 ${
@@ -114,7 +126,7 @@ export const DirectMessagingModal: React.FC<DirectMessagingModalProps> = ({
                 }`}
               >
                 Les deux
-              </button>
+              </button>}
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
               {channel === 'in_app' && "Le client retrouvera ce message dans la cloche de l'application. Aucun SMS ni WhatsApp n'est envoye automatiquement."}

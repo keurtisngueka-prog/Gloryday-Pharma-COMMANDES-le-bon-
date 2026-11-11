@@ -24,7 +24,7 @@ import {
   CalendarClock,
   UserRound
 } from 'lucide-react';
-import { Order, OrderStatus, User, MobilePaymentDetails } from '../types';
+import { Order, OrderStatus, User, MobilePaymentDetails, ClientRemainderChoice } from '../types';
 import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
 import { getOrderBillingTotal, getOrderDeliveredQuantity, getOrderRemainingQuantity } from '../utils/orderFulfillment';
 import { generateInternalPurchaseOrderPdf } from '../utils/pdfGenerator';
@@ -36,6 +36,7 @@ import {
 import { api } from '../api';
 import { MobilePaymentModal } from './MobilePaymentModal';
 import { ClientProfileModal } from './ClientProfileModal';
+import { OrderConversationModal } from './OrderConversationModal';
 
 interface ClientDashboardProps {
   orders: Order[];
@@ -184,8 +185,14 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   onProfileUpdated
 }) => {
   const [selectedPaymentOrder, setSelectedPaymentOrder] = useState<Order | null>(null);
+  const [conversationOrder, setConversationOrder] = useState<Order | null>(null);
   const [selectedActiveDeliveryId, setSelectedActiveDeliveryId] = useState('');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [remainderChoiceOrderId, setRemainderChoiceOrderId] = useState<string | null>(null);
+  const [remainderChoice, setRemainderChoice] = useState<ClientRemainderChoice>('continue_partial');
+  const [remainderChoiceNote, setRemainderChoiceNote] = useState('');
+  const [savingRemainderOrderId, setSavingRemainderOrderId] = useState<string | null>(null);
+  const [remainderChoiceFeedback, setRemainderChoiceFeedback] = useState<{ orderId: string; type: 'success' | 'error'; message: string } | null>(null);
   const [isRefreshingOrders, setIsRefreshingOrders] = useState(false);
   const [ordersRefreshError, setOrdersRefreshError] = useState<string | null>(null);
   const ordersRefreshInFlight = useRef(false);
@@ -223,6 +230,24 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       setIsRefreshingOrders(false);
     }
   }, [currentUser?.role, onRefreshOrders]);
+
+  const submitRemainderChoice = async (order: Order) => {
+    if (savingRemainderOrderId || remainderChoiceOrderId !== order.id) return;
+    setSavingRemainderOrderId(order.id);
+    setRemainderChoiceFeedback(null);
+    try {
+      await api.submitClientRemainderChoice(order.id, remainderChoice, remainderChoiceNote);
+      setRemainderChoiceFeedback({ orderId: order.id, type: 'success', message: 'Votre demande a été transmise à l’équipe Gloryday.' });
+      setRemainderChoiceOrderId(null);
+      setRemainderChoiceNote('');
+      void onRefreshOrders().catch(() => {});
+    } catch (cause) {
+      setRemainderChoiceFeedback({ orderId: order.id, type: 'error', message: cause instanceof Error ? cause.message : 'Votre choix n’a pas pu être transmis. Réessayez.' });
+      void onRefreshOrders().catch(() => {});
+    } finally {
+      setSavingRemainderOrderId(null);
+    }
+  };
 
   useEffect(() => {
     if (currentUser?.role !== 'client') return;
@@ -1308,7 +1333,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 const paymentStatusLabel = order.status === 'Annulée'
                   ? 'Sans objet · commande annulée'
                   : deliveryTrackingActive && billingTotal <= 0
-                    ? paidAmount > 0 ? 'Acompte reçu · en attente de facturation' : 'En attente de facturation des quantités remises'
+                    ? paidAmount > 0 ? 'Acompte reçu · affectation après facture' : 'À régler après facturation des articles remis'
                   : remainingBalance <= 0
                     ? deliveryTrackingActive && order.isPartialDelivery ? 'Facture soldée · reliquat en cours' : 'Soldée'
                     : collectionOverdue
@@ -1324,6 +1349,27 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                             : order.customer.paymentMethod === 'en_compte'
                               ? 'Paiement à terme'
                               : 'Aucun versement confirmé';
+                const remainingProductUnits = pendingProductLines.reduce((sum, line) => sum + line.remainingQuantity, 0);
+                const deliveryStatusLabel = order.status === 'Annulée'
+                  ? 'Sans livraison · commande annulée'
+                  : remainingProductUnits > 0
+                    ? `${remainingProductUnits} unité(s) restent à livrer`
+                    : order.status === 'Livrée' || order.deliveryStage === 'delivered'
+                      ? 'Livraison terminée'
+                      : order.deliveryStage === 'in_transit'
+                        ? 'En cours de livraison'
+                        : order.deliveryStage === 'picked_up'
+                          ? 'Prise en charge'
+                          : order.deliveryStage === 'preparation'
+                            ? 'Préparation'
+                            : order.customer.deliveryMode === 'retrait' ? 'Retrait à organiser' : 'À planifier';
+                const latestRemainderRequest = order.clientRemainderRequests?.[order.clientRemainderRequests.length - 1];
+                const remainderChoiceLabels: Record<ClientRemainderChoice, string> = {
+                  continue_partial: 'Recevoir les articles disponibles puis le reste',
+                  wait_for_restock: 'Attendre que les articles manquants soient disponibles',
+                  cancel_remaining: 'Demander l’annulation des articles manquants',
+                  request_equivalent: 'Demander une proposition d’article équivalent',
+                };
 
                 return (
                   <div key={order.id} className="dashboard-row-interactive p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -1343,14 +1389,18 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                           <span className="text-slate-500">Commande :</span> {order.status}
                         </span>
                         <span aria-hidden="true" className="text-slate-300">·</span>
+                        <span className={`font-bold ${remainingProductUnits > 0 ? 'text-amber-800' : order.status === 'Livrée' ? 'text-emerald-700' : 'text-slate-700'}`}>
+                          <span className="text-slate-500">Livraison :</span> {deliveryStatusLabel}
+                        </span>
+                        <span aria-hidden="true" className="text-slate-300">·</span>
                         {remainingBalance <= 0 && order.status !== 'Annulée' ? (
                           <span className="font-bold text-emerald-700 flex items-center gap-1">
                             <Check className="w-3 h-3 text-emerald-600" />
-                            <span><span className="text-slate-500">Règlement :</span> Soldée</span>
+                            <span><span className="text-slate-500">Paiement :</span> Soldé</span>
                           </span>
                         ) : (
                           <span className={`font-bold ${collectionOverdue ? 'text-rose-700' : pendingInstallments.length > 0 || hasPendingMobileReference ? 'text-amber-800' : 'text-slate-700'}`}>
-                            <span className="text-slate-500">Règlement :</span> {paymentStatusLabel}
+                            <span className="text-slate-500">Paiement :</span> {paymentStatusLabel}
                           </span>
                         )}
 
@@ -1419,6 +1469,33 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                               ? <>Prochaine livraison prévue : <strong>{nextPendingDelivery}</strong></>
                               : 'La date de livraison de ces produits n’est pas encore confirmée.'}
                           </p>
+                          {currentUser?.role === 'client' && (
+                            <div className="mt-2 border-t border-amber-200 pt-2">
+                              {latestRemainderRequest && <p className="mb-2 text-[11px] text-amber-900">Votre dernière demande : <strong>{remainderChoiceLabels[latestRemainderRequest.choice]}</strong> · {latestRemainderRequest.status === 'pending' ? 'en attente de traitement par l’équipe' : 'traitée par l’équipe'}.</p>}
+                              {remainderChoiceFeedback?.orderId === order.id && <p role={remainderChoiceFeedback.type === 'error' ? 'alert' : 'status'} className={`mb-2 text-[11px] font-semibold ${remainderChoiceFeedback.type === 'error' ? 'text-rose-700' : 'text-emerald-800'}`}>{remainderChoiceFeedback.message}</p>}
+                              {latestRemainderRequest?.status === 'pending' ? (
+                                <p className="rounded-lg border border-amber-200 bg-white/80 p-2 text-[11px] text-amber-950">Votre demande est déjà en cours de traitement. Pour ajouter une précision, utilisez « Message sur la commande ».</p>
+                              ) : remainderChoiceOrderId === order.id ? (
+                                <div className="space-y-2">
+                                  <p className="font-bold">Que souhaitez-vous faire pour les produits manquants ?</p>
+                                  {(Object.entries(remainderChoiceLabels) as [ClientRemainderChoice, string][]).map(([value, label]) => (
+                                    <label key={value} className="flex cursor-pointer items-start gap-2 rounded-lg border border-amber-200 bg-white/80 p-2 text-[11px]">
+                                      <input type="radio" name={`remainder-choice-${order.id}`} checked={remainderChoice === value} onChange={() => setRemainderChoice(value)} className="mt-0.5 accent-amber-700" />
+                                      <span>{label}{value === 'request_equivalent' && <span className="block text-[10px] text-slate-600">Aucun remplacement ne sera fait sans votre accord.</span>}</span>
+                                    </label>
+                                  ))}
+                                  <textarea rows={2} maxLength={500} value={remainderChoiceNote} onChange={(event) => setRemainderChoiceNote(event.target.value)} placeholder="Précision facultative pour l’équipe" className="w-full rounded-lg border border-amber-200 bg-white px-2.5 py-2 text-[11px] outline-none focus:border-amber-500" />
+                                  <p className="text-[10px] text-amber-900">C’est une demande : l’équipe confirme avant toute annulation ou tout remplacement. Votre commande ne change pas automatiquement.</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    <button type="button" disabled={savingRemainderOrderId === order.id} onClick={() => void submitRemainderChoice(order)} className="rounded-lg bg-amber-800 px-3 py-2 text-[11px] font-bold text-white hover:bg-amber-900 disabled:opacity-60">{savingRemainderOrderId === order.id ? 'Envoi…' : 'Transmettre mon choix'}</button>
+                                    <button type="button" disabled={savingRemainderOrderId === order.id} onClick={() => setRemainderChoiceOrderId(null)} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-[11px] font-bold text-amber-950 disabled:opacity-60">Fermer</button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <button type="button" onClick={() => { setRemainderChoiceOrderId(order.id); setRemainderChoice('continue_partial'); setRemainderChoiceNote(''); setRemainderChoiceFeedback(null); }} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-[11px] font-bold text-amber-950 hover:bg-amber-100">Choisir la suite pour les produits manquants</button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                       {order.status !== 'Annulée' && (
@@ -1494,6 +1571,10 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                           <span>Suivi Livreur</span>
                         </button>
                       )}
+
+                      <button type="button" onClick={() => setConversationOrder(order)} className="py-1.5 px-3 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-bold text-xs flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0" title="Écrire à l’équipe au sujet de cette commande">
+                        <MessageCircle className="w-3.5 h-3.5" /><span>Message sur la commande</span>
+                      </button>
 
                       <button
                         type="button"
@@ -1575,6 +1656,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           onClose={() => setIsProfileModalOpen(false)}
           onProfileUpdated={onProfileUpdated}
         />
+      )}
+      {conversationOrder && currentUser?.role === 'client' && (
+        <OrderConversationModal order={conversationOrder} currentUser={currentUser} onClose={() => setConversationOrder(null)} />
       )}
     </div>
   );
