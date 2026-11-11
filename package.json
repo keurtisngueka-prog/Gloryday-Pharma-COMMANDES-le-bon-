@@ -13,7 +13,6 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
     "@supabase/supabase-js": "^2.118.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vercel/functions": "^3.11.0",
@@ -41,5 +40,14 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite-plugin-pwa": "^2.0.0"
+  },
+  "allowScripts": {
+    "core-js@3.51.0": false,
+    "esbuild@0.28.2": true
+  },
+  "overrides": {
+    "workbox-build": {
+      "glob": "^14.0.4"
+    }
   }
 }

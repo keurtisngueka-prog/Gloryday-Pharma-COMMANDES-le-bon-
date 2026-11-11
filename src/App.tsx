@@ -46,21 +46,21 @@ import { userHasPermission } from './permissions';
 import { Navbar } from './components/Navbar';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { AppSidebar } from './components/AppSidebar';
-import { AuthModal } from './components/AuthModal';
 import { ProductCard } from './components/ProductCard';
-import { ProductDetailModal } from './components/ProductDetailModal';
-import { DeliveryTrackingModal } from './components/DeliveryTrackingModal';
-import { OrderFinanceModal } from './components/OrderFinanceModal';
-import { DirectMessagingModal } from './components/DirectMessagingModal';
-import { OrderPreviewModal } from './components/OrderPreviewModal';
-import { OrderConfirmationView } from './components/OrderConfirmationView';
-import { OrderPdfDocumentModal } from './components/OrderPdfDocumentModal';
-import { BestClientsModule } from './components/BestClientsModule';
-import { NotificationModal } from './components/NotificationModal';
-import { ProductFormModal } from './components/ProductFormModal';
-import { DraftsManagerModal } from './components/DraftsManagerModal';
 import { PWAInstallBanner, OfflineIndicator } from './components/PWAInstallBanner';
 import { RestrictedAccessView } from './components/RestrictedAccessView';
+
+const AuthModal = React.lazy(() => import('./components/AuthModal').then(module => ({ default: module.AuthModal })));
+const DeliveryTrackingModal = React.lazy(() => import('./components/DeliveryTrackingModal').then(module => ({ default: module.DeliveryTrackingModal })));
+const OrderFinanceModal = React.lazy(() => import('./components/OrderFinanceModal').then(module => ({ default: module.OrderFinanceModal })));
+const DirectMessagingModal = React.lazy(() => import('./components/DirectMessagingModal').then(module => ({ default: module.DirectMessagingModal })));
+const OrderPreviewModal = React.lazy(() => import('./components/OrderPreviewModal').then(module => ({ default: module.OrderPreviewModal })));
+const OrderConfirmationView = React.lazy(() => import('./components/OrderConfirmationView').then(module => ({ default: module.OrderConfirmationView })));
+const OrderPdfDocumentModal = React.lazy(() => import('./components/OrderPdfDocumentModal').then(module => ({ default: module.OrderPdfDocumentModal })));
+const BestClientsModule = React.lazy(() => import('./components/BestClientsModule').then(module => ({ default: module.BestClientsModule })));
+const NotificationModal = React.lazy(() => import('./components/NotificationModal').then(module => ({ default: module.NotificationModal })));
+const ProductFormModal = React.lazy(() => import('./components/ProductFormModal').then(module => ({ default: module.ProductFormModal })));
+const DraftsManagerModal = React.lazy(() => import('./components/DraftsManagerModal').then(module => ({ default: module.DraftsManagerModal })));
 
 const PacksSection = React.lazy(() => import('./components/PacksSection').then(module => ({ default: module.PacksSection })));
 const CartView = React.lazy(() => import('./components/CartView').then(module => ({ default: module.CartView })));
@@ -1609,7 +1609,8 @@ export default function App() {
       />
 
       {/* MODALS */}
-      <AuthModal
+      <React.Suspense fallback={<div className="fixed inset-x-0 top-3 z-[100] flex justify-center"><div className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-lg">Chargement…</div></div>}>
+      {isAuthModalOpen && <AuthModal
         isOpen={isAuthModalOpen}
         initialMode={authInitialMode}
         onClose={() => {
@@ -1617,7 +1618,7 @@ export default function App() {
           setAuthInitialMode('guest_choice');
         }}
         onSuccess={handleAuthSuccess}
-      />
+      />}
 
       {isPreviewModalOpen && pendingCustomerInfo && (
         <OrderPreviewModal
@@ -1630,7 +1631,7 @@ export default function App() {
       )}
 
       {/* Offline Order Drafts Manager Modal */}
-      <DraftsManagerModal
+      {isDraftsModalOpen && <DraftsManagerModal
         isOpen={isDraftsModalOpen}
         onClose={() => {
           setIsDraftsModalOpen(false);
@@ -1646,9 +1647,9 @@ export default function App() {
         } : undefined)}
         onLoadDraftToCart={handleLoadDraftToCart}
         onDirectSubmitDraft={handleDirectSubmitDraft}
-      />
+      />}
 
-      <NotificationModal
+      {isNotificationModalOpen && <NotificationModal
         isOpen={isNotificationModalOpen}
         onClose={() => setIsNotificationModalOpen(false)}
         notifications={notifications}
@@ -1710,15 +1711,15 @@ export default function App() {
             setActiveTab('clients-list');
           }
         }}
-      />
+      />}
 
-      <ProductFormModal
+      {isGlobalProductModalOpen && <ProductFormModal
         isOpen={isGlobalProductModalOpen}
         onClose={() => setIsGlobalProductModalOpen(false)}
         onSuccess={handleAdminProductSaved}
         canManageStock={userHasPermission(currentUser, 'stock_adjust')}
         canManagePurchasePrice={userHasPermission(currentUser, 'stock_costs_manage')}
-      />
+      />}
 
       {isGlobalMessageModalOpen && globalMessageTarget && (
         <DirectMessagingModal
@@ -1773,6 +1774,7 @@ export default function App() {
           onClose={() => setPreviewPdfOrder(null)}
         />
       )}
+      </React.Suspense>
 
       {/* Toast Notification Banner */}
       {toastBanner && (
