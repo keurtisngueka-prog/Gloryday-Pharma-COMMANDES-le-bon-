@@ -34,7 +34,7 @@ import {
   FileSpreadsheet,
   Upload
 } from 'lucide-react';
-import { Order, OrderStatus, AdminStats, Pack, Product, User, AppRole, DeliveryStage, AppNotification, VolumeDiscountSettings, StaffPermission, PaymentTerms, ClientAccountStatus } from '../types';
+import { Order, OrderStatus, AdminStats, Pack, Product, User, AppRole, DeliveryStage, AppNotification, VolumeDiscountSettings, StaffPermission, PaymentTerms, ClientAccountStatus, ClientRecord } from '../types';
 import { api } from '../api';
 import { getActiveVolumeDiscountSettings, setActiveVolumeDiscountSettings } from '../utils/volumeDiscount';
 import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
@@ -46,6 +46,7 @@ import { ClientAnnouncementModal } from './ClientAnnouncementModal';
 import { AdminPacksModule } from './AdminPacksModule';
 import { ClientPurchasesStatsModule } from './ClientPurchasesStatsModule';
 import { ClientPurchaseHistoryView } from './ClientPurchaseHistoryView';
+import { userHasPermission } from '../permissions';
 const DataExportModule = React.lazy(() => import('./DataExportModule').then(module => ({ default: module.DataExportModule })));
 const FinanceModule = React.lazy(() => import('./FinanceModule').then(module => ({ default: module.FinanceModule })));
 const ReceivablesModule = React.lazy(() => import('./ReceivablesModule').then(module => ({ default: module.ReceivablesModule })));
@@ -60,6 +61,8 @@ import { generateWhatsAppMessageForStage } from '../utils/whatsappNotifications'
 import type { CatalogImportPreviewResult } from '../utils/dataExport';
 import { CatalogExcelImportModal } from './CatalogExcelImportModal';
 import { AdminCreateOrderModal } from './AdminCreateOrderModal';
+import { AdminClientRecordModal } from './AdminClientRecordModal';
+import { OrderDiscountModal } from './OrderDiscountModal';
 
 const hasValidOrderCoordinates = (order: Order): boolean => {
   const coordinates = order.customer.coordinates;
@@ -123,7 +126,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 }) => {
   const role: AppRole = currentUser.role;
   const isSuperAdmin = role === 'Super-Admin';
-  const hasPerm = (perm: StaffPermission) => isSuperAdmin || Boolean(currentUser.permissions?.includes(perm));
+  const hasPerm = (perm: StaffPermission) => isSuperAdmin || userHasPermission(currentUser, perm);
   const canViewOrders = hasPerm('orders_view') || hasPerm('orders_create_for_client') || hasPerm('orders_confirm') || hasPerm('orders_cancel') || hasPerm('orders_status_manage') || hasPerm('orders_finance_view') || hasPerm('orders_finance_manage') || hasPerm('payments_manage') || hasPerm('logistics_view') || hasPerm('logistics_manage') || hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('receivables_reminders_manage') || hasPerm('finance_view');
   const canConfirmOrders = hasPerm('orders_confirm') || hasPerm('orders_status_manage');
   const canCancelOrders = hasPerm('orders_cancel') || hasPerm('orders_status_manage');
@@ -131,6 +134,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const canViewDelivery = hasPerm('logistics_view') || hasPerm('logistics_manage');
   const canViewOrderFinance = hasPerm('orders_finance_view') || hasPerm('orders_finance_manage') || hasPerm('payments_manage') || hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('stats_view') || hasPerm('finance_view');
   const canManageFinance = hasPerm('orders_finance_manage');
+  const canManageOrderDiscount = role !== 'client';
   const canManagePayments = hasPerm('payments_manage') || hasPerm('receivables_payments_manage');
   const canOpenOrderFinanceModal = onOpenFinanceModal && (
     hasPerm('orders_finance_view') || canManageFinance || hasPerm('payments_manage') ||
@@ -177,6 +181,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const [activeTab, setActiveTab] = useState<AdminSubTab>(defaultSubTab);
   const [isCreateOrderModalOpen, setIsCreateOrderModalOpen] = useState(false);
+  const [discountModalOrder, setDiscountModalOrder] = useState<Order | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | 'to_confirm' | 'confirmed' | 'preparation' | 'delivered' | 'cancelled'>('all');
   const [financialFilter, setFinancialFilter] = useState<'all' | 'outstanding' | 'overdue'>('all');
@@ -191,6 +196,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
   const [targetMessageClient, setTargetMessageClient] = useState<any | null>(null);
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
+  const [isClientRecordModalOpen, setIsClientRecordModalOpen] = useState(false);
+  const [editingClientRecord, setEditingClientRecord] = useState<(ClientRecord & { linkedUserId?: string }) | null>(null);
   const [selectedHistoryClientId, setSelectedHistoryClientId] = useState<string | null>(null);
   const [clientsModuleView, setClientsModuleView] = useState<'directory' | 'purchase-history'>('directory');
   const [clientDirectorySearch, setClientDirectorySearch] = useState('');
@@ -1212,10 +1219,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         type="button"
                         onClick={() => onViewOrderPdf(order)}
                         className="py-1.5 px-3 rounded-xl bg-slate-100 text-slate-800 hover:bg-slate-200 font-bold border border-slate-300 flex items-center gap-1 cursor-pointer transition-colors"
-                        title="Visualiser et télécharger le Bon de Commande PDF A4"
+                        title="Visualiser et télécharger la proforma PDF A4"
                       >
                         <FileText className="w-3.5 h-3.5 text-[#0d44e8]" />
                         <span>Bon PDF</span>
+                      </button>
+                    )}
+                    {canManageOrderDiscount && order.status !== 'Annulée' && (
+                      <button
+                        type="button"
+                        onClick={() => setDiscountModalOrder(order)}
+                        className="py-1.5 px-3 rounded-xl bg-amber-50 text-amber-800 hover:bg-amber-100 font-bold border border-amber-200 flex items-center gap-1 cursor-pointer transition-colors"
+                        title="Appliquer ou modifier la remise de la commande"
+                      >
+                        <span>Remise</span>
                       </button>
                     )}
 
@@ -1293,6 +1310,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               clients={clients}
               products={products}
               canManageInvoices={canManageFinance}
+              canOfferDiscount
               onClose={() => setIsCreateOrderModalOpen(false)}
               onOrderCreated={(order) => {
                 // New staff-created orders start as "À confirmer". Clear any
@@ -1304,6 +1322,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 onOrderCreated(order);
               }}
               onViewOrderPdf={onViewOrderPdf}
+            />
+          )}
+          {discountModalOrder && (
+            <OrderDiscountModal
+              order={discountModalOrder}
+              onClose={() => setDiscountModalOrder(null)}
+              onSaved={() => onRefresh()}
             />
           )}
         </div>
@@ -1731,6 +1756,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <Megaphone className="w-4 h-4" />
                 <span>Informer tous les clients</span>
               </button>}
+              {canManageClients && <button
+                type="button"
+                onClick={() => { setEditingClientRecord(null); setIsClientRecordModalOpen(true); }}
+                className="py-2 px-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center gap-2 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Ajouter un client</span>
+              </button>}
             </div>
           </div>
           {clientsModuleView === 'purchase-history' ? (
@@ -1803,14 +1836,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       )}
                     </div>
                     <div className="text-slate-500 mt-1">
-                      {c.contactName || 'Réception'} · <span className="font-mono">{c.phone}</span>{c.secondaryPhone && <> · 2e tél. <span className="font-mono">{c.secondaryPhone}</span></>} · {c.deliveryAddress || 'Libreville'}
+                      {c.contactName || 'Réception'} · Entreprise : <span className="font-mono">{c.companyPhone || c.phone || '—'}</span>
+                      {c.loginPhone && <> · Connexion : <span className="font-mono">{c.loginPhone}</span></>}
+                      {c.directorName && <> · Direction : {c.directorName}</>}
+                      {c.secondaryPhone && <> · 2e tél. <span className="font-mono">{c.secondaryPhone}</span></>}
+                      {c.deliveryAddress && <> · {c.deliveryAddress}</>}
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    {canManageClients && c.hasDirectoryRecord && <button
+                      type="button"
+                      onClick={() => {
+                        setEditingClientRecord(c as ClientRecord & { linkedUserId?: string });
+                        setIsClientRecordModalOpen(true);
+                      }}
+                      className="py-1.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                      <span>Modifier la fiche</span>
+                    </button>}
                     {c.hasAccount && canManageClientCredit && (
                       <button
                         type="button"
-                        onClick={() => openCreditTerms(c as User)}
+                        onClick={() => openCreditTerms({ ...c, id: c.linkedUserId || c.id } as User)}
                         className="py-1.5 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
                       >
                         <CreditCard className="w-3.5 h-3.5" />
@@ -1980,6 +2028,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <ClientAnnouncementModal
           isOpen={true}
           onClose={() => setIsAnnouncementModalOpen(false)}
+        />
+      )}
+
+      {isClientRecordModalOpen && canManageClients && (
+        <AdminClientRecordModal
+          record={editingClientRecord}
+          clients={clients}
+          onClose={() => { setIsClientRecordModalOpen(false); setEditingClientRecord(null); }}
+          onSaved={() => { setIsClientRecordModalOpen(false); setEditingClientRecord(null); onRefresh(); }}
         />
       )}
 

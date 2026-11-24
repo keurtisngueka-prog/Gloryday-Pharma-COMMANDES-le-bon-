@@ -89,11 +89,14 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
 
     orders.forEach((ord) => {
       const phoneKey = normalizePhoneKey(ord.customer?.phone || '');
-      let entry = phoneKey ? map.get(phoneKey) : undefined;
+      let entry = ord.clientRecordId
+        ? Array.from(map.values()).find((candidate) => candidate.rawClient.clientRecordId === ord.clientRecordId || candidate.id === ord.clientRecordId)
+        : undefined;
+      if (!entry && phoneKey) entry = map.get(phoneKey);
 
       if (!entry && ord.userId) {
         for (const candidate of map.values()) {
-          if (candidate.id === ord.userId) {
+          if (candidate.id === ord.userId || candidate.rawClient.linkedUserId === ord.userId) {
             entry = candidate;
             break;
           }
@@ -713,6 +716,11 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
                       <span className="text-sm sm:text-base font-black text-slate-900 font-mono tabular-nums">
                         {(ord.estimatedTotal || 0).toLocaleString('fr-FR')} FCFA
                       </span>
+                      {Number(ord.orderDiscountAmount) > 0 && (
+                        <div className="mt-1 text-[10px] font-bold text-emerald-700">
+                          Remise de commande : −{Number(ord.orderDiscountAmount).toLocaleString('fr-FR')} FCFA
+                        </div>
+                      )}
                       {ord.status !== 'Annulée' && getOrderRemainingBalance(ord) > 0 && (
                         <div className={`mt-1 text-[10px] font-bold ${isCollectionOverdue(ord) ? 'text-rose-700' : 'text-amber-700'}`}>
                           Versé : {getOrderPaidAmount(ord).toLocaleString('fr-FR')} FCFA · Reste dû : {getOrderRemainingBalance(ord).toLocaleString('fr-FR')} FCFA

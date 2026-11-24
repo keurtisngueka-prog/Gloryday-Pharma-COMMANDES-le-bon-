@@ -80,7 +80,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   // Invoice State
   const [invoiceType, setInvoiceType] = useState<'facture' | 'avoir'>('facture');
   const [tvaRate, setTvaRate] = useState<number>(0); // 0% dispositifs médicaux ou 18%
-  const [includeStampOnInvoice, setIncludeStampOnInvoice] = useState(true);
+  const [includeStampOnInvoice, setIncludeStampOnInvoice] = useState(false);
   const [creditReason, setCreditReason] = useState('');
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [invoiceDownloadError, setInvoiceDownloadError] = useState('');
@@ -98,6 +98,11 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   // Partial Delivery State
   const [partialNotes, setPartialNotes] = useState(order.partialDeliveryNotes || '');
   const [deliveryQuantities, setDeliveryQuantities] = useState<Record<number, string>>({});
+  const [unreservedStockSaleItems, setUnreservedStockSaleItems] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    setIncludeStampOnInvoice(false);
+  }, [order.id]);
 
   useEffect(() => {
     if (!canManageLogistics) return;
@@ -265,7 +270,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       type: invoiceType,
       number: num,
       issueDate: new Date().toISOString().slice(0, 10),
-      clientFacilityName: order.customer.facilityName,
+      clientFacilityName: order.customer.invoiceName || order.customer.facilityName,
       tvaRate,
       tvaAmount,
       totalHT,
@@ -282,6 +287,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     };
 
     if (!await saveUpdatedOrder(updatedOrder)) return;
+    setIncludeStampOnInvoice(false);
 
     logAuditEvent(
       currentUser,
@@ -365,7 +371,11 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     const lines = Object.entries(deliveryQuantities).flatMap(([rawIndex, rawQuantity]) => {
       const itemIndex = Number(rawIndex);
       const quantity = Number(rawQuantity);
-      return Number.isSafeInteger(quantity) && quantity > 0 ? [{ itemIndex, quantity }] : [];
+      const item = order.items[itemIndex];
+      const soldWithoutStockReservation = Boolean(item?.isDeferredStock && unreservedStockSaleItems[itemIndex]);
+      return Number.isSafeInteger(quantity) && quantity > 0
+        ? [{ itemIndex, quantity, ...(soldWithoutStockReservation ? { soldWithoutStockReservation: true } : {}) }]
+        : [];
     });
     const notes = partialNotes.trim();
     if (!lines.length && !notes) {
@@ -379,9 +389,9 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     }
     if (lines.some((line) => {
       const item = order.items[line.itemIndex];
-      return !item || item.isQuote || item.isDeferredStock || Number(item.price) <= 0;
+      return !item || item.isQuote || Number(item.price) <= 0 || Boolean(item.isDeferredStock) !== Boolean(line.soldWithoutStockReservation);
     })) {
-      setSaveError('Un article sur devis ou en réapprovisionnement doit d’abord être chiffré et confirmé avant l’enregistrement de sa remise.');
+      setSaveError('Un article sur devis doit d’abord être chiffré. Pour une ligne sans stock réservé, cochez « vendu sans stock enregistré » avant de saisir la remise.');
       return;
     }
     const fulfillmentId = globalThis.crypto?.randomUUID?.() || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
@@ -410,6 +420,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       partialDeliveryNotes: notes || undefined,
     })) return;
     setDeliveryQuantities({});
+    setUnreservedStockSaleItems({});
     setPartialNotes('');
     logAuditEvent(
       currentUser,
@@ -862,16 +873,35 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
               </div>
               <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-900">Après l’enregistrement, le client rattaché à un compte reçoit une notification dans son espace et sur son appareil si les notifications sont autorisées. Elle indique les quantités remises et les articles restant à recevoir. La commande d’origine est conservée ; pour un client sans compte, transmettez le bon de livraison mis à jour par votre canal habituel.</p>
               <div className="space-y-2">
-                {order.items.map((item, itemIndex) => {
+                  {order.items.map((item, itemIndex) => {
                   const delivered = getOrderDeliveredQuantity(order, itemIndex);
                   const remaining = getOrderRemainingQuantity(order, itemIndex);
                   const isDeferred = item.isQuote || item.isDeferredStock || Number(item.price) <= 0;
+                    const canRecordZeroStockSale = Boolean(item.isDeferredStock && !item.isQuote && Number(item.price) > 0);
+                  const soldWithoutStockReservation = canRecordZeroStockSale && unreservedStockSaleItems[itemIndex] === true;
                   return (
                     <div key={`${item.productId}-${item.variant}-${itemIndex}`} className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_115px_150px] sm:items-center">
                       <div>
                         <strong className="block text-sm text-slate-900">{item.productName}</strong>
                         <span className="text-xs text-slate-500">{item.variant} · commandé {item.quantity} · déjà remis {delivered} · reste {remaining}</span>
-                        {isDeferred && <span className="mt-0.5 block text-[11px] font-semibold text-amber-700">À chiffrer / réapprovisionner avant remise</span>}
+                        {item.isQuote || Number(item.price) <= 0 ? (
+                          <span className="mt-0.5 block text-[11px] font-semibold text-amber-700">À chiffrer avant remise</span>
+                        ) : item.isDeferredStock ? (
+                          <label className="mt-1 flex items-start gap-2 text-[11px] font-semibold text-amber-800">
+                            <input
+                              type="checkbox"
+                              checked={soldWithoutStockReservation}
+                              onChange={(event) => {
+                                const checked = event.target.checked;
+                                setUnreservedStockSaleItems((current) => ({ ...current, [itemIndex]: checked }));
+                                if (!checked) setDeliveryQuantities((current) => ({ ...current, [itemIndex]: '' }));
+                              }}
+                              disabled={!canRecordZeroStockSale || remaining === 0}
+                              className="mt-0.5"
+                            />
+                            <span>Vente malgré un stock insuffisant · aucun stock ne sera retiré</span>
+                          </label>
+                        ) : null}
                       </div>
                       <label className="text-xs font-semibold text-slate-600">
                         Remis aujourd’hui
@@ -881,7 +911,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                           max={remaining}
                           step="1"
                           value={deliveryQuantities[itemIndex] ?? ''}
-                          disabled={isDeferred || remaining === 0}
+                          disabled={remaining === 0 || (isDeferred && !soldWithoutStockReservation)}
                           onChange={(event) => setDeliveryQuantities((current) => ({ ...current, [itemIndex]: event.target.value }))}
                           className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm tabular-nums disabled:bg-slate-100"
                           aria-label={`Quantité remise aujourd’hui pour ${item.productName}`}
@@ -911,7 +941,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                     {order.deliveryFulfillments!.map((record) => (
                       <div key={record.id} className="rounded-lg bg-white p-2">
                         <strong>{new Date(record.fulfilledAt).toLocaleString('fr-FR')} · {record.recordedByName}</strong>
-                        <p>{record.lines.map((line) => `${line.quantity} × ${order.items[line.itemIndex]?.productName || 'article'}`).join(', ') || 'Signalement de reliquat, sans remise'}</p>
+                        <p>{record.lines.map((line) => `${line.quantity} × ${order.items[line.itemIndex]?.productName || 'article'}${line.soldWithoutStockReservation ? ' · vendu sans sortie de stock' : ''}`).join(', ') || 'Signalement de reliquat, sans remise'}</p>
                         {record.notes && <p className="text-slate-500">{record.notes}</p>}
                       </div>
                     ))}

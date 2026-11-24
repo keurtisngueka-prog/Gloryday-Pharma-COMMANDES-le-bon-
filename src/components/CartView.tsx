@@ -80,7 +80,7 @@ export const CartView: React.FC<CartViewProps> = ({
     if (currentUser) {
       if (currentUser.facilityName) setFacilityName(currentUser.facilityName);
       if (currentUser.contactName) setContactName(currentUser.contactName);
-      if (currentUser.phone) setPhone(currentUser.phone);
+      if (currentUser.companyPhone || currentUser.phone) setPhone(currentUser.companyPhone || currentUser.phone);
       setDeliveryCoordinates(null);
       setGpsMessage('Relevez le GPS à l’adresse de livraison pour associer un point exact à cette commande.');
       const detected = (currentUser.neighborhoodId && getNeighborhoodById(currentUser.neighborhoodId))
@@ -117,9 +117,10 @@ export const CartView: React.FC<CartViewProps> = ({
   const selectedNeighborhood = getNeighborhoodById(neighborhoodId);
   const deliveryWindow = computeDeliveryTimeWindow(neighborhoodId);
 
-  // Free delivery for orders >= 30,000 FCFA or for pickup
+  // Centre-Ville remains chargeable even when the order passes the other-zone threshold.
   const baseDeliveryFee = deliveryMode === 'retrait' ? 0 : (selectedNeighborhood?.baseDeliveryFee || 0);
-  const deliveryFee = itemsSubtotal >= FREE_DELIVERY_THRESHOLD_FCFA ? 0 : baseDeliveryFee;
+  const hasThresholdFreeDelivery = selectedNeighborhood?.id !== 'centre-ville' && itemsSubtotal >= FREE_DELIVERY_THRESHOLD_FCFA;
+  const deliveryFee = deliveryMode === 'retrait' || hasThresholdFreeDelivery ? 0 : baseDeliveryFee;
   const estimatedTotal = itemsSubtotal + deliveryFee;
   const hasAccountCreditLine = Boolean(
     currentUser?.role === 'client'
@@ -281,7 +282,7 @@ export const CartView: React.FC<CartViewProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200 mb-5">
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-[#161618] tracking-tight">
-            Mon panier & Bon de commande
+            Mon panier & demande de proforma
           </h1>
           <p className="text-xs text-[#6a6a6b] mt-0.5">
             {items.length} ligne(s) · Total estimé : <strong className="text-slate-900">{estimatedTotal.toLocaleString('fr-FR')} FCFA</strong> (sans TVA)
@@ -313,7 +314,7 @@ export const CartView: React.FC<CartViewProps> = ({
             className="px-4 py-2.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-extrabold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
           >
             <CheckCircle2 className="w-4 h-4" />
-            <span>Confirmer le bon de commande</span>
+            <span>Confirmer la demande de proforma</span>
           </button>
         </div>
       </div>
@@ -330,7 +331,7 @@ export const CartView: React.FC<CartViewProps> = ({
             <span className="font-bold">
               {currentUser
                 ? `Panier attribué à : ${currentUser.facilityName}`
-                : 'Connexion requise pour enregistrer et générer le Bon de Commande PDF'}
+                : 'Connexion requise pour enregistrer et générer la proforma PDF'}
             </span>
             <p className="text-[11px] text-slate-600 mt-0.5">
               {currentUser
@@ -449,7 +450,7 @@ export const CartView: React.FC<CartViewProps> = ({
             <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs leading-relaxed flex items-start gap-2">
               <HelpCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div>
-                <strong>Articles sur devis :</strong> Votre bon de commande PDF sera généré immédiatement et transmis à notre équipe commerciale pour confirmation.
+                <strong>Articles sur devis :</strong> Votre proforma indicative sera générée immédiatement et transmise à notre équipe commerciale pour confirmation.
               </div>
             </div>
           )}
@@ -507,7 +508,7 @@ export const CartView: React.FC<CartViewProps> = ({
                 type="submit"
                 className="w-full h-11 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] active:scale-[0.98] text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer mt-1"
               >
-                <span>Vérifier & Confirmer le bon de commande</span>
+                <span>Vérifier & confirmer la demande de proforma</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -610,7 +611,7 @@ export const CartView: React.FC<CartViewProps> = ({
                       <span>Arrivée estimée : <strong>{deliveryWindow.timeWindow}</strong></span>
                     </span>
                     <span className="text-[10px] font-bold text-emerald-800">
-                      {itemsSubtotal >= FREE_DELIVERY_THRESHOLD_FCFA ? 'Livraison offerte dès 30 000 FCFA' : `${baseDeliveryFee.toLocaleString('fr-FR')} F`}
+                      {hasThresholdFreeDelivery ? 'Livraison offerte dès 30 000 FCFA' : `${baseDeliveryFee.toLocaleString('fr-FR')} F`}
                     </span>
                   </div>
                 )}
@@ -751,7 +752,7 @@ export const CartView: React.FC<CartViewProps> = ({
                 boxShadow: 'rgba(4, 24, 85, 0.28) 0px 2px 6px -1px, rgba(66, 174, 247, 0.48) 0px 6px 14px 0px inset'
               }}
             >
-              <span>Vérifier le bon de commande</span>
+              <span>Vérifier la proforma</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
@@ -777,7 +778,7 @@ export const CartView: React.FC<CartViewProps> = ({
             onClick={triggerOrderConfirmation}
             className="px-4 py-2.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] active:scale-95 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
           >
-            <span>Vérifier le bon de commande</span>
+            <span>Vérifier la proforma</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>

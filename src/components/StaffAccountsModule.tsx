@@ -6,10 +6,10 @@ import { STAFF_PERMISSION_GROUPS, getDefaultStaffPermissions, normalizeStaffPerm
 
 const ROLE_DETAILS: Record<StaffRole, string> = {
   'Admin simple': 'Tableau de bord, commandes et clients ; sans réglages système ni export SQL',
+  Secrétaire: 'Proformas et suivi de ses commandes ; factures et stock désactivés par défaut',
   Commercial: 'Clients attribués, commandes et devis',
   'Gestionnaire Catalogue': 'Produits, tarifs dégressifs et stock',
   Logistique: 'Préparation et suivi des livraisons',
-  Secrétaire: 'Clients et suivi de ses commandes ; facturation et stock désactivés par défaut',
 };
 
 const LEGACY_PERMISSION_LABELS: { id: StaffPermission; label: string; desc: string }[] = [

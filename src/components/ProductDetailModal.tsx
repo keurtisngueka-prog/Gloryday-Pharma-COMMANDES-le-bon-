@@ -135,6 +135,7 @@ export function ProductDetailModal({
                 <h3 className="text-xl font-bold text-slate-900 tracking-tight leading-snug">
                   {product.name}
                 </h3>
+                {product.reference && <p className="mt-1 text-xs font-bold text-blue-700">Référence catalogue : {product.reference}</p>}
                 <p className="mt-1.5 text-xs text-slate-500 leading-relaxed">
                   {product.description || 'Description à compléter.'}
                 </p>

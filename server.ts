@@ -10,7 +10,6 @@ import { waitUntil } from '@vercel/functions';
 import { INITIAL_PRODUCTS, INITIAL_PACKS, LEGACY_DEMO_PRODUCT_IDS, LEGACY_DEMO_PACK_IDS } from './src/data/initialProducts.js';
 import { buildNeighborhoodDeliveryAddress, getEstimatedDeliveryText, getNeighborhoodById, resolveOrderDestinationCoordinates } from './src/data/librevilleZones.js';
 import {
-  calculateCartVolumeSummary,
   calculateItemVolumePrice,
   DEFAULT_VOLUME_DISCOUNT_SETTINGS,
   sanitizeVolumeDiscountSettings,
@@ -32,6 +31,7 @@ import type {
   Product,
   Pack,
   Order,
+  OrderItem,
   CartItem,
   User,
   FacilityType,
@@ -62,7 +62,8 @@ import type {
   Courier,
   OrderDraft,
   CollectionReminderChannel,
-  CollectionReminderOutcome
+  CollectionReminderOutcome,
+  ClientRecord
 } from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -107,6 +108,7 @@ type ServerStore = PersistentServerStore & {
   couriers: Courier[];
   stockMovements: StockMovement[];
   stockBatches: StockBatch[];
+  clientRecords: ClientRecord[];
   clientWorkspaces?: Record<string, ClientWorkspace>;
   deliveryLocations?: Record<string, DeliveryLocationPoint[]>;
   deliveryTrackingSessions?: Record<string, StoredDeliveryTrackingSession>;
@@ -310,6 +312,7 @@ function loadStore(): ServerStore {
         packs: cleanedPacks,
         orders: Array.isArray(parsed.orders) ? parsed.orders : [],
         accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
+        clientRecords: Array.isArray(parsed.clientRecords) ? parsed.clientRecords : [],
         staffAccounts: Array.isArray(parsed.staffAccounts) ? parsed.staffAccounts : [],
         quotes: Array.isArray(parsed.quotes) ? parsed.quotes : [],
         messages: Array.isArray(parsed.messages) ? parsed.messages : [],
@@ -349,6 +352,7 @@ function loadStore(): ServerStore {
     packs: INITIAL_PACKS,
     orders: [],
     accounts: [],
+    clientRecords: [],
     staffAccounts: [],
     quotes: [],
     messages: [],
@@ -537,6 +541,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       const hydratedStore = await persistence.hydrate(store);
       store = {
         ...hydratedStore,
+        clientRecords: hydratedStore.clientRecords || [],
         expenses: hydratedStore.expenses || [],
         collectionReminders: hydratedStore.collectionReminders || [],
         couriers: hydratedStore.couriers || [],
@@ -563,6 +568,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   await migrateLegacyPasswords(store);
   store.deliveryLocations ||= {};
   store.deliveryTrackingSessions ||= {};
+  store.clientRecords ||= [];
   const clearDeliveryLocations = async (orderId: string) => {
     if (persistence) {
       try {
@@ -843,6 +849,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         'orders_finance_manage', 'payments_manage', 'receivables_payments_manage',
         'receivables_reminders_manage', 'logistics_manage',
       ].some(permission => hasPerm(permission as StaffPermission));
+      else if (route.endsWith('/discount')) allowed = role !== 'client' && ['GET', 'PATCH'].includes(method);
       else if (route.endsWith('/payment')) allowed = hasPerm('payments_manage') || hasPerm('receivables_payments_manage');
       else if (route.endsWith('/mobile-payment')) allowed = role === 'client' || hasPerm('payments_manage');
       else if (route.endsWith('/expected-delivery')) allowed = role === 'client' || hasPerm('logistics_manage');
@@ -1241,8 +1248,14 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     // New inventory is always recorded through the receipt workflow so it
     // receives an operator, timestamp, reason, lot and expiry trace.
     const initialStock = 0;
+    const productReference = typeof productData.reference === 'string' ? productData.reference.trim().slice(0, 40) : '';
+    if (productReference && store.products.some((product) => product.reference?.toLocaleLowerCase('fr') === productReference.toLocaleLowerCase('fr'))) {
+      res.status(409).json({ error: 'Cette référence catalogue est déjà utilisée.' });
+      return;
+    }
     const newProduct: Product = {
       id: productData.id || `prod-${Date.now()}`,
+      reference: productReference || undefined,
       name: productData.name || 'Nouveau Produit Médical',
       category: productData.category || 'Consommables médicaux',
       subcategory: productData.subcategory,
@@ -1501,9 +1514,15 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       lowStockAlertThreshold: _ignoredLowStockAlertThreshold,
       ...productFields
     } = req.body || {};
+    const productReference = typeof req.body?.reference === 'string' ? req.body.reference.trim().slice(0, 40) : '';
+    if (productReference && store.products.some((product) => product.id !== id && product.reference?.toLocaleLowerCase('fr') === productReference.toLocaleLowerCase('fr'))) {
+      res.status(409).json({ error: 'Cette référence catalogue est déjà utilisée.' });
+      return;
+    }
     const merged: Product = {
       ...previousProduct,
       ...productFields,
+      reference: req.body?.reference === undefined ? previousProduct.reference : productReference || undefined,
       ...(canAdjustStock && req.body?.status !== undefined ? { status: req.body.status } : {}),
       ...(canAdjustStock && req.body?.alertThreshold !== undefined ? { alertThreshold: req.body.alertThreshold } : {}),
       ...(canAdjustStock && req.body?.lowStockAlertThreshold !== undefined ? { lowStockAlertThreshold: req.body.lowStockAlertThreshold } : {}),
@@ -2355,11 +2374,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       return;
     }
     await recordLoginFailure(registrationKey);
-    const { phone, facilityName, contactName, facilityType, facilityTypeOther, password, deliveryAddress, coordinates, avatarUrl: rawAvatarUrl } = req.body || {};
+    const { phone, companyPhone, invoiceName, directorName, facilityName, contactName, facilityType, facilityTypeOther, password, deliveryAddress, coordinates, avatarUrl: rawAvatarUrl } = req.body || {};
     const cleanPhone = normalizePhone(String(phone || ''));
+    const cleanCompanyPhone = normalizePhone(String(companyPhone || ''));
     const cleanPass = String(password || '');
     if (!cleanPhone || !facilityName || !/^\+?\d{8,15}$/.test(cleanPhone)) {
       res.status(400).json({ error: 'Numéro de téléphone valide et nom de l’établissement obligatoires.' });
+      return;
+    }
+    if (companyPhone && (!/^\+?\d{8,15}$/.test(cleanCompanyPhone) || cleanCompanyPhone.length < 8)) {
+      res.status(400).json({ error: 'Saisissez un numéro d’entreprise valide ou laissez le champ vide.' });
       return;
     }
     if (cleanPass.length < 8 || cleanPass.length > 85) {
@@ -2380,6 +2404,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const newUser: User = {
       id: `usr-${randomUUID()}`,
       phone: String(phone).trim(),
+      companyPhone: companyPhone ? String(companyPhone).trim().slice(0, 32) : undefined,
+      invoiceName: typeof invoiceName === 'string' ? invoiceName.trim().slice(0, 120) || undefined : undefined,
+      directorName: typeof directorName === 'string' ? directorName.trim().slice(0, 120) || undefined : undefined,
       facilityName: String(facilityName).trim().slice(0, 120),
       contactName: contactName ? String(contactName).trim().slice(0, 120) : 'Responsable Approvisionnement',
       facilityType: facilityType || 'Clinique',
@@ -2476,6 +2503,21 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
     if (has('contactName')) {
       updatedUser.contactName = cleanProfileText(body.contactName, 120) || undefined;
+    }
+    if (has('directorName')) {
+      updatedUser.directorName = cleanProfileText(body.directorName, 120) || undefined;
+    }
+    if (has('invoiceName')) {
+      updatedUser.invoiceName = cleanProfileText(body.invoiceName, 120) || undefined;
+    }
+    if (has('companyPhone')) {
+      const companyPhone = cleanProfileText(body.companyPhone, 32);
+      const normalizedCompanyPhone = normalizePhone(companyPhone);
+      if (companyPhone && (!/^\+?\d{8,15}$/.test(normalizedCompanyPhone) || normalizedCompanyPhone.length < 8)) {
+        res.status(400).json({ error: 'Saisissez un numéro d’entreprise valide.' });
+        return;
+      }
+      updatedUser.companyPhone = companyPhone || undefined;
     }
     if (has('secondaryPhone')) {
       const secondaryPhone = cleanProfileText(body.secondaryPhone, 32);
@@ -2892,11 +2934,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   // ==========================================
   // 4. CLIENTS & QUOTES ROUTES
   // ==========================================
-  const buildClientPurchaseSummary = (clientUser: Partial<User> & { id: string; phone: string; facilityName: string }, allOrders: Order[]) => {
+  const buildClientPurchaseSummary = (clientUser: Partial<User> & { id: string; phone: string; facilityName: string } & { clientRecordId?: string; linkedUserId?: string; city?: string; loginPhone?: string; companyPhone?: string }, allOrders: Order[]) => {
     const cleanTargetPhone = normalizePhone(clientUser.phone || '');
     const cleanTargetFacility = (clientUser.facilityName || '').trim().toLowerCase();
     const matchingOrders = allOrders
       .filter((o) => {
+        if (clientUser.clientRecordId) {
+          if (o.clientRecordId === clientUser.clientRecordId) return true;
+          if (clientUser.linkedUserId && o.userId === clientUser.linkedUserId) return true;
+          if (o.clientRecordId) return false;
+        }
         if (clientUser.id && o.userId && o.userId === clientUser.id) return true;
         const orderPhone = normalizePhone(o.customer?.phone || '');
         if (cleanTargetPhone && orderPhone && cleanTargetPhone === orderPhone) return true;
@@ -3014,13 +3061,19 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       invoices: hasInvoiceAccess ? order.invoices : undefined,
       mobilePayment: hasPaymentDetailsAccess ? order.mobilePayment : undefined,
       deliveryFee: hasLineAmountAccess ? order.deliveryFee : undefined,
+      orderDiscountAmount: hasLineAmountAccess ? order.orderDiscountAmount : undefined,
+      orderDiscountType: hasLineAmountAccess ? order.orderDiscountType : undefined,
+      orderDiscountValue: hasLineAmountAccess ? order.orderDiscountValue : undefined,
+      orderDiscountUpdatedAt: hasLineAmountAccess ? order.orderDiscountUpdatedAt : undefined,
+      orderDiscountUpdatedBy: hasLineAmountAccess ? order.orderDiscountUpdatedBy : undefined,
       collectionDueDate: hasCollectionAccess ? order.collectionDueDate : undefined,
-      items: order.items.map(({ price, total, discountPercent, savings, ...item }) => ({
+      items: order.items.map(({ price, total, discountPercent, savings, orderDiscountShare, ...item }) => ({
         ...item,
         price: hasLineAmountAccess ? price : 0,
         total: hasLineAmountAccess ? total : 0,
         ...(hasLineAmountAccess && discountPercent !== undefined ? { discountPercent } : {}),
         ...(hasLineAmountAccess && savings !== undefined ? { savings } : {}),
+        ...(hasLineAmountAccess && orderDiscountShare !== undefined ? { orderDiscountShare } : {}),
       })),
     } as Order;
   };
@@ -3030,11 +3083,72 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const visibleAccounts = user.role === 'Commercial'
       ? store.accounts.filter(acc => acc.user.assignedToCommercialId === user.id)
       : store.accounts;
+    const visibleAccountIds = new Set(visibleAccounts.map((account) => account.user.id));
+    const linkedRecordsByUser = new Map((store.clientRecords || [])
+      .filter((record) => record.linkedUserId && visibleAccountIds.has(record.linkedUserId))
+      .map((record) => [record.linkedUserId!, record]));
     const knownPhones = new Set<string>();
-    const enrichedClients = visibleAccounts.map(acc => {
+    const enrichedClients: Array<Record<string, any>> = visibleAccounts.map(acc => {
+      const record = linkedRecordsByUser.get(acc.user.id);
+      const companyPhone = record?.companyPhone || acc.user.companyPhone || acc.user.phone;
+      if (companyPhone) knownPhones.add(normalizePhone(companyPhone));
       if (acc.user.phone) knownPhones.add(normalizePhone(acc.user.phone));
-      return { ...buildClientPurchaseSummary(acc.user, store.orders), hasAccount: true };
+      const summary = record
+        ? buildClientPurchaseSummary({
+            ...acc.user,
+            ...record,
+            id: record.id,
+            phone: companyPhone,
+            companyPhone,
+            loginPhone: acc.user.phone,
+            clientRecordId: record.id,
+            linkedUserId: acc.user.id,
+            createdAt: record.createdAt,
+          } as any, store.orders)
+        : buildClientPurchaseSummary({ ...acc.user, phone: companyPhone, companyPhone, loginPhone: acc.user.phone, clientRecordId: acc.user.id, linkedUserId: acc.user.id } as any, store.orders);
+      return { ...summary, hasAccount: true, hasDirectoryRecord: Boolean(record), clientRecordId: record?.id || acc.user.id, linkedUserId: acc.user.id, loginPhone: acc.user.phone, companyPhone };
     });
+
+    const linkedRecordIds = new Set(Array.from(linkedRecordsByUser.values()).map((record) => record.id));
+    const visibleRecords = (store.clientRecords || []).filter((record) =>
+      user.role !== 'Commercial'
+        ? true
+        : record.assignedToCommercialId === user.id || Boolean(record.linkedUserId && visibleAccountIds.has(record.linkedUserId))
+    );
+    for (const record of visibleRecords) {
+      if (linkedRecordIds.has(record.id)) continue;
+      const summary = buildClientPurchaseSummary({
+        id: record.id,
+        clientRecordId: record.id,
+        phone: record.companyPhone,
+        companyPhone: record.companyPhone,
+        facilityName: record.facilityName,
+        invoiceName: record.invoiceName,
+        contactName: record.contactName,
+        directorName: record.directorName,
+        facilityType: record.facilityType,
+        deliveryAddress: record.deliveryAddress || '',
+        deliveryInstructions: record.deliveryInstructions,
+        city: record.city,
+        linkedUserId: record.linkedUserId,
+        role: 'client',
+        createdAt: record.createdAt,
+      }, store.orders);
+      const linkedAccount = record.linkedUserId
+        ? store.accounts.find((account) => account.user.id === record.linkedUserId)
+        : undefined;
+      if (record.companyPhone) knownPhones.add(normalizePhone(record.companyPhone));
+      enrichedClients.push({
+        ...summary,
+        id: record.id,
+        clientRecordId: record.id,
+        hasDirectoryRecord: true,
+        hasAccount: Boolean(linkedAccount),
+        linkedUserId: linkedAccount?.user.id,
+        loginPhone: linkedAccount?.user.phone,
+        companyPhone: record.companyPhone,
+      });
+    }
 
     // Also include any facility/client from orders that does not yet have a registered account row
     if (user.role !== 'Commercial') {
@@ -3064,6 +3178,169 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const canSeeFinancials = canViewOrderFinancials(user);
     res.json(canSeeFinancials ? enrichedClients : enrichedClients.map(redactClientFinancialSummary));
   });
+
+  app.post('/api/clients', asyncHandler(async (req, res) => {
+    const user = (req as AuthenticatedRequest).authenticatedUser!;
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const clean = (value: unknown, maxLength: number) =>
+      typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, maxLength) : '';
+    const facilityName = clean(body.facilityName, 120);
+    const companyPhone = clean(body.companyPhone, 32);
+    const normalizedCompanyPhone = normalizePhone(companyPhone);
+    const allowedFacilityTypes: FacilityType[] = ['Clinique', 'Polyclinique', 'Hôpital', 'Laboratoire', 'Pharmacie', 'Cabinet médical', 'Autre'];
+    const facilityType = allowedFacilityTypes.includes(body.facilityType as FacilityType)
+      ? body.facilityType as FacilityType
+      : 'Clinique';
+    if (!facilityName || !companyPhone || !/^\+?\d{8,15}$/.test(normalizedCompanyPhone)) {
+      res.status(400).json({ error: 'Le nom de l’établissement et un numéro de téléphone d’entreprise valide sont obligatoires.' });
+      return;
+    }
+    const now = new Date().toISOString();
+    const record: ClientRecord = {
+      id: `client-${randomUUID()}`,
+      facilityName,
+      invoiceName: clean(body.invoiceName, 120) || undefined,
+      facilityType,
+      facilityTypeOther: clean(body.facilityTypeOther, 120) || undefined,
+      contactName: clean(body.contactName, 120) || 'Contact achats',
+      directorName: clean(body.directorName, 120) || undefined,
+      companyPhone,
+      secondaryPhone: clean(body.secondaryPhone, 32) || undefined,
+      city: clean(body.city, 100) || undefined,
+      deliveryAddress: clean(body.deliveryAddress, 300) || undefined,
+      deliveryInstructions: clean(body.deliveryInstructions, 250) || undefined,
+      assignedToCommercialId: user.role === 'Commercial' ? user.id : undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+    store.clientRecords ||= [];
+    store.clientRecords.unshift(record);
+    await saveStore(store, persistence);
+    res.status(201).json(record);
+  }));
+
+  app.patch('/api/clients/:id', asyncHandler(async (req, res) => {
+    const user = (req as AuthenticatedRequest).authenticatedUser!;
+    const record = (store.clientRecords || []).find((item) => item.id === req.params.id);
+    if (!record) {
+      res.status(404).json({ error: 'Fiche client introuvable.' });
+      return;
+    }
+    if (user.role === 'Commercial' && record.assignedToCommercialId !== user.id) {
+      res.status(403).json({ error: 'Cette fiche client ne fait pas partie de votre portefeuille.' });
+      return;
+    }
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const clean = (value: unknown, maxLength: number) =>
+      typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, maxLength) : '';
+    const allowedFacilityTypes: FacilityType[] = ['Clinique', 'Polyclinique', 'Hôpital', 'Laboratoire', 'Pharmacie', 'Cabinet médical', 'Autre'];
+    if (Object.prototype.hasOwnProperty.call(body, 'facilityName')) {
+      const facilityName = clean(body.facilityName, 120);
+      if (!facilityName) {
+        res.status(400).json({ error: 'Le nom de l’établissement est obligatoire.' });
+        return;
+      }
+      record.facilityName = facilityName;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'companyPhone')) {
+      const companyPhone = clean(body.companyPhone, 32);
+      if (!companyPhone || !/^\+?\d{8,15}$/.test(normalizePhone(companyPhone))) {
+        res.status(400).json({ error: 'Saisissez un numéro d’entreprise valide.' });
+        return;
+      }
+      record.companyPhone = companyPhone;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'facilityType')) {
+      if (!allowedFacilityTypes.includes(body.facilityType as FacilityType)) {
+        res.status(400).json({ error: 'Le type d’établissement sélectionné est invalide.' });
+        return;
+      }
+      record.facilityType = body.facilityType as FacilityType;
+    }
+    const optionalTextFields: Array<[keyof ClientRecord, number]> = [
+      ['invoiceName', 120], ['facilityTypeOther', 120], ['contactName', 120], ['directorName', 120],
+      ['secondaryPhone', 32], ['city', 100], ['deliveryAddress', 300], ['deliveryInstructions', 250],
+    ];
+    for (const [field, maxLength] of optionalTextFields) {
+      if (Object.prototype.hasOwnProperty.call(body, field)) {
+        (record as any)[field] = clean(body[field], maxLength) || undefined;
+      }
+    }
+    record.updatedAt = new Date().toISOString();
+    if (record.linkedUserId) {
+      const account = store.accounts.find((item) => item.user.id === record.linkedUserId);
+      if (account) {
+        account.user = {
+          ...account.user,
+          facilityName: record.facilityName,
+          invoiceName: record.invoiceName,
+          facilityType: record.facilityType,
+          facilityTypeOther: record.facilityTypeOther,
+          contactName: record.contactName,
+          directorName: record.directorName,
+          companyPhone: record.companyPhone,
+          secondaryPhone: record.secondaryPhone,
+          deliveryAddress: record.deliveryAddress,
+          deliveryInstructions: record.deliveryInstructions,
+        };
+        for (const [sessionId, session] of sessions) {
+          if (session.user.id === account.user.id) sessions.set(sessionId, { ...session, user: cleanUser(account.user) });
+        }
+      }
+    }
+    await saveStore(store, persistence);
+    res.json(record);
+  }));
+
+  app.post('/api/clients/:id/link-account', asyncHandler(async (req, res) => {
+    const user = (req as AuthenticatedRequest).authenticatedUser!;
+    const record = (store.clientRecords || []).find((item) => item.id === req.params.id);
+    const linkedUserId = typeof req.body?.userId === 'string' ? req.body.userId.trim().slice(0, 120) : '';
+    const account = store.accounts.find((item) => item.user.id === linkedUserId && item.user.role === 'client');
+    if (!record || !account) {
+      res.status(404).json({ error: 'Fiche client ou compte client introuvable.' });
+      return;
+    }
+    if ((store.clientRecords || []).some((item) => item.id !== record.id && item.linkedUserId === account.user.id)) {
+      res.status(409).json({ error: 'Ce compte est déjà rattaché à une autre fiche client.' });
+      return;
+    }
+    if (record.linkedUserId && record.linkedUserId !== account.user.id) {
+      res.status(409).json({ error: 'Cette fiche client est déjà rattachée à un autre compte.' });
+      return;
+    }
+
+    record.linkedUserId = account.user.id;
+    record.updatedAt = new Date().toISOString();
+    account.user = {
+      ...account.user,
+      structureId: record.id,
+      facilityName: record.facilityName,
+      invoiceName: record.invoiceName,
+      facilityType: record.facilityType,
+      facilityTypeOther: record.facilityTypeOther,
+      contactName: record.contactName || account.user.contactName,
+      directorName: record.directorName,
+      companyPhone: record.companyPhone,
+      secondaryPhone: record.secondaryPhone,
+      deliveryAddress: record.deliveryAddress || account.user.deliveryAddress,
+      deliveryInstructions: record.deliveryInstructions || account.user.deliveryInstructions,
+    };
+    for (const order of store.orders) {
+      const legacyOrderMatchesRecord = !order.clientRecordId
+        && normalizePhone(order.customer.phone || '') === normalizePhone(record.companyPhone)
+        && (order.customer.facilityName || '').trim().toLocaleLowerCase('fr') === record.facilityName.trim().toLocaleLowerCase('fr');
+      if (order.clientRecordId === record.id || order.userId === account.user.id || legacyOrderMatchesRecord) {
+        order.clientRecordId = record.id;
+        order.userId = account.user.id;
+      }
+    }
+    for (const [sessionId, session] of sessions) {
+      if (session.user.id === account.user.id) sessions.set(sessionId, { ...session, user: cleanUser(account.user) });
+    }
+    await saveStore(store, persistence);
+    res.json({ ...record, hasAccount: true, loginPhone: account.user.phone });
+  }));
 
   app.patch('/api/clients/:id/credit-terms', asyncHandler(async (req, res) => {
     const account = store.accounts.find((item) => item.user.id === req.params.id);
@@ -3225,26 +3502,128 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   app.post('/api/quotes', asyncHandler(async (req, res) => {
     const quoteData = req.body || {};
     const user = (req as AuthenticatedRequest).authenticatedUser!;
-    const customerAccount = store.accounts.find(account => account.user.id === String(quoteData.customerId || ''));
-    if (!customerAccount || (user.role === 'Commercial' && customerAccount.user.assignedToCommercialId !== user.id)) {
+    const requestedCustomerId = typeof quoteData.customerId === 'string' ? quoteData.customerId.trim().slice(0, 120) : '';
+    const clientRecord = (store.clientRecords || []).find((record) => record.id === requestedCustomerId)
+      || (store.clientRecords || []).find((record) => record.linkedUserId === requestedCustomerId);
+    const customerAccount = store.accounts.find((account) => account.user.id === requestedCustomerId)
+      || (clientRecord?.linkedUserId ? store.accounts.find((account) => account.user.id === clientRecord.linkedUserId) : undefined);
+    if ((!customerAccount && !clientRecord) || (user.role === 'Commercial'
+      && customerAccount?.user.assignedToCommercialId !== user.id
+      && clientRecord?.assignedToCommercialId !== user.id)) {
       res.status(403).json({ error: 'Ce client ne vous est pas attribué ou n’existe pas.' });
       return;
     }
+    if (!Array.isArray(quoteData.items) || quoteData.items.length === 0 || quoteData.items.length > 100) {
+      res.status(400).json({ error: 'Ajoutez entre 1 et 100 articles au devis.' });
+      return;
+    }
+    const canApplyQuoteDiscount = user.role === 'Super-Admin'
+      || normalizeStaffPermissions(user.permissions, user.role as StaffRole).includes('quotes_manage');
+    const items: OrderItem[] = [];
+    for (const rawItem of quoteData.items) {
+      const productId = typeof rawItem?.productId === 'string' ? rawItem.productId.trim() : '';
+      const product = store.products.find((candidate) => candidate.id === productId);
+      const variant = product?.variants?.find((candidate) => candidate.label === String(rawItem?.variant || ''));
+      const quantity = Number(rawItem?.quantity);
+      const requestedLineDiscount = rawItem?.discountPercent === undefined ? 0 : Number(rawItem.discountPercent);
+      if (!product || !variant || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 10000) {
+        res.status(400).json({ error: 'Un produit, son conditionnement ou sa quantité n’est plus valide. Actualisez le catalogue.' });
+        return;
+      }
+      if (!Number.isFinite(requestedLineDiscount) || requestedLineDiscount < 0 || requestedLineDiscount > 100) {
+        res.status(400).json({ error: 'La remise par article doit être comprise entre 0 et 100 %.' });
+        return;
+      }
+      if (requestedLineDiscount > 0 && !canApplyQuoteDiscount) {
+        res.status(403).json({ error: 'Votre compte ne peut pas accorder de remise commerciale.' });
+        return;
+      }
+      const isQuote = Number(variant.price) <= 0 || Boolean(product.isQuote);
+      const price = Math.max(0, Math.trunc(Number(variant.price) || 0));
+      const grossLineTotal = isQuote ? 0 : price * quantity;
+      const lineSavings = Math.round(grossLineTotal * requestedLineDiscount / 100);
+      items.push({
+        productId: product.id,
+        productReference: product.reference,
+        productName: product.name,
+        category: product.category,
+        variant: variant.label,
+        price,
+        quantity,
+        total: Math.max(0, grossLineTotal - lineSavings),
+        discountPercent: grossLineTotal > 0 ? requestedLineDiscount : 0,
+        savings: lineSavings,
+        isQuote,
+      });
+    }
+    const subtotal = items.reduce((sum, item) => sum + (item.isQuote ? 0 : item.price * item.quantity), 0);
+    const lineDiscountAmount = items.reduce((sum, item) => sum + (item.savings || 0), 0);
+    const subtotalAfterLineDiscount = Math.max(0, subtotal - lineDiscountAmount);
+    const discountType: CommercialQuote['discountType'] = quoteData.discountType === 'amount' ? 'amount' : 'percent';
+    const requestedDiscountValue = Number(quoteData.discountValue ?? 0);
+    if (!Number.isFinite(requestedDiscountValue) || requestedDiscountValue < 0 || (discountType === 'percent' && requestedDiscountValue > 100)) {
+      res.status(400).json({ error: 'La remise doit être comprise entre 0 et 100 % ou un montant positif.' });
+      return;
+    }
+    const discountValue = discountType === 'percent'
+      ? requestedDiscountValue
+      : Math.min(subtotalAfterLineDiscount, Math.round(requestedDiscountValue));
+    const discountAmount = discountType === 'percent'
+      ? Math.round(subtotalAfterLineDiscount * discountValue / 100)
+      : discountValue;
+    const finalTotal = Math.max(0, subtotalAfterLineDiscount - discountAmount);
+    const validDaysValue = Number(quoteData.validDays ?? 15);
+    if (!Number.isSafeInteger(validDaysValue) || validDaysValue < 1 || validDaysValue > 90) {
+      res.status(400).json({ error: 'La validité du devis doit être comprise entre 1 et 90 jours.' });
+      return;
+    }
+    const now = new Date();
+    const validUntil = new Date(now.getTime() + validDaysValue * 24 * 60 * 60 * 1000).toISOString();
+    const clientUser = customerAccount?.user;
     const newQuote: CommercialQuote = {
-      ...quoteData,
       id: `quote-${randomUUID()}`,
       commercialId: user.id,
       commercialName: user.contactName || user.facilityName,
-      customer: {
-        facilityName: customerAccount.user.facilityName,
-        contactName: customerAccount.user.contactName || 'Responsable Approvisionnement',
-        phone: customerAccount.user.phone,
-        deliveryAddress: customerAccount.user.deliveryAddress || '',
+      customerId: clientRecord?.id || clientUser!.id,
+      ...(clientRecord ? { clientRecordId: clientRecord.id } : {}),
+      customer: clientRecord ? {
+        facilityName: clientRecord.facilityName,
+        invoiceName: clientRecord.invoiceName,
+        facilityType: clientRecord.facilityType,
+        contactName: clientRecord.contactName || 'Contact achats',
+        directorName: clientRecord.directorName,
+        phone: clientRecord.companyPhone,
+        companyPhone: clientRecord.companyPhone,
+        secondaryPhone: clientRecord.secondaryPhone,
+        deliveryAddress: clientRecord.deliveryAddress || '',
+        city: clientRecord.city,
+        notes: clientRecord.deliveryInstructions,
+        deliveryMode: 'livraison',
+        paymentMethod: 'especes'
+      } : {
+        facilityName: clientUser!.facilityName,
+        invoiceName: clientUser!.invoiceName,
+        facilityType: clientUser!.facilityType,
+        contactName: clientUser!.contactName || 'Responsable Approvisionnement',
+        directorName: clientUser!.directorName,
+        phone: clientUser!.companyPhone || clientUser!.phone,
+        companyPhone: clientUser!.companyPhone,
+        secondaryPhone: clientUser!.secondaryPhone,
+        deliveryAddress: clientUser!.deliveryAddress || '',
         deliveryMode: 'livraison',
         paymentMethod: 'especes'
       },
-      reference: quoteData.reference || `DEV-${new Date().getFullYear()}-${String(store.quotes.length + 1).padStart(4, '0')}`,
-      createdAt: new Date().toISOString()
+      items,
+      subtotal,
+      discountType,
+      discountValue,
+      discountAmount,
+      finalTotal,
+      status: 'Brouillon',
+      notes: typeof quoteData.notes === 'string' ? quoteData.notes.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 1000) || undefined : undefined,
+      reference: `DEV-${now.getFullYear()}-${String(store.quotes.length + 1).padStart(4, '0')}`,
+      createdAt: now.toISOString(),
+      validUntil,
     };
     store.quotes.unshift(newQuote);
     await saveStore(store, persistence);
@@ -3547,6 +3926,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const requestedClientId = typeof req.body?.clientId === 'string' ? req.body.clientId.trim().slice(0, 120) : '';
     const isStaffOrderCreation = user.role !== 'client';
     const canCreateForClient = user.role === 'Super-Admin' || normalizeStaffPermissions(user.permissions, user.role as StaffRole).includes('orders_create_for_client');
+    const canApplyManualDiscount = user.role !== 'client';
     if (isStaffOrderCreation && !canCreateForClient) {
       res.status(403).json({ error: 'Le droit « Créer une commande pour un client » est requis.' });
       return;
@@ -3559,10 +3939,34 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(403).json({ error: 'Un client ne peut créer une commande que pour son propre compte.' });
       return;
     }
-    const account = store.accounts.find(a => a.user.id === (isStaffOrderCreation ? requestedClientId : user.id));
+    const selectedRecord = isStaffOrderCreation
+      ? (store.clientRecords || []).find((record) => record.id === requestedClientId)
+      : (store.clientRecords || []).find((record) => record.linkedUserId === user.id);
+    const account = store.accounts.find(a => a.user.id === (isStaffOrderCreation ? requestedClientId : user.id))
+      || (selectedRecord?.linkedUserId ? store.accounts.find((item) => item.user.id === selectedRecord.linkedUserId) : undefined);
+    const clientRecord = selectedRecord || (account
+      ? (store.clientRecords || []).find((record) => record.linkedUserId === account.user.id || record.id === account.user.structureId)
+      : undefined);
+    const clientProfile: User | undefined = account?.user || (clientRecord ? {
+      id: clientRecord.id,
+      phone: clientRecord.companyPhone,
+      companyPhone: clientRecord.companyPhone,
+      facilityName: clientRecord.facilityName,
+      invoiceName: clientRecord.invoiceName,
+      contactName: clientRecord.contactName,
+      directorName: clientRecord.directorName,
+      facilityType: clientRecord.facilityType,
+      facilityTypeOther: clientRecord.facilityTypeOther,
+      secondaryPhone: clientRecord.secondaryPhone,
+      deliveryAddress: clientRecord.deliveryAddress,
+      deliveryInstructions: clientRecord.deliveryInstructions,
+      role: 'client',
+      createdAt: clientRecord.createdAt,
+    } : undefined);
+    const clientRecordId = clientRecord?.id || clientProfile?.structureId || account?.user.id;
     const customerInput = req.body?.customer || {};
     const requestedItems = req.body?.items;
-    if (!account || !Array.isArray(requestedItems) || requestedItems.length === 0 || requestedItems.length > 100) {
+    if (!clientProfile || (isStaffOrderCreation && !clientRecordId) || !Array.isArray(requestedItems) || requestedItems.length === 0 || requestedItems.length > 100) {
       res.status(400).json({ error: 'Informations client et articles requis.' });
       return;
     }
@@ -3574,14 +3978,14 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
     if (idempotencyKey) {
       const existingOrder = store.orders.find(order =>
-        order.userId === account.user.id && order.idempotencyKey === idempotencyKey
+        (order.clientRecordId === clientRecordId || order.userId === clientProfile.id) && order.idempotencyKey === idempotencyKey
       );
       if (existingOrder) {
         res.status(200).json(existingOrder);
         return;
       }
     }
-    if (account.user.accountStatus && account.user.accountStatus !== 'actif') {
+    if (account?.user.accountStatus && account.user.accountStatus !== 'actif') {
       res.status(403).json({ error: 'Ce compte ne peut pas encore passer commande. Contactez Gloryday Pharma.' });
       return;
     }
@@ -3606,18 +4010,29 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       const product = store.products.find(p => p.id === String(requested?.productId || ''));
       const variant = product?.variants?.find(v => v.label === String(requested?.variant || ''));
       const quantity = Number(requested?.quantity);
+      const requestedDiscountPercent = requested?.discountPercent === undefined ? 0 : Number(requested.discountPercent);
       if (!product || !variant || !Number.isInteger(quantity) || quantity < 1 || quantity > 10000) {
         res.status(400).json({ error: 'Un article, son format ou sa quantité n’est plus valide. Actualisez le catalogue.' });
+        return;
+      }
+      if (!Number.isFinite(requestedDiscountPercent) || requestedDiscountPercent < 0 || requestedDiscountPercent > 100) {
+        res.status(400).json({ error: 'La remise par article doit être comprise entre 0 et 100 %.' });
+        return;
+      }
+      if (requestedDiscountPercent > 0 && !canApplyManualDiscount) {
+        res.status(403).json({ error: 'Seul un collaborateur peut appliquer une remise commerciale.' });
         return;
       }
       const isQuoteItem = Number(variant.price) === 0 || Boolean(product.isQuote);
       items.push({
         productId: product.id,
+        productReference: product.reference,
         productName: product.name,
         category: product.category,
         variant: variant.label,
         price: Number(variant.price) || 0,
         quantity,
+        discountPercent: requestedDiscountPercent,
         isQuote: isQuoteItem
       });
     }
@@ -3677,16 +4092,20 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
             : undefined)
       : undefined;
     const customer = {
-      facilityName: account.user.facilityName,
-      facilityType: account.user.facilityType,
-      facilityTypeOther: account.user.facilityTypeOther,
-      contactName: account.user.contactName || 'Responsable Approvisionnement',
-      phone: account.user.phone,
-      secondaryPhone: account.user.secondaryPhone,
-      deliveryAddress: String(customerInput.deliveryAddress || account.user.deliveryAddress || '').slice(0, 300),
+      facilityName: clientProfile.facilityName,
+      invoiceName: clientProfile.invoiceName,
+      facilityType: clientProfile.facilityType,
+      facilityTypeOther: clientProfile.facilityTypeOther,
+      contactName: clientProfile.contactName || 'Responsable Approvisionnement',
+      directorName: clientProfile.directorName,
+      phone: clientProfile.companyPhone || clientRecord?.companyPhone || clientProfile.phone,
+      companyPhone: clientProfile.companyPhone || clientRecord?.companyPhone,
+      city: clientRecord?.city,
+      secondaryPhone: clientProfile.secondaryPhone,
+      deliveryAddress: String(customerInput.deliveryAddress || clientProfile.deliveryAddress || '').slice(0, 300),
       neighborhoodId: neighborhood?.id,
       neighborhoodName: neighborhood?.name,
-      notes: String(customerInput.notes || '').slice(0, 1000),
+      notes: [clientRecord?.deliveryInstructions, String(customerInput.notes || '').trim()].filter(Boolean).join(' · ').slice(0, 1000),
       deliveryMode: customerInput.deliveryMode === 'retrait' ? 'retrait' as const : 'livraison' as const,
       paymentMethod: ['especes', 'airtel_money', 'moov_money', 'virement', 'cheque', 'en_compte'].includes(customerInput.paymentMethod) ? customerInput.paymentMethod : 'especes',
       mobilePayment: customerInput.mobilePayment ? {
@@ -3698,7 +4117,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         status: 'submitted' as const
       } : undefined,
       coordinates: customerInput.deliveryMode === 'retrait' ? undefined : orderCoordinates,
-      googleMapsUrl: account.user.googleMapsUrl,
+      googleMapsUrl: clientProfile.googleMapsUrl,
       deliveryFee: 0
     };
 
@@ -3710,14 +4129,42 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const estimatedTime = getEstimatedDeliveryText(customer.neighborhoodId, customer.deliveryAddress);
 
     const activeDiscountSettings = sanitizeVolumeDiscountSettings(store.volumeDiscounts);
-    const volumeSummary = calculateCartVolumeSummary(items, activeDiscountSettings);
-    const deliveryFee = customer.deliveryMode === 'retrait' || volumeSummary.netTotal >= FREE_DELIVERY_THRESHOLD_FCFA ? 0 : neighborhood?.baseDeliveryFee || 0;
-    const finalTotal = volumeSummary.netTotal + deliveryFee;
+    const pricedItems: OrderItem[] = items.map((item) => {
+      const volumePrice = calculateItemVolumePrice(item.price, item.quantity, item.isQuote, activeDiscountSettings);
+      const manualSavings = Math.round(volumePrice.totalWithDiscount * (Number(item.discountPercent) || 0) / 100);
+      const finalLineTotal = Math.max(0, volumePrice.totalWithDiscount - manualSavings);
+      const totalSavings = volumePrice.savings + manualSavings;
+      return {
+        productId: item.productId,
+        productReference: item.productReference,
+        productName: item.productName,
+        category: item.category,
+        variant: item.variant,
+        price: item.price,
+        quantity: item.quantity,
+        total: finalLineTotal,
+        isQuote: item.isQuote,
+        isDeferredStock: Boolean(item.isDeferredStock),
+        stockReservedQuantity: item.isDeferredStock ? 0 : item.quantity,
+        discountPercent: volumePrice.totalWithoutDiscount > 0
+          ? Math.round(totalSavings / volumePrice.totalWithoutDiscount * 10000) / 100
+          : 0,
+        savings: totalSavings,
+      };
+    });
+    const netSubtotal = pricedItems.reduce((sum, item) => sum + item.total, 0);
+    const hasThresholdFreeDelivery = neighborhood?.id !== 'centre-ville' && netSubtotal >= FREE_DELIVERY_THRESHOLD_FCFA;
+    const deliveryFee = customer.deliveryMode === 'retrait' || hasThresholdFreeDelivery ? 0 : neighborhood?.baseDeliveryFee || 0;
+    const finalTotal = netSubtotal + deliveryFee;
     customer.deliveryFee = deliveryFee;
+    const volumeSummary = pricedItems.reduce((summary, item) => ({
+      grossTotal: summary.grossTotal + Math.max(0, Number(item.price) * Number(item.quantity)),
+      totalSavings: summary.totalSavings + Math.max(0, Number(item.savings) || 0),
+    }), { grossTotal: 0, totalSavings: 0 });
 
     let collectionDueDate: string | undefined;
     if (customer.paymentMethod === 'en_compte') {
-      if (account.user.accountStatus !== 'actif' || account.user.paymentTerms === 'comptant' || !account.user.paymentTerms) {
+      if (!account || account.user.accountStatus !== 'actif' || account.user.paymentTerms === 'comptant' || !account.user.paymentTerms) {
         res.status(403).json({ error: 'Le paiement à terme n’est pas autorisé pour ce compte. Contactez Gloryday Pharma.' });
         return;
       }
@@ -3788,31 +4235,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       reference,
       ...(idempotencyKey ? { idempotencyKey } : {}),
       createdAt: createdNow.toISOString(),
-      userId: account.user.id,
+      ...(account ? { userId: account.user.id } : {}),
+      ...(clientRecordId ? { clientRecordId } : {}),
       ...(isStaffOrderCreation ? {
         createdByUserId: user.id,
         createdByName: user.contactName || user.facilityName || 'Collaborateur Gloryday',
         createdByRole: user.role,
       } : {}),
-      assignedCommercialId: account.user.assignedToCommercialId,
+      assignedCommercialId: clientProfile.assignedToCommercialId || clientRecord?.assignedToCommercialId,
       customer,
-      items: items.map((it: any) => {
-        const calc = calculateItemVolumePrice(it.price, it.quantity, it.isQuote, activeDiscountSettings);
-        return {
-          productId: it.productId,
-          productName: it.productName,
-          category: it.category,
-          variant: it.variant,
-          price: calc.discountedUnitPrice,
-          quantity: it.quantity,
-          total: it.isQuote ? 0 : calc.totalWithDiscount,
-          isQuote: it.isQuote,
-          isDeferredStock: Boolean(it.isDeferredStock),
-          stockReservedQuantity: it.isDeferredStock ? 0 : it.quantity,
-          discountPercent: calc.discountPercent,
-          savings: calc.savings
-        };
-      }),
+      items: pricedItems,
       estimatedTotal: finalTotal,
       collectionDueDate,
       hasQuoteItems: hasQuoteOrDeferred,
@@ -3868,9 +4300,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
             date: new Date().toISOString(),
             performedBy: isStaffOrderCreation
               ? (user.contactName || user.facilityName || user.phone || 'Collaborateur Gloryday')
-              : (account.user.contactName || account.user.facilityName || account.user.phone),
-            performedById: isStaffOrderCreation ? user.id : account.user.id,
-            performedByRole: isStaffOrderCreation ? user.role : account.user.role,
+              : (clientProfile.contactName || clientProfile.facilityName || clientProfile.phone),
+            performedById: isStaffOrderCreation ? user.id : clientProfile.id,
+            performedByRole: isStaffOrderCreation ? user.role : clientProfile.role,
           });
         }
       }
@@ -3888,9 +4320,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         reference: `DEV-${year}-${orderToSave.reference.split('-').at(-1) || randomUUID().slice(0, 8).toUpperCase()}`,
         createdAt: createdNow.toISOString(),
         validUntil,
-        commercialId: account.user.assignedToCommercialId || 'staff-super-admin',
-        commercialName: account.user.assignedToCommercialName || 'Service Commercial Gloryday',
-        customerId: account.user.id,
+        commercialId: clientProfile.assignedToCommercialId || 'staff-super-admin',
+        commercialName: clientProfile.assignedToCommercialName || 'Service Commercial Gloryday',
+        customerId: clientProfile.id,
         customer,
         items: orderToSave.items,
         subtotal: volumeSummary.grossTotal,
@@ -3915,7 +4347,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       targetRole,
       read: false
     }));
-    const clientOrderNotification: AppNotification = {
+    const clientOrderNotification: AppNotification | undefined = account ? {
       id: `notif-${randomUUID()}`,
       timestamp: new Date().toISOString(),
       type: 'order_created',
@@ -3925,8 +4357,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       targetRole: 'client',
       userId: account.user.id,
       read: false
-    };
-    const orderNotifications = [...staffOrderNotifications, clientOrderNotification];
+    } : undefined;
+    const orderNotifications = [...staffOrderNotifications, ...(clientOrderNotification ? [clientOrderNotification] : [])];
     store.notifications.unshift(...orderNotifications);
     let orderCreationLog: StaffActivityLog | undefined;
     if (isStaffOrderCreation) {
@@ -3937,7 +4369,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         targetType: 'order',
         targetId: orderToSave.id,
         targetLabel: `${orderToSave.reference} · ${customer.facilityName}`,
-        details: `Commande de ${orderToSave.estimatedTotal.toLocaleString('fr-FR')} FCFA créée par ${user.contactName || user.phone || user.id} pour le compte client ${account.user.id}.`,
+        details: `Commande de ${orderToSave.estimatedTotal.toLocaleString('fr-FR')} FCFA créée par ${user.contactName || user.phone || user.id} pour le client ${clientRecordId || clientProfile.id}.`,
       });
     }
     const sideEffectsPromise = persistence
@@ -3947,7 +4379,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
           staffLog: orderCreationLog,
         })
       : saveStore(store, persistence);
-    const pushPromise = sendPushForNotification(clientOrderNotification);
+    const pushPromise = clientOrderNotification ? sendPushForNotification(clientOrderNotification) : Promise.resolve();
     if (persistence && process.env.VERCEL) {
       scheduleBackgroundTask(
         Promise.all([sideEffectsPromise, pushPromise]),
@@ -4584,6 +5016,210 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     res.json(order);
   }));
 
+  const loadDiscountOrder = async (orderId: string): Promise<Order | undefined> => {
+    if (persistence) {
+      const freshOrder = await persistence.loadOrderById(orderId);
+      if (!freshOrder) return undefined;
+      const existingOrderIndex = store.orders.findIndex((item) => item.id === freshOrder.id);
+      if (existingOrderIndex >= 0) store.orders[existingOrderIndex] = freshOrder;
+      else store.orders.unshift(freshOrder);
+      return freshOrder;
+    }
+    return store.orders.find((item) => item.id === orderId || item.reference === orderId);
+  };
+
+  const canAccessDiscountOrder = (order: Order, user: User): boolean => {
+    if (user.role === 'client') return false;
+    const staffPermissions = normalizeStaffPermissions(user.permissions, user.role as StaffRole);
+    const orderViewPermissions = new Set<StaffPermission>([
+      'orders_view', 'orders_create_for_client', 'orders_confirm', 'orders_cancel', 'orders_status_manage',
+      'orders_finance_view', 'orders_finance_manage', 'payments_manage', 'logistics_view', 'logistics_manage',
+      'receivables_view', 'receivables_payments_manage', 'receivables_reminders_manage', 'finance_view',
+    ]);
+    const canAccessOrders = user.role === 'Super-Admin' || staffPermissions.some((permission) => orderViewPermissions.has(permission));
+    if (!canAccessOrders) return false;
+    if (user.role === 'Commercial') {
+      return order.assignedCommercialId === user.id
+        || order.createdByUserId === user.id
+        || store.accounts.some((account) => account.user.id === order.userId && account.user.assignedToCommercialId === user.id);
+    }
+    if (user.role === 'Secrétaire'
+      && !staffPermissions.includes('orders_view')) {
+      return order.createdByUserId === user.id;
+    }
+    return true;
+  };
+
+  app.get('/api/orders/:id/discount', asyncHandler(async (req, res) => {
+    const user = (req as AuthenticatedRequest).authenticatedUser!;
+    const order = await loadDiscountOrder(req.params.id);
+    if (!order) {
+      res.status(404).json({ error: 'Commande introuvable.' });
+      return;
+    }
+    if (!canAccessDiscountOrder(order, user)) {
+      res.status(403).json({ error: 'Cette commande ne fait pas partie des commandes accessibles à votre compte.' });
+      return;
+    }
+    const baseLineTotals = order.items.map((item) => {
+      const savedTotal = Number(item.total);
+      const lineTotal = Number.isFinite(savedTotal)
+        ? Math.max(0, Math.trunc(savedTotal))
+        : Math.max(0, Math.trunc(Number(item.price) * Number(item.quantity)));
+      return lineTotal + Math.max(0, Math.trunc(Number(item.orderDiscountShare) || 0));
+    });
+    const baseSubtotal = order.items.reduce((sum, item, index) => item.isQuote ? sum : sum + baseLineTotals[index], 0);
+    const lineDiscountTotal = (order.items || []).reduce((sum, item) => sum + Math.max(0, Math.trunc(Number(item.orderDiscountShare) || 0)), 0);
+    const neighborhood = order.customer.neighborhoodId ? getNeighborhoodById(order.customer.neighborhoodId) : undefined;
+    const fallbackDeliveryFee = Math.max(0, Math.trunc(Number(order.deliveryFee ?? order.customer.deliveryFee) || 0));
+    res.json({
+      baseSubtotal,
+      currentDiscountAmount: Number.isFinite(Number(order.orderDiscountAmount)) ? Math.max(0, Math.trunc(Number(order.orderDiscountAmount))) : lineDiscountTotal,
+      discountType: order.orderDiscountType,
+      discountValue: order.orderDiscountValue,
+      deliveryMode: order.customer.deliveryMode,
+      neighborhoodId: order.customer.neighborhoodId,
+      baseDeliveryFee: neighborhood?.baseDeliveryFee ?? fallbackDeliveryFee,
+      hasInvoice: (order.invoices || []).some((invoice) => invoice.type === 'facture'),
+      isCancelled: order.status === 'Annulée',
+    });
+  }));
+
+  app.patch('/api/orders/:id/discount', asyncHandler(async (req, res) => {
+    const user = (req as AuthenticatedRequest).authenticatedUser!;
+    if (user.role === 'client') {
+      res.status(403).json({ error: 'Cette action est réservée aux collaborateurs.' });
+      return;
+    }
+    const order = await loadDiscountOrder(req.params.id);
+    if (!order) {
+      res.status(404).json({ error: 'Commande introuvable.' });
+      return;
+    }
+    if (!canAccessDiscountOrder(order, user)) {
+      res.status(403).json({ error: 'Cette commande ne fait pas partie des commandes accessibles à votre compte.' });
+      return;
+    }
+    if (order.status === 'Annulée') {
+      res.status(409).json({ error: 'Une commande annulée ne peut pas recevoir de remise.' });
+      return;
+    }
+    if ((order.invoices || []).some((invoice) => invoice.type === 'facture')) {
+      res.status(409).json({ error: 'Une facture a déjà été émise. La remise ne peut plus modifier cette commande.' });
+      return;
+    }
+
+    const body = req.body || {};
+    const discountType = body.discountType === 'amount' || body.discountType === 'percent' ? body.discountType : null;
+    const requestedValue = Number(body.discountValue);
+    if (!discountType || !Number.isFinite(requestedValue) || requestedValue < 0 || (discountType === 'percent' && requestedValue > 100)) {
+      res.status(400).json({ error: 'Choisissez un montant positif ou un pourcentage compris entre 0 et 100.' });
+      return;
+    }
+
+    const oldTotal = order.estimatedTotal;
+    const baseLineTotals = order.items.map((item) => {
+      const savedTotal = Number(item.total);
+      const currentTotal = Number.isFinite(savedTotal)
+        ? Math.max(0, Math.trunc(savedTotal))
+        : Math.max(0, Math.trunc(Number(item.price) * Number(item.quantity)));
+      return Math.min(Number.MAX_SAFE_INTEGER, currentTotal + Math.max(0, Math.trunc(Number(item.orderDiscountShare) || 0)));
+    });
+    const discountableSubtotal = order.items.reduce((sum, item, index) => item.isQuote ? sum : sum + baseLineTotals[index], 0);
+    const discountAmount = discountType === 'percent'
+      ? Math.round(discountableSubtotal * requestedValue / 100)
+      : Math.round(requestedValue);
+    if (discountAmount > discountableSubtotal) {
+      res.status(400).json({ error: 'La remise ne peut pas dépasser le montant des articles chiffrés.' });
+      return;
+    }
+
+    const shares = order.items.map(() => 0);
+    const eligibleItemIndexes = order.items.flatMap((item, index) => !item.isQuote && baseLineTotals[index] > 0 ? [index] : []);
+    let remainingDiscount = discountAmount;
+    let remainingSubtotal = discountableSubtotal;
+    for (let position = 0; position < eligibleItemIndexes.length; position += 1) {
+      const itemIndex = eligibleItemIndexes[position];
+      const share = position === eligibleItemIndexes.length - 1
+        ? remainingDiscount
+        : Math.floor(remainingDiscount * baseLineTotals[itemIndex] / Math.max(1, remainingSubtotal));
+      shares[itemIndex] = Math.min(baseLineTotals[itemIndex], Math.max(0, share));
+      remainingDiscount -= shares[itemIndex];
+      remainingSubtotal -= baseLineTotals[itemIndex];
+    }
+
+    order.items = order.items.map((item, index) => {
+      const priorShare = Math.max(0, Math.trunc(Number(item.orderDiscountShare) || 0));
+      const previousSavings = Math.max(0, Math.trunc(Number(item.savings) || 0) - priorShare);
+      const savings = previousSavings + shares[index];
+      const grossLineTotal = Math.max(0, Number(item.price) * Number(item.quantity));
+      return {
+        ...item,
+        total: Math.max(0, baseLineTotals[index] - shares[index]),
+        savings,
+        discountPercent: grossLineTotal > 0 ? Math.min(100, Math.round(savings / grossLineTotal * 10000) / 100) : 0,
+        orderDiscountShare: shares[index],
+      };
+    });
+
+    const itemsNetTotal = order.items.reduce((sum, item) => sum + (item.isQuote ? 0 : item.total), 0);
+    const neighborhood = order.customer.neighborhoodId ? getNeighborhoodById(order.customer.neighborhoodId) : undefined;
+    const thresholdFreeDelivery = neighborhood?.id !== 'centre-ville' && itemsNetTotal >= FREE_DELIVERY_THRESHOLD_FCFA;
+    const deliveryFee = order.customer.deliveryMode === 'retrait' || thresholdFreeDelivery
+      ? 0
+      : neighborhood?.baseDeliveryFee ?? Math.max(0, Math.trunc(Number(order.deliveryFee ?? order.customer.deliveryFee) || 0));
+    order.deliveryFee = deliveryFee;
+    order.customer.deliveryFee = deliveryFee;
+    order.estimatedTotal = itemsNetTotal + deliveryFee;
+    order.orderDiscountAmount = discountAmount;
+    order.orderDiscountType = discountType;
+    order.orderDiscountValue = requestedValue;
+    order.orderDiscountUpdatedAt = new Date().toISOString();
+    order.orderDiscountUpdatedBy = user.contactName || user.facilityName || user.id;
+    order.isPaid = getOrderPaidAmount(order) >= order.estimatedTotal;
+
+    const note = typeof body.note === 'string' ? body.note.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 500) : '';
+    const staffLog = appendStaffLog(user, {
+      category: 'orders',
+      severity: 'info',
+      actionLabel: discountAmount > 0 ? 'Remise appliquée à une commande' : 'Remise de commande retirée',
+      targetType: 'order',
+      targetId: order.id,
+      targetLabel: `${order.reference} · ${order.customer.facilityName}`,
+      details: `${discountAmount.toLocaleString('fr-FR')} FCFA de remise · total ${oldTotal.toLocaleString('fr-FR')} → ${order.estimatedTotal.toLocaleString('fr-FR')} FCFA${note ? ` · Motif : ${note}` : ''}`,
+      previousValue: `${oldTotal} FCFA`,
+      newValue: `${order.estimatedTotal} FCFA · remise ${discountAmount} FCFA`,
+    });
+    let clientNotification: AppNotification | undefined;
+    if (order.userId) {
+      clientNotification = {
+        id: `notif-${randomUUID()}`,
+        timestamp: order.orderDiscountUpdatedAt,
+        type: 'admin_message',
+        title: discountAmount > 0 ? 'Remise appliquée à votre commande' : 'Remise de commande mise à jour',
+        orderId: order.id,
+        orderReference: order.reference,
+        message: discountAmount > 0
+          ? `Une remise de ${discountAmount.toLocaleString('fr-FR')} FCFA a été appliquée. Le nouveau total de la commande est de ${order.estimatedTotal.toLocaleString('fr-FR')} FCFA. Vous pouvez consulter la proforma mise à jour dans votre espace.`
+          : `La remise de votre commande a été retirée. Le nouveau total est de ${order.estimatedTotal.toLocaleString('fr-FR')} FCFA.`,
+        targetRole: 'client',
+        userId: order.userId,
+        read: false,
+        actionUrl: '/#dashboard',
+      };
+      store.notifications.unshift(clientNotification);
+    }
+
+    if (persistence) {
+      await persistence.persistOrderFinance({ order, notifications: clientNotification ? [clientNotification] : [], staffLog });
+      if (!process.env.VERCEL) saveStoreLocal(store);
+    } else {
+      saveStoreLocal(store);
+    }
+    if (clientNotification) scheduleBackgroundTask(sendPushForNotification(clientNotification), `remise sur la commande ${order.reference}`);
+    res.json({ success: true });
+  }));
+
   app.patch('/api/orders/:id/finance', asyncHandler(async (req, res) => {
     const user = (req as AuthenticatedRequest).authenticatedUser!;
     let persistedInvoiceNumbers: string[] | undefined;
@@ -4740,7 +5376,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         totalTTC,
         lineItems: type === 'facture' ? lineItems : undefined,
         deliveryFee,
-        includeStamp: raw.includeStamp !== false,
+        includeStamp: raw.includeStamp === true,
         reason: type === 'avoir' ? reason : undefined,
       });
     }
@@ -4921,8 +5557,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         const existing = existingById.get(raw.id);
         if (existing) {
           const sameLines = Array.isArray(raw.lines) && sameValue(
-            raw.lines.map((line: any) => ({ itemIndex: Number(line.itemIndex), quantity: Number(line.quantity) })).sort((a: any, b: any) => a.itemIndex - b.itemIndex),
-            [...existing.lines].map((line) => ({ itemIndex: line.itemIndex, quantity: line.quantity })).sort((a, b) => a.itemIndex - b.itemIndex),
+            raw.lines.map((line: any) => ({ itemIndex: Number(line.itemIndex), quantity: Number(line.quantity), soldWithoutStockReservation: line.soldWithoutStockReservation === true })).sort((a: any, b: any) => a.itemIndex - b.itemIndex),
+            [...existing.lines].map((line) => ({ itemIndex: line.itemIndex, quantity: line.quantity, soldWithoutStockReservation: line.soldWithoutStockReservation === true })).sort((a, b) => a.itemIndex - b.itemIndex),
           );
           const sameNotes = (typeof raw.notes === 'string' ? raw.notes.trim() || undefined : undefined) === existing.notes;
           if (!sameLines || !sameNotes) {
@@ -4956,8 +5592,15 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
             return;
           }
           const orderItem = order.items[itemIndex];
-          if (orderItem.isQuote || orderItem.isDeferredStock || Number(orderItem.price) <= 0) {
-            res.status(409).json({ error: `« ${orderItem.productName} » est encore sur devis ou en réapprovisionnement. Confirmez d’abord son prix et son stock, puis créez la commande de livraison correspondante.` });
+          const soldWithoutStockReservation = line?.soldWithoutStockReservation === true;
+          if (orderItem.isQuote || Number(orderItem.price) <= 0) {
+            res.status(409).json({ error: `« ${orderItem.productName} » doit d’abord être chiffré avant l’enregistrement de sa remise.` });
+            return;
+          }
+          if (Boolean(orderItem.isDeferredStock) !== soldWithoutStockReservation) {
+            res.status(409).json({ error: orderItem.isDeferredStock
+              ? `« ${orderItem.productName} » n’a pas réservé de stock. Cochez la vente sans stock enregistré pour noter sa remise.`
+              : `« ${orderItem.productName} » dispose d’une réservation de stock et ne peut pas être déclaré vendu à stock zéro.` });
             return;
           }
           const alreadyDelivered = existingFulfillments.reduce((sum, fulfillment) => sum + fulfillment.lines
@@ -4971,7 +5614,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
             return;
           }
           lineIndexes.add(itemIndex);
-          validatedLines.push({ itemIndex, quantity });
+          validatedLines.push({ itemIndex, quantity, ...(soldWithoutStockReservation ? { soldWithoutStockReservation: true } : {}) });
         }
         newFulfillments.push({
           id: raw.id,
@@ -5003,6 +5646,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       }
     }
 
+    const unreservedStockSales = newFulfillments.flatMap((fulfillment) => fulfillment.lines
+      .filter((line) => line.soldWithoutStockReservation)
+      .map((line) => `${line.quantity} × ${order.items[line.itemIndex]?.productName || 'article'}`));
     const financeLog = appendStaffLog(user, {
       category: 'orders',
       severity: 'info',
@@ -5010,7 +5656,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       targetType: 'order',
       targetId: order.id,
       targetLabel: `${order.reference} · ${order.customer.facilityName}`,
-      details: `${newInvoices.length} document(s) créé(s), ${newInstallments.length} versement(s) ajouté(s), ${remainderResponseUpdates.length} demande(s) client traitée(s) pour ${order.reference}.`,
+      details: `${newInvoices.length} document(s) créé(s), ${newInstallments.length} versement(s) ajouté(s), ${remainderResponseUpdates.length} demande(s) client traitée(s) pour ${order.reference}.${unreservedStockSales.length ? ` Ventes sans sortie de stock : ${unreservedStockSales.join(', ')}.` : ''}`,
     });
     let clientFinanceNotification: AppNotification | undefined;
     let hasOutstandingDeliveryItems = false;

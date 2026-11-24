@@ -20,7 +20,7 @@ Lorsqu’un client passe commande, une notification dans l’application est cr�
 
 ## Comptes et rôles
 
-- Le Super-Admin crée les collaborateurs dans **Comptes employés & rôles**. Le rôle **Admin simple** donne accès au tableau de bord et aux opérations, sans réglages système, comptes employés ni export ou migration SQL. Les autres rôles sont `Commercial`, `Gestionnaire Catalogue` et `Logistique`. Les anciens comptes déclarés dans `STAFF_ACCOUNTS_JSON` restent visibles en lecture seule.
+- Le Super-Admin crée les collaborateurs dans **Comptes employés & rôles**. Le rôle **Secrétaire** peut préparer des proformas et suivre les commandes qu’il a créées ; les factures et le stock restent désactivés par défaut. Le rôle **Admin simple** donne accès au tableau de bord et aux opérations, sans réglages système, comptes employés ni export ou migration SQL. Les autres rôles sont `Commercial`, `Gestionnaire Catalogue` et `Logistique`. Les anciens comptes déclarés dans `STAFF_ACCOUNTS_JSON` restent visibles en lecture seule.
 - Les clients s’inscrivent avec leur téléphone et un mot de passe. Les mots de passe sont dérivés avec un sel avant stockage. Les sessions sont conservées dans Supabase afin qu’elles fonctionnent avec les fonctions Vercel.
 - Google est désactivé jusqu’à la mise en place d’un véritable flux OAuth vérifié.
 

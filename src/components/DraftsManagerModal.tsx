@@ -280,7 +280,7 @@ export const DraftsManagerModal: React.FC<DraftsManagerModalProps> = ({
               <div>
                 <strong className="block font-bold">Connexion internet indisponible ou instable</strong>
                 <p className="text-amber-800 text-[11px] mt-0.5">
-                  Toutes les modifications apportées à vos brouillons sont enregistrées localement sur votre téléphone ou ordinateur. Vous pouvez aussi générer un Bon de commande PDF ou envoyer le récapitulatif par WhatsApp même sans accès au serveur !
+                  Toutes les modifications apportées à vos brouillons sont enregistrées localement sur votre téléphone ou ordinateur. Vous pouvez aussi générer une proforma indicative PDF ou envoyer le récapitulatif par WhatsApp même sans accès au serveur !
                 </p>
               </div>
             </div>
@@ -546,16 +546,16 @@ export const DraftsManagerModal: React.FC<DraftsManagerModalProps> = ({
                         {/* Action Toolbar for this draft */}
                         <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            {/* Download PDF Bon de Commande */}
+                            {/* Download PDF proforma */}
                             <button
                               type="button"
                               onClick={() => handleDownloadPdf(draft)}
                               disabled={generatingPdfId === draft.id}
                               className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-[11px] flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs disabled:opacity-50"
-                              title="Télécharger le Bon de commande PDF hors-ligne"
+                              title="Télécharger la proforma PDF hors-ligne"
                             >
                               <Download className="w-3.5 h-3.5 text-[#0d44e8]" />
-                              <span>{generatingPdfId === draft.id ? 'Génération...' : 'PDF Bon de commande'}</span>
+                              <span>{generatingPdfId === draft.id ? 'Génération...' : 'PDF Proforma'}</span>
                             </button>
 
                             {/* WhatsApp transmission */}

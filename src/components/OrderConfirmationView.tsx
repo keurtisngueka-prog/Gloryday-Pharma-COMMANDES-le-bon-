@@ -92,7 +92,7 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
     try {
       await downloadOrderPdf(order, pdfDataUrl || order.pdfUrl);
     } catch (error) {
-      console.error('Échec du téléchargement du bon de commande PDF.', error);
+      console.error('Échec du téléchargement de la proforma PDF.', error);
       setPdfDownloadError(true);
     } finally {
       setIsDownloadingPdf(false);
@@ -206,10 +206,10 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
       {/* PDF Actions */}
       <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-left">
         <span className="text-xs font-bold text-slate-900 block mb-2">
-          Bon de commande (PDF A4)
+          Proforma indicative (PDF A4)
         </span>
         <p className="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-[11px] leading-relaxed text-blue-900">
-          Ce document récapitule votre demande enregistrée. Il ne vaut pas facture. La facture sera établie par Gloryday Pharma après validation de la commande et du montant définitif.
+          Cette proforma récapitule votre demande enregistrée. Elle est indicative et ne vaut pas facture. Gloryday Pharma doit encore confirmer la disponibilité, le délai et le montant définitif.
         </p>
         <div className="grid grid-cols-2 gap-2">
           <button
@@ -227,13 +227,13 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
             className="h-10 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
           >
             <Eye className="w-3.5 h-3.5 text-slate-500" />
-            <span>Visualiser Bon & Visas</span>
+            <span>Visualiser la proforma</span>
           </button>
         </div>
         {pdfPreparing && <p role="status" className="mt-2 text-xs text-blue-700">Préparation du fichier PDF en cours...</p>}
         {pdfDownloadError && (
           <p role="alert" className="mt-2 text-xs font-medium text-red-700">
-            Le téléchargement du bon PDF a échoué. Réessayez dans un instant.
+            Le téléchargement de la proforma PDF a échoué. Réessayez dans un instant.
           </p>
         )}
         {pdfGenerationFailed && onRetryPdf && (

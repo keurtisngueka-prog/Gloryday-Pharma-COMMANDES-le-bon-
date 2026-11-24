@@ -115,6 +115,8 @@ export function normalizeStaffPermissions(input: unknown, fallbackRole: StaffRol
   if (expanded.has('logistics_manage')) expanded.add('logistics_view');
   if (expanded.has('receivables_payments_manage') || expanded.has('receivables_reminders_manage')) expanded.add('receivables_view');
   if (expanded.has('quotes_manage')) expanded.add('quotes_view');
+  // Commercial staff need to be able to turn a client request into a proforma-backed order.
+  if (fallbackRole === 'Commercial') expanded.add('orders_create_for_client');
   return Array.from(expanded);
 }
 
@@ -123,7 +125,7 @@ export function getDefaultStaffPermissions(role: StaffRole): StaffPermission[] {
     case 'Admin simple':
       return ['orders_view', 'orders_confirm', 'orders_cancel', 'orders_finance_view', 'payments_manage', 'clients_view', 'clients_manage', 'clients_credit_manage', 'messages_view', 'messages_send', 'logistics_view', 'logistics_manage', 'receivables_view', 'receivables_payments_manage', 'receivables_reminders_manage', 'stats_view'];
     case 'Commercial':
-      return ['orders_view', 'orders_confirm', 'orders_cancel', 'quotes_view', 'quotes_manage', 'clients_view', 'clients_manage', 'messages_view', 'messages_send', 'receivables_view', 'receivables_reminders_manage'];
+      return ['orders_view', 'orders_create_for_client', 'orders_confirm', 'orders_cancel', 'quotes_view', 'quotes_manage', 'clients_view', 'clients_manage', 'messages_view', 'messages_send', 'receivables_view', 'receivables_reminders_manage'];
     case 'Gestionnaire Catalogue':
       return ['catalog_view', 'catalog_manage', 'packs_manage', 'stock_view', 'stock_receive', 'stock_adjust', 'stock_batches_manage', 'stock_availability_manage', 'stock_costs_view', 'stock_costs_manage', 'stock_export', 'orders_view'];
     case 'Logistique':

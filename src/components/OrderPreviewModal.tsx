@@ -32,7 +32,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
             <FileText className="w-5 h-5 text-[#0d44e8]" />
             <div>
               <h3 className="font-bold text-sm sm:text-base text-slate-900 leading-tight">
-                Aperçu du bon de commande
+                Aperçu de la proforma indicative
               </h3>
               <p className="text-[11px] text-slate-500">
                 Vérifiez les articles et vos coordonnées avant transmission
@@ -62,7 +62,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
             </div>
             <div className="text-right">
               <span className="text-[10px] font-bold uppercase text-slate-400 block">Document</span>
-              <span className="text-xs font-bold text-slate-900 block">Bon de commande</span>
+              <span className="text-xs font-bold text-slate-900 block">Proforma indicative</span>
               <span className="text-[11px] text-slate-500">{new Date().toLocaleDateString('fr-FR')}</span>
             </div>
           </div>

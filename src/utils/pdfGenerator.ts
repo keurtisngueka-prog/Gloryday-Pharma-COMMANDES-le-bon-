@@ -130,7 +130,7 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
     doc.setTextColor(ink[0], ink[1], ink[2]);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
-    doc.text('BON DE COMMANDE PROVISOIRE', margin, 41);
+    doc.text('PROFORMA INDICATIVE', margin, 41);
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
     doc.roundedRect(pageWidth - 83, 32, 69, 25, 2, 2, 'FD');
@@ -154,7 +154,18 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
   const addressY = 81;
   const paymentY = addressY + addressLines.length * 4 + 1;
   const notesY = paymentY + 5;
-  const clientBoxBottom = Math.max(order.customer.secondaryPhone ? 96 : 91, notesLines.length ? notesY + notesLines.length * 4 : paymentY + 5) + 4;
+  const proformaClientName = text(order.customer.invoiceName || order.customer.facilityName || 'Établissement');
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  const proformaClientNameLines = doc.splitTextToSize(proformaClientName, 88).slice(0, 3);
+  const proformaContactY = 75 + Math.max(1, proformaClientNameLines.length) * 4 + 1;
+  const proformaPhoneY = proformaContactY + 5;
+  const proformaSecondaryPhoneY = proformaPhoneY + 5;
+  const proformaDirectorY = (order.customer.secondaryPhone ? proformaSecondaryPhoneY : proformaPhoneY) + 5;
+  const leftClientBottom = order.customer.directorName
+    ? proformaDirectorY
+    : order.customer.secondaryPhone ? proformaSecondaryPhoneY : proformaPhoneY;
+  const clientBoxBottom = Math.max(91, leftClientBottom, notesLines.length ? notesY + notesLines.length * 4 : paymentY + 5) + 4;
 
   doc.setFillColor(241, 245, 249);
   doc.roundedRect(margin, clientBoxTop, contentWidth, clientBoxBottom - clientBoxTop, 2, 2, 'F');
@@ -164,12 +175,13 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
   doc.text('CLIENT / DESTINATAIRE', leftColumnX, 68);
   doc.setFontSize(9);
   doc.setTextColor(ink[0], ink[1], ink[2]);
-  doc.text(text(order.customer.facilityName || 'Établissement'), leftColumnX, 75);
+  doc.text(proformaClientNameLines, leftColumnX, 75, { lineHeightFactor: 1.0 });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
-  doc.text(text(`Contact : ${order.customer.contactName || order.customer.facilityName}`), leftColumnX, 81);
-  doc.text(text(`Téléphone : ${order.customer.phone}`), leftColumnX, 86);
-  if (order.customer.secondaryPhone) doc.text(text(`2e téléphone : ${order.customer.secondaryPhone}`), leftColumnX, 91);
+  doc.text(text(`Contact : ${order.customer.contactName || order.customer.facilityName}`), leftColumnX, proformaContactY);
+  doc.text(text(`Téléphone : ${order.customer.phone}`), leftColumnX, proformaPhoneY);
+  if (order.customer.secondaryPhone) doc.text(text(`2e téléphone : ${order.customer.secondaryPhone}`), leftColumnX, proformaSecondaryPhoneY);
+  if (order.customer.directorName) doc.text(text(`Direction : ${order.customer.directorName}`), leftColumnX, proformaDirectorY);
   doc.setFont('helvetica', 'bold');
   doc.text(text(`Réception : ${deliveryMode}`), rightColumnX, 68);
   doc.setFont('helvetica', 'normal');
@@ -183,9 +195,11 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
-    doc.text('Article et variante', margin + 4, top + 5.5);
+    doc.text('Réf.', margin + 4, top + 5.5);
+    doc.text('Article et variante', margin + 28, top + 5.5);
     doc.text(text('Qté'), 126, top + 5.5, { align: 'center' });
-    doc.text('Prix unit. (FCFA)', 158, top + 5.5, { align: 'right' });
+    doc.text('Prix unit.', 154, top + 5.5, { align: 'right' });
+    doc.text('Remise', 179, top + 5.5, { align: 'right' });
     doc.text('Total (FCFA)', pageWidth - margin - 4, top + 5.5, { align: 'right' });
   };
 
@@ -206,7 +220,7 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
       : text(item.productName);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
-    const labelLines = doc.splitTextToSize(itemLabel || 'Article', 99);
+    const labelLines = doc.splitTextToSize(itemLabel || 'Article', 76);
     const rowHeight = Math.max(8, labelLines.length * 4.2 + 3.5);
     if (y + rowHeight > pageHeight - 28) {
       doc.addPage();
@@ -222,22 +236,26 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
     doc.line(margin, y + rowHeight, pageWidth - margin, y + rowHeight);
     doc.setTextColor(ink[0], ink[1], ink[2]);
     doc.setFont('helvetica', 'normal');
-    doc.text(labelLines, margin + 4, y + 5.2);
     const valueY = y + Math.min(rowHeight - 1.5, Math.max(5.2, rowHeight / 2 + 1));
+    doc.text(text(item.productReference || '—'), margin + 4, valueY);
+    doc.text(labelLines, margin + 28, y + 5.2);
     doc.text(String(item.quantity), 126, valueY, { align: 'center' });
     if (item.isQuote) {
       doc.setTextColor(180, 83, 9);
       doc.setFont('helvetica', 'bold');
-      doc.text('Sur devis', 158, valueY, { align: 'right' });
+      doc.text('Sur devis', 154, valueY, { align: 'right' });
+      doc.text('—', 179, valueY, { align: 'right' });
       doc.text('Sur devis', pageWidth - margin - 4, valueY, { align: 'right' });
     } else {
       const unitPrice = Number(item.price) || 0;
-      const lineTotal = Number(item.total) || unitPrice * (Number(item.quantity) || 1);
+      const lineTotal = Number.isFinite(Number(item.total)) ? Number(item.total) : unitPrice * (Number(item.quantity) || 1);
       itemsSubtotal += lineTotal;
-      totalSavings += Number(item.savings) || 0;
+      const lineSavings = Number(item.savings) || 0;
+      totalSavings += lineSavings;
       doc.setTextColor(ink[0], ink[1], ink[2]);
       doc.setFont('helvetica', 'normal');
-      doc.text(formatPdfAmount(unitPrice), 158, valueY, { align: 'right' });
+      doc.text(formatPdfAmount(unitPrice), 154, valueY, { align: 'right' });
+      doc.text(formatPdfAmount(lineSavings), 179, valueY, { align: 'right' });
       doc.text(formatPdfAmount(lineTotal), pageWidth - margin - 4, valueY, { align: 'right' });
     }
     y += rowHeight;
@@ -246,7 +264,8 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
   y += 6;
   const deliveryFee = Number(order.deliveryFee ?? order.customer.deliveryFee) || 0;
   const orderTotal = Number(order.estimatedTotal) || itemsSubtotal + deliveryFee;
-  const totalsRows = 2 + (deliveryFee > 0 ? 1 : 0) + (totalSavings > 0 ? 1 : 0);
+  const orderDiscountAmount = Math.min(totalSavings, Math.max(0, Number(order.orderDiscountAmount) || 0));
+  const totalsRows = 2 + (deliveryFee > 0 ? 1 : 0) + (totalSavings > 0 ? 1 : 0) + (orderDiscountAmount > 0 ? 1 : 0);
   const boxHeight = 8 + totalsRows * 6;
   if (y + boxHeight > pageHeight - 23) {
     doc.addPage();
@@ -271,7 +290,12 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
   if (totalSavings > 0) {
     totalY += 6;
     doc.setTextColor(5, 150, 105);
-    doc.text(text(`Remise volume incluse : -${formatPdfAmount(totalSavings)} FCFA`), totalsBoxX + 4, totalY);
+    doc.text(text(`Remises incluses : -${formatPdfAmount(totalSavings)} FCFA`), totalsBoxX + 4, totalY);
+  }
+  if (orderDiscountAmount > 0) {
+    totalY += 6;
+    doc.setTextColor(5, 150, 105);
+    doc.text(text(`Dont remise de commande : -${formatPdfAmount(orderDiscountAmount)} FCFA`), totalsBoxX + 4, totalY);
   }
   totalY += 7;
   doc.setFont('helvetica', 'bold');
@@ -397,7 +421,7 @@ export async function generateInternalPurchaseOrderPdf(
       doc.text('Sur devis', pageWidth - 18, y + 5, { align: 'right' });
     } else {
       const unitPrice = Number(item.price) || 0;
-      const lineTotal = Number(item.total) || unitPrice * (Number(item.quantity) || 1);
+      const lineTotal = Number.isFinite(Number(item.total)) ? Number(item.total) : unitPrice * (Number(item.quantity) || 1);
       doc.text(formatPdfAmount(unitPrice), 155, y + 5, { align: 'right' });
       doc.text(formatPdfAmount(lineTotal), pageWidth - 18, y + 5, { align: 'right' });
     }
@@ -523,10 +547,7 @@ export async function generateInvoiceProjectPdf(
   doc.text('NIF : 250301 T', margin, 42);
   doc.text('RCCM : GA.LBV-01 2021-A10-00629', margin, 48);
   doc.text('BP 20350 · Libreville, Gabon', margin, 54);
-  doc.text('+241 66 24 03 99 · +241 77 00 30 04', margin, 60);
   doc.setFontSize(6.9);
-  doc.text('Ecobank : 40024 000020 36188011806 64', margin, 66);
-  doc.text('Bamboo : 40021 01000 23055700201 24', margin, 72);
 
   const metaX = pageWidth - margin;
   doc.setTextColor(stampBlue[0], stampBlue[1], stampBlue[2]);
@@ -547,7 +568,19 @@ export async function generateInvoiceProjectPdf(
   }
 
   const clientTop = 76;
-  const clientHeight = 27;
+  const facilityType = order.customer.facilityType === 'Autre'
+    ? (order.customer.facilityTypeOther || 'Autre établissement')
+    : (order.customer.facilityType || 'Établissement');
+  const facilityName = text(invoice.clientFacilityName || order.customer.invoiceName || order.customer.facilityName || 'Établissement');
+  const facilityNameWithoutType = facilityName.toLocaleLowerCase().startsWith(text(facilityType).toLocaleLowerCase())
+    ? facilityName.slice(text(facilityType).length).trim()
+    : facilityName;
+  doc.setFont('times', 'bold');
+  doc.setFontSize(8.4);
+  const facilityNameLines = doc.splitTextToSize(facilityNameWithoutType || facilityName, 64).slice(0, 3);
+  const contactY = clientTop + 13 + Math.max(1, facilityNameLines.length) * 3.5 + 3.5;
+  const directorY = contactY + 6;
+  const clientHeight = Math.max(33, (order.customer.directorName ? directorY : contactY) + 5 - clientTop);
   doc.setFillColor(pale[0], pale[1], pale[2]);
   doc.setDrawColor(rule[0], rule[1], rule[2]);
   doc.setLineWidth(0.25);
@@ -557,24 +590,21 @@ export async function generateInvoiceProjectPdf(
   doc.setTextColor(stampBlue[0], stampBlue[1], stampBlue[2]);
   doc.text('CLIENT / DESTINATAIRE', margin + 4, clientTop + 6);
   doc.text('CONTACT ET LIVRAISON', margin + 105, clientTop + 6);
-  const facilityType = order.customer.facilityType === 'Autre'
-    ? (order.customer.facilityTypeOther || 'Autre établissement')
-    : (order.customer.facilityType || 'Établissement');
-  const facilityName = text(invoice.clientFacilityName || order.customer.facilityName || 'Établissement');
-  const facilityNameWithoutType = facilityName.toLocaleLowerCase().startsWith(text(facilityType).toLocaleLowerCase())
-    ? facilityName.slice(text(facilityType).length).trim()
-    : facilityName;
   doc.setFont('times', 'bold');
   doc.setFontSize(7.5);
   doc.setTextColor(stampBlue[0], stampBlue[1], stampBlue[2]);
   doc.text(text(facilityType).toUpperCase(), margin + 4, clientTop + 13);
   doc.setFont('times', 'bold');
-  doc.setFontSize(9);
   doc.setTextColor(ink[0], ink[1], ink[2]);
-  doc.text(facilityNameWithoutType || facilityName, margin + 34, clientTop + 13, { maxWidth: 64 });
+  doc.setFontSize(8.4);
+  doc.text(facilityNameLines, margin + 34, clientTop + 13, { lineHeightFactor: 1.0 });
   doc.setFont('times', 'normal');
   doc.setFontSize(8);
-  doc.text(text(`Responsable : ${order.customer.contactName || 'Non renseigné'}`), margin + 4, clientTop + 20);
+  doc.text(text(`Responsable : ${order.customer.contactName || 'Non renseigné'}`), margin + 4, contactY);
+  if (order.customer.directorName) {
+    doc.setFontSize(7.5);
+    doc.text(text(`Direction : ${order.customer.directorName}`), margin + 4, directorY);
+  }
   const phones = [order.customer.phone, order.customer.secondaryPhone].filter(Boolean).join(' · ');
   doc.text(text(`Tél. : ${phones || 'Non renseigné'}`), margin + 105, clientTop + 13, { maxWidth: contentWidth - 109 });
   doc.text(text(`Adresse : ${order.customer.deliveryAddress || 'Non renseignée'}`), margin + 105, clientTop + 20, { maxWidth: contentWidth - 109 });
@@ -605,15 +635,16 @@ export async function generateInvoiceProjectPdf(
     x.forEach((edge) => doc.line(edge, top, edge, top + 8));
   };
 
-  const includeStamp = invoice.includeStamp !== false;
+  const includeStamp = invoice.includeStamp === true;
   const finalContentReserve = includeStamp ? 108 : 76;
   const finalContentLimit = pageHeight - finalContentReserve;
-  let y = 108;
+  let y = clientTop + clientHeight + 5;
   drawTableHeader(y);
   y += 8;
   const invoiceItems = invoice.lineItems?.length
     ? invoice.lineItems.map((item) => ({
         productId: item.productId,
+        productReference: item.productReference || order.items.find((orderItem) => orderItem.productId === item.productId)?.productReference,
         productName: item.productName,
         variant: item.variant,
         quantity: item.quantity,
@@ -647,7 +678,7 @@ export async function generateInvoiceProjectPdf(
     doc.setTextColor(ink[0], ink[1], ink[2]);
     doc.setFont('times', 'normal');
     doc.setFontSize(8.3);
-    doc.text(text(item.productId ? item.productId.slice(-8).toUpperCase() : `L${index + 1}`), referenceX, y + 6.2);
+    doc.text(text(item.productReference || '—'), referenceX, y + 6.2);
     doc.setFontSize(9);
     doc.text(labelLines, designationX, y + 6.2, { lineHeightFactor: 1.1 });
     const valueY = y + Math.min(rowHeight - 2, Math.max(6.2, rowHeight / 2 + 1.2));
@@ -660,7 +691,7 @@ export async function generateInvoiceProjectPdf(
       doc.text('Sur devis', totalX, valueY, { align: 'right' });
     } else {
       const unitPrice = Number(item.price) || 0;
-      const lineTotal = Number(item.total) || unitPrice * (Number(item.quantity) || 1);
+      const lineTotal = Number.isFinite(Number(item.total)) ? Number(item.total) : unitPrice * (Number(item.quantity) || 1);
       doc.text(formatPdfAmount(unitPrice), unitPriceX, valueY, { align: 'right' });
       doc.text(formatPdfAmount(Number(item.savings) || 0), discountX, valueY, { align: 'right' });
       doc.text(formatPdfAmount(lineTotal), totalX, valueY, { align: 'right' });
@@ -784,7 +815,6 @@ export async function generateInvoiceProjectPdf(
   doc.setFontSize(6.1);
   doc.text(text('Consommables, r\u00e9actifs, \u00e9quipements m\u00e9dicaux'), stampX + stampWidth / 2, stampY + 14.5, { align: 'center' });
   doc.setFontSize(6.4);
-  doc.text('+241 77 00 30 04 / +241 66 24 03 99', stampX + stampWidth / 2, stampY + 20, { align: 'center' });
   }
   const pageCount = doc.getNumberOfPages();
   for (let page = 1; page <= pageCount; page += 1) {
@@ -982,7 +1012,7 @@ export async function downloadDeliveryNotePdf(order: Order): Promise<void> {
 }
 
 export async function downloadOrderPdf(order: Order, existingDataUrl?: string): Promise<void> {
-  const filename = `Bon_de_Commande_${order.reference}.pdf`;
+  const filename = `Proforma_${order.reference}.pdf`;
   if (existingDataUrl) {
     try {
       triggerPdfBlobDownload(existingDataUrl, filename);

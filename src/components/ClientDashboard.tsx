@@ -495,12 +495,16 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
               </div>
 
               <div className="flex items-center gap-3 text-xs text-slate-300 mt-1 flex-wrap">
-                {currentUser?.phone && (
+                {(currentUser?.companyPhone || currentUser?.phone) && (
                   <span className="flex items-center gap-1 text-slate-300">
                     <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
-                    WhatsApp : <strong className="tabular-nums">{currentUser.phone}</strong>
+                    Téléphone entreprise : <strong className="tabular-nums">{currentUser.companyPhone || currentUser.phone}</strong>
                   </span>
                 )}
+                {currentUser?.phone && (
+                  <span className="text-slate-400">Connexion : <strong className="tabular-nums">{currentUser.phone}</strong></span>
+                )}
+                {currentUser?.directorName && <span className="text-slate-300">Direction : <strong>{currentUser.directorName}</strong></span>}
                 {currentUser?.deliveryAddress && (
                   <span className="flex items-center gap-1 text-slate-300">
                     <MapPin className="w-3.5 h-3.5 text-blue-400" />
@@ -1501,7 +1505,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                       {order.status !== 'Annulée' && (
                         <div className={`text-xs font-semibold ${collectionOverdue ? 'text-rose-700' : 'text-slate-600'}`}>
                           {deliveryTrackingActive ? 'Total facturé à date' : 'Total commande'} : {(deliveryTrackingActive ? billingTotal : order.estimatedTotal).toLocaleString('fr-FR')} FCFA · Confirmé/encaissé : {paidAmount.toLocaleString('fr-FR')} FCFA · Solde restant : {remainingBalance.toLocaleString('fr-FR')} FCFA
-                          {deliveryTrackingActive && <span className="block mt-0.5 text-slate-500">Montant initial du bon de commande : {order.estimatedTotal.toLocaleString('fr-FR')} FCFA. Les articles non remis ne sont pas facturés.</span>}
+                          {deliveryTrackingActive && <span className="block mt-0.5 text-slate-500">Montant initial de la proforma : {order.estimatedTotal.toLocaleString('fr-FR')} FCFA. Les articles non remis ne sont pas facturés.</span>}
                           {order.collectionDueDate && remainingBalance > 0 && (
                             <span className="block mt-0.5">
                               {collectionOverdue ? 'Échéance de recouvrement dépassée : ' : 'Échéance de recouvrement : '}{formatCollectionDueDate(order.collectionDueDate)}

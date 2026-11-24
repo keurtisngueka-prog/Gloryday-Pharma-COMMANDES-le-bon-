@@ -303,7 +303,7 @@ export const generateDraftWhatsAppUrl = (
 };
 
 /**
- * Generate an offline draft PDF Bon de Commande directly in the browser
+ * Generate an offline draft proforma directly in the browser
  */
 export const generateDraftPdf = async (draft: OrderDraft): Promise<{ blob: Blob; dataUrl: string }> => {
   const { jsPDF } = await import('jspdf');
@@ -355,7 +355,7 @@ export const generateDraftPdf = async (draft: OrderDraft): Promise<{ blob: Blob;
   doc.setTextColor(graphite[0], graphite[1], graphite[2]);
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text(draft.name || 'BROUILLON DE COMMANDE', 14, 50);
+  doc.text(draft.name || 'BROUILLON DE PROFORMA', 14, 50);
 
   // Draft info Box
   doc.setFillColor(248, 250, 252);

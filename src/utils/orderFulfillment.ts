@@ -10,6 +10,18 @@ export function getOrderDeliveredQuantity(order: Pick<Order, 'deliveryFulfillmen
   ));
 }
 
+export function getOrderSoldWithoutStockReservationQuantity(order: Pick<Order, 'deliveryFulfillments'>, itemIndex: number): number {
+  return Math.max(0, (order.deliveryFulfillments || []).reduce(
+    (sum, fulfillment) => sum + (fulfillment.lines || []).reduce(
+      (lineSum, line) => line.itemIndex === itemIndex && line.soldWithoutStockReservation === true
+        ? lineSum + Math.max(0, Math.trunc(Number(line.quantity) || 0))
+        : lineSum,
+      0,
+    ),
+    0,
+  ));
+}
+
 export function getOrderRemainingQuantity(order: Pick<Order, 'items' | 'deliveryFulfillments'>, itemIndex: number): number {
   const ordered = Math.max(0, Math.trunc(Number(order.items[itemIndex]?.quantity) || 0));
   return Math.max(0, ordered - getOrderDeliveredQuantity(order, itemIndex));
@@ -33,18 +45,33 @@ export function getInvoiceReadyLineItems(order: Order): InvoiceLineItem[] {
 
   return order.items.flatMap((item, itemIndex) => {
     const delivered = trackedDeliveries ? getOrderDeliveredQuantity(order, itemIndex) : Math.max(0, Math.trunc(Number(item.quantity) || 0));
-    const quantity = Math.max(0, delivered - (billedByIndex.get(itemIndex) || 0));
-    if (!quantity || item.isQuote || item.isDeferredStock) return [];
+    const billableDelivered = item.isDeferredStock
+      ? getOrderSoldWithoutStockReservationQuantity(order, itemIndex)
+      : delivered;
+    const quantity = Math.max(0, billableDelivered - (billedByIndex.get(itemIndex) || 0));
+    if (!quantity || item.isQuote) return [];
     const unitPrice = Math.max(0, Math.trunc(Number(item.price) || 0));
+    const orderedQuantity = Math.max(1, Math.trunc(Number(item.quantity) || 0));
+    const storedOrderTotal = Number(item.total);
+    const orderLineTotal = Number.isFinite(storedOrderTotal)
+      ? Math.max(0, Math.trunc(storedOrderTotal))
+      : unitPrice * orderedQuantity;
+    const previouslyBilledQuantity = Math.max(0, billedByIndex.get(itemIndex) || 0);
+    const lineTotal = Math.round(orderLineTotal * (previouslyBilledQuantity + quantity) / orderedQuantity)
+      - Math.round(orderLineTotal * previouslyBilledQuantity / orderedQuantity);
+    const storedSavings = Math.max(0, Math.trunc(Number(item.savings) || 0));
+    const lineSavings = Math.round(storedSavings * (previouslyBilledQuantity + quantity) / orderedQuantity)
+      - Math.round(storedSavings * previouslyBilledQuantity / orderedQuantity);
     return [{
       itemIndex,
       productId: item.productId,
+      productReference: item.productReference,
       productName: item.productName,
       variant: item.variant,
       quantity,
       unitPrice,
-      lineTotal: unitPrice * quantity,
-      savings: Math.round((Math.max(0, Number(item.savings) || 0) * quantity) / Math.max(1, item.quantity)),
+      lineTotal,
+      savings: lineSavings,
       discountPercent: item.discountPercent,
       isQuote: item.isQuote,
     }];

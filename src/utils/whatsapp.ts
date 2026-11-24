@@ -70,7 +70,7 @@ export function formatOrderWhatsAppMessage(order: Order, pdfLink?: string): stri
           : null;
       if (!fullPdfUrl) throw new Error('Le PDF n’est pas accessible publiquement.');
       lines.push('');
-      lines.push(`📑 *Bon de commande PDF :* ${fullPdfUrl}`);
+      lines.push(`📑 *Proforma PDF :* ${fullPdfUrl}`);
     } catch {
       // A bad or unavailable PDF URL must never block the WhatsApp order message.
     }

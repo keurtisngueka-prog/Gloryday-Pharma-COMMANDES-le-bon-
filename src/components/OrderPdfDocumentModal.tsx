@@ -38,7 +38,7 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
     : createdAt.toLocaleDateString('fr-FR');
 
   const itemsSubtotal = (order.items || []).reduce(
-    (sum, item) => sum + (item.isQuote ? 0 : (Number(item.total) || Number(item.price) * Number(item.quantity))),
+    (sum, item) => sum + (item.isQuote ? 0 : (Number.isFinite(Number(item.total)) ? Number(item.total) : Number(item.price) * Number(item.quantity))),
     0
   );
   const totalSavings = (order.items || []).reduce(
@@ -55,7 +55,7 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
     try {
       await downloadOrderPdf(order, pdfDataUrl || order.pdfUrl);
     } catch (error) {
-      console.error('Échec du téléchargement du bon de commande PDF.', error);
+      console.error('Échec du téléchargement de la proforma PDF.', error);
       setPdfError('Le téléchargement du bon PDF a échoué. Réessayez dans un instant.');
     } finally {
       setDownloadingOrder(false);
@@ -90,10 +90,10 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
             </div>
             <div>
               <h3 className="text-xs sm:text-sm font-black text-slate-900">
-                Bon de Commande PDF — {order.reference}
+                Proforma PDF — {order.reference}
               </h3>
               <p className="text-[11px] text-slate-500">
-                {order.customer.facilityName} · {orderTotal.toLocaleString('fr-FR')} FCFA
+                {order.customer.invoiceName || order.customer.facilityName} · {orderTotal.toLocaleString('fr-FR')} FCFA
               </p>
             </div>
           </div>
@@ -107,7 +107,7 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
                   docMode === 'order' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Bon de Commande
+                Proforma
               </button>
               <button
                 type="button"
@@ -194,7 +194,7 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
                     Document Officiel A4
                   </span>
                   <h4 className="text-base sm:text-lg font-black text-slate-900">
-                    {docMode === 'order' ? 'BON DE COMMANDE PROVISOIRE' : 'BON POUR ACCORD & ENGAGEMENT'}
+                    {docMode === 'order' ? 'PROFORMA INDICATIVE' : 'BON POUR ACCORD & ENGAGEMENT'}
                   </h4>
                 </div>
                 <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs space-y-0.5 sm:text-right">
@@ -212,7 +212,7 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
                     Client / Destinataire
                   </span>
                   <div className="font-bold text-slate-900 text-sm">
-                    {order.customer.facilityName || 'Établissement'}
+                    {order.customer.invoiceName || order.customer.facilityName || 'Établissement'}
                   </div>
                   <div className="text-slate-600">
                     Contact : <strong className="text-slate-800">{order.customer.contactName || order.customer.facilityName}</strong>
@@ -264,13 +264,14 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
                       <th className="py-2.5 px-3">Article et variante</th>
                       <th className="py-2.5 px-3 text-center">Qté</th>
                       <th className="py-2.5 px-3 text-right">Prix unit. (FCFA)</th>
+                      <th className="py-2.5 px-3 text-right">Remise (FCFA)</th>
                       <th className="py-2.5 px-3 text-right">Total (FCFA)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
                     {(order.items || []).map((item, idx) => {
                       const unitPrice = Number(item.price) || 0;
-                      const lineTotal = Number(item.total) || unitPrice * (Number(item.quantity) || 1);
+                      const lineTotal = Number.isFinite(Number(item.total)) ? Number(item.total) : unitPrice * (Number(item.quantity) || 1);
                       return (
                         <tr key={idx} className={idx % 2 === 1 ? 'bg-slate-50/70' : 'bg-white'}>
                           <td className="py-2.5 px-3">
@@ -288,6 +289,9 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
                             ) : (
                               unitPrice.toLocaleString('fr-FR')
                             )}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-emerald-700 tabular-nums">
+                            {item.isQuote ? '—' : (Number(item.savings) || 0).toLocaleString('fr-FR')}
                           </td>
                           <td className="py-2.5 px-3 text-right font-bold text-slate-900 tabular-nums">
                             {item.isQuote ? (
@@ -328,10 +332,18 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
                     </div>
                   )}
                   {totalSavings > 0 && (
-                    <div className="flex justify-between text-emerald-700 font-bold">
-                      <span>Remise volume incluse</span>
-                      <span className="tabular-nums">-{totalSavings.toLocaleString('fr-FR')} FCFA</span>
-                    </div>
+                    <>
+                      <div className="flex justify-between text-emerald-700 font-bold">
+                        <span>Remises incluses</span>
+                        <span className="tabular-nums">-{totalSavings.toLocaleString('fr-FR')} FCFA</span>
+                      </div>
+                      {Number(order.orderDiscountAmount) > 0 && (
+                        <div className="flex justify-between pl-2 text-[10px] font-semibold text-emerald-700">
+                          <span>Dont remise de commande</span>
+                          <span className="tabular-nums">-{Math.min(totalSavings, Number(order.orderDiscountAmount)).toLocaleString('fr-FR')} FCFA</span>
+                        </div>
+                      )}
+                    </>
                   )}
                   <div className="pt-2 border-t border-slate-200 flex justify-between items-baseline">
                     <span className="font-black text-[#0d44e8] uppercase text-xs">Total Estimé</span>

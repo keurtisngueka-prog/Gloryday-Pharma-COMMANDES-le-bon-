@@ -58,6 +58,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 }) => {
   const [mode, setMode] = useState<'guest_choice' | 'login' | 'register' | 'admin' | 'google_complete' | 'recover'>(initialMode);
   const [phone, setPhone] = useState('');
+  const [companyPhone, setCompanyPhone] = useState('');
+  const [invoiceName, setInvoiceName] = useState('');
+  const [directorName, setDirectorName] = useState('');
   const [contactName, setContactName] = useState('');
   const [facilityName, setFacilityName] = useState('');
   const [facilityType, setFacilityType] = useState<FacilityType>('Clinique');
@@ -209,6 +212,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         avatarUrl: googleProfile.avatarUrl,
         facilityName: facilityName.trim(),
         phone: phone.trim(),
+        companyPhone: companyPhone.trim() || undefined,
+        invoiceName: invoiceName.trim() || undefined,
+        directorName: directorName.trim() || undefined,
         contactName: contactName.trim() || googleProfile.name,
         facilityType,
         deliveryAddress: buildNeighborhoodDeliveryAddress(neighborhoodId, deliveryAddress),
@@ -246,6 +252,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setLoading(true);
       const res = await api.register({
         phone,
+        companyPhone: companyPhone.trim() || undefined,
+        invoiceName: invoiceName.trim() || undefined,
+        directorName: directorName.trim() || undefined,
         facilityName,
         contactName,
         facilityType,
@@ -387,13 +396,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           >
             <X className="w-4 h-4" />
           </button>
-          <div className="w-9 h-9 rounded-xl bg-[#0d44e8] flex items-center justify-center mb-2 text-white font-bold text-sm">
-            +
+          <div className="flex items-center gap-3 pr-8">
+            <img
+              src="/gloryday-logo.png"
+              alt="Logo Gloryday Pharma"
+              className="h-16 w-16 shrink-0 rounded-xl bg-white object-contain p-1"
+              decoding="async"
+            />
+            <div className="min-w-0">
+              <h2 id="auth-modal-title" className="text-base sm:text-lg font-bold tracking-tight">Gloryday Pharma Gabon</h2>
+              <p id="auth-modal-description" className="text-xs text-slate-400 mt-0.5">
+                Commandes médicales pour cliniques, hôpitaux & officines
+              </p>
+            </div>
           </div>
-          <h2 id="auth-modal-title" className="text-base sm:text-lg font-bold tracking-tight">Gloryday Pharma Gabon</h2>
-          <p id="auth-modal-description" className="text-xs text-slate-400 mt-0.5">
-            Commandes médicales pour cliniques, hôpitaux & officines
-          </p>
         </div>
 
         {/* Content Body */}
@@ -585,7 +601,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                 <div>
                   <label htmlFor="google-phone" className="block font-bold text-slate-700 uppercase mb-1">
-                    Téléphone WhatsApp *
+                    Téléphone de connexion *
                   </label>
                   <PhoneNumberInput id="google-phone" required value={phone} onChange={setPhone} className="text-xs" />
                 </div>
@@ -593,7 +609,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
               <div>
                 <label htmlFor="google-contact-name" className="block font-bold text-slate-700 uppercase mb-1">
-                  Nom du responsable / Contact
+                  Contact opérationnel
                 </label>
                 <input
                   id="google-contact-name"
@@ -603,6 +619,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   onChange={(e) => setContactName(e.target.value)}
                   className="w-full p-2 rounded-xl border border-slate-300 text-xs bg-white"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label htmlFor="google-director-name" className="block font-bold text-slate-700 uppercase mb-1">Propriétaire / directeur général</label>
+                  <input id="google-director-name" type="text" maxLength={120} value={directorName} onChange={(e) => setDirectorName(e.target.value)} className="w-full p-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                </div>
+                <div>
+                  <label htmlFor="google-invoice-name" className="block font-bold text-slate-700 uppercase mb-1">Nom court sur facture</label>
+                  <input id="google-invoice-name" type="text" maxLength={120} value={invoiceName} onChange={(e) => setInvoiceName(e.target.value)} className="w-full p-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                </div>
+              </div>
+              <div>
+                <label htmlFor="google-company-phone" className="block font-bold text-slate-700 uppercase mb-1">Téléphone de l’entreprise / WhatsApp</label>
+                <PhoneNumberInput id="google-company-phone" value={companyPhone} onChange={setCompanyPhone} className="text-xs" />
               </div>
 
               <div>
@@ -689,7 +720,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
               <div>
                 <label htmlFor="login-phone" className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Numéro de téléphone
+                  Téléphone de connexion
                 </label>
                 <PhoneNumberInput id="login-phone" required value={phone} onChange={setPhone} placeholder="77 00 30 04" />
               </div>
@@ -863,7 +894,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
               <div>
                 <label htmlFor="register-contact-name" className="block font-bold text-slate-700 uppercase mb-0.5">
-                  Responsable / Contact
+                  Contact opérationnel
                 </label>
                 <input
                   id="register-contact-name"
@@ -875,11 +906,48 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 />
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label htmlFor="register-director-name" className="block font-bold text-slate-700 uppercase mb-0.5">
+                    Propriétaire / directeur général
+                  </label>
+                  <input
+                    id="register-director-name"
+                    type="text"
+                    maxLength={120}
+                    value={directorName}
+                    onChange={(e) => setDirectorName(e.target.value)}
+                    className="w-full p-2 rounded-xl border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="register-invoice-name" className="block font-bold text-slate-700 uppercase mb-0.5">
+                    Nom court sur facture
+                  </label>
+                  <input
+                    id="register-invoice-name"
+                    type="text"
+                    maxLength={120}
+                    placeholder="Facultatif"
+                    value={invoiceName}
+                    onChange={(e) => setInvoiceName(e.target.value)}
+                    className="w-full p-2 rounded-xl border border-slate-300"
+                  />
+                </div>
+              </div>
+
               <div>
                 <label htmlFor="register-phone" className="block font-bold text-slate-700 uppercase mb-0.5">
-                  Téléphone WhatsApp *
+                  Téléphone de connexion au compte *
                 </label>
                 <PhoneNumberInput id="register-phone" required value={phone} onChange={setPhone} placeholder="77 00 30 04" />
+              </div>
+              <div>
+                <label htmlFor="register-company-phone" className="block font-bold text-slate-700 uppercase mb-0.5">
+                  Téléphone de l’entreprise / WhatsApp
+                </label>
+                <PhoneNumberInput id="register-company-phone" value={companyPhone} onChange={setCompanyPhone} placeholder="Numéro public de la structure" />
+                <p className="mt-1 text-[10px] text-slate-500">Ce numéro apparaîtra sur les commandes et les factures. Il peut être différent du téléphone de connexion.</p>
               </div>
               <div>
                 <div className="flex items-center justify-between mb-0.5">

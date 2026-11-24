@@ -41,7 +41,7 @@ export const LIBREVILLE_ZONE_GROUPS: LibrevilleZoneGroup[] = [
         estimatedText: '30 à 40 minutes (Express)',
         landmarkExample: 'Près de la Mairie Centrale ou Bd Triomphal',
         isExpressEligible: true,
-        baseDeliveryFee: 0,
+        baseDeliveryFee: 3000,
         defaultCoordinates: { lat: 0.3924, lng: 9.4536 }
       },
       {

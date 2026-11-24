@@ -20,7 +20,8 @@ import type {
   StockMovement,
   OperatingExpense,
   CollectionReminder,
-  OrderDraft
+  OrderDraft,
+  ClientRecord
 } from '../types.js';
 
 const INITIAL_PRODUCT_IMAGES = new Map<string, string>();
@@ -63,6 +64,7 @@ export interface PersistentServerStore {
   stockMovements?: StockMovement[];
   stockBatches?: StockBatch[];
   accounts: StoredUserAccount[];
+  clientRecords?: ClientRecord[];
   staffAccounts: ManagedStaffAccount[];
   quotes: CommercialQuote[];
   messages: DirectMessage[];
@@ -816,6 +818,7 @@ export class SupabaseStorePersistence {
     const runtimeRows = rows(runtimeSettingsResult.data);
     const volumeDiscountRow = runtimeRows.find((r) => r.setting_key === 'volume_discounts');
     const courierDirectoryRow = runtimeRows.find((r) => r.setting_key === 'couriers_directory');
+    const clientDirectoryRow = runtimeRows.find((r) => r.setting_key === 'client_directory');
     const remoteVolumeDiscounts = volumeDiscountRow?.setting_value
       ? (volumeDiscountRow.setting_value as VolumeDiscountSettings)
       : local.volumeDiscounts;
@@ -826,6 +829,11 @@ export class SupabaseStorePersistence {
       ? [{ ...order.courier, id: order.courier.courierId || `historic-${normalizeCourierPhone(order.courier.phone)}`, active: true }]
       : []);
     const remoteCouriers = mergeCourierDirectories(couriersFromOrders, savedCouriers);
+    const remoteClientRecords = Array.isArray(clientDirectoryRow?.setting_value)
+      ? (clientDirectoryRow.setting_value as ClientRecord[]).filter((record) =>
+          record && typeof record.id === 'string' && typeof record.facilityName === 'string'
+        )
+      : [];
 
     const mergedStaffLogs = mergeById(remoteActivityLogs, local.staffLogs || [], (item) => item.id)
       .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
@@ -838,6 +846,7 @@ export class SupabaseStorePersistence {
       stockMovements: local.stockMovements || [],
       stockBatches: local.stockBatches || [],
       accounts: mergeById(remoteAccounts, local.accounts, (item) => item.user.id),
+      clientRecords: mergeById(remoteClientRecords, local.clientRecords || [], (item) => item.id),
       staffAccounts: mergeById(remoteStaffAccounts, local.staffAccounts || [], (item) => item.id),
       quotes: mergeById(remoteQuotes, local.quotes, (item) => item.id),
       messages: mergeById(remoteMessages, local.messages, (item) => item.id),
@@ -855,6 +864,7 @@ export class SupabaseStorePersistence {
       packs: remotePacks,
       orders: remoteOrders,
       accounts: remoteAccounts,
+      clientRecords: remoteClientRecords,
       staffAccounts: remoteStaffAccounts,
       quotes: remoteQuotes,
       messages: remoteMessages,
@@ -1643,6 +1653,7 @@ export class SupabaseStorePersistence {
         || numberOr(previous.purchasePrice) !== numberOr(product.purchasePrice)
         || previous.purchasePriceVerified !== product.purchasePriceVerified;
       const extra = {
+        reference: product.reference,
         specialty: product.specialty,
         specifications: product.specifications,
         thumbnailUrl: product.thumbnailUrl,
@@ -1782,6 +1793,15 @@ export class SupabaseStorePersistence {
       }, { onConflict: 'setting_key' });
       if (this.isMissingTableError(error, 'app_runtime_settings')) return;
       assertNoError('enregistrement de l’annuaire des coursiers', error);
+    }
+    if (!same(this.baseline?.clientRecords || [], store.clientRecords || [])) {
+      const { error } = await this.client.from('app_runtime_settings').upsert({
+        setting_key: 'client_directory',
+        setting_value: store.clientRecords || [],
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'setting_key' });
+      if (this.isMissingTableError(error, 'app_runtime_settings')) return;
+      assertNoError('enregistrement du répertoire clients', error);
     }
   }
 

@@ -108,6 +108,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   canManageStock = true,
   canManagePurchasePrice = true
 }) => {
+  const [reference, setReference] = useState(initialProduct?.reference || '');
   const [name, setName] = useState(initialProduct?.name || '');
   const [category, setCategory] = useState(initialProduct?.category || 'Consommables médicaux');
   const [subcategory, setSubcategory] = useState(initialProduct?.subcategory || 'Seringues et perfusion');
@@ -193,6 +194,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       return;
     }
     setName(initialProduct?.name || '');
+    setReference(initialProduct?.reference || '');
     setCategory(initialProduct?.category || 'Consommables médicaux');
     setSubcategory(initialProduct?.subcategory || 'Seringues et perfusion');
     setDescription(initialProduct?.description || '');
@@ -434,6 +436,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       }
 
       const productPayload: Partial<Product> = {
+        reference: reference.trim().slice(0, 40) || undefined,
         name: name.trim(),
         category,
         subcategory: category === 'Consommables médicaux' ? subcategory : undefined,
@@ -506,6 +509,20 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit} className="min-h-0 p-5 overflow-y-auto space-y-4 flex-1 text-xs">
+          <div>
+            <label className="block font-bold text-slate-700 uppercase mb-1">
+              Référence catalogue / facture
+            </label>
+            <input
+              type="text"
+              maxLength={40}
+              placeholder="Ex. GP 326"
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              className="w-full p-2.5 rounded-xl border border-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-[#0d44e8]"
+            />
+            <p className="mt-1 text-[10px] text-slate-500">Cette référence apparaîtra sur la facture. Renseignez le code officiel du produit.</p>
+          </div>
           <div>
             <label className="block font-bold text-slate-700 uppercase mb-1">
               Désignation de l'article *

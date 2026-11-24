@@ -31,6 +31,8 @@ export interface ProductVariant {
 
 export interface Product {
   id: string;
+  /** Human-readable catalogue code, for example GP 326. */
+  reference?: string;
   name: string;
   category: string;
   subcategory?: string;
@@ -80,6 +82,7 @@ export interface Pack {
 
 export interface CartItem {
   productId: string;
+  productReference?: string;
   productName: string;
   category: string;
   variant: string;
@@ -114,10 +117,13 @@ export interface MobilePaymentDetails {
 
 export interface CustomerInfo {
   facilityName: string;
+  invoiceName?: string;
   facilityType?: FacilityType;
   facilityTypeOther?: string;
   contactName: string;
+  directorName?: string;
   phone: string;
+  companyPhone?: string;
   secondaryPhone?: string;
   deliveryAddress: string;
   neighborhoodId?: string;
@@ -134,6 +140,7 @@ export interface CustomerInfo {
 
 export interface OrderItem {
   productId: string;
+  productReference?: string;
   productName: string;
   category?: string;
   variant: string;
@@ -146,11 +153,15 @@ export interface OrderItem {
   stockReservedQuantity?: number;
   discountPercent?: number;
   savings?: number;
+  /** Share of an order-wide discount distributed across this line. */
+  orderDiscountShare?: number;
 }
 
 export interface DeliveryFulfillmentLine {
   itemIndex: number;
   quantity: number;
+  /** Explicitly records fulfillment without reducing inventory reserved at checkout. */
+  soldWithoutStockReservation?: boolean;
 }
 
 export interface DeliveryFulfillment {
@@ -179,6 +190,7 @@ export interface ClientRemainderRequest {
 export interface InvoiceLineItem {
   itemIndex: number;
   productId: string;
+  productReference?: string;
   productName: string;
   variant: string;
   quantity: number;
@@ -314,12 +326,19 @@ export interface Order {
   idempotencyKey?: string;
   createdAt: string;
   userId?: string;
+  /** Stable client directory identity, including before a login account exists. */
+  clientRecordId?: string;
   createdByUserId?: string;
   createdByName?: string;
   createdByRole?: AppRole;
   customer: CustomerInfo;
   items: OrderItem[];
   estimatedTotal: number;
+  orderDiscountAmount?: number;
+  orderDiscountType?: 'percent' | 'amount';
+  orderDiscountValue?: number;
+  orderDiscountUpdatedAt?: string;
+  orderDiscountUpdatedBy?: string;
   hasQuoteItems: boolean;
   status: OrderStatus;
   cancellationReason?: string;
@@ -348,6 +367,18 @@ export interface Order {
   deliveryFee?: number;
   lastWhatsAppNotifiedStage?: string;
   whatsappLogs?: WhatsAppNotificationLog[];
+}
+
+export interface OrderDiscountSummary {
+  baseSubtotal: number;
+  currentDiscountAmount: number;
+  discountType?: 'percent' | 'amount';
+  discountValue?: number;
+  deliveryMode: CustomerInfo['deliveryMode'];
+  neighborhoodId?: string;
+  baseDeliveryFee: number;
+  hasInvoice: boolean;
+  isCancelled: boolean;
 }
 
 export interface WhatsAppNotificationLog {
@@ -473,10 +504,14 @@ export interface PurchaseOrder {
 
 export interface User {
   id: string;
+  /** Login identifier. Kept separate from the facility's public contact number. */
   phone: string;
+  companyPhone?: string;
   secondaryPhone?: string;
   facilityName: string;
+  invoiceName?: string;
   contactName?: string;
+  directorName?: string;
   facilityType?: FacilityType;
   facilityTypeOther?: string;
   role: AppRole;
@@ -508,6 +543,25 @@ export interface User {
   permissions?: StaffPermission[];
 }
 
+export interface ClientRecord {
+  id: string;
+  facilityName: string;
+  invoiceName?: string;
+  facilityType?: FacilityType;
+  facilityTypeOther?: string;
+  contactName: string;
+  directorName?: string;
+  companyPhone: string;
+  secondaryPhone?: string;
+  city?: string;
+  deliveryAddress?: string;
+  deliveryInstructions?: string;
+  linkedUserId?: string;
+  assignedToCommercialId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CommercialQuote {
   id: string;
   reference: string; // DEV-2026-0001
@@ -516,6 +570,7 @@ export interface CommercialQuote {
   commercialId: string;
   commercialName: string;
   customerId: string;
+  clientRecordId?: string;
   customer: CustomerInfo;
   items: OrderItem[];
   subtotal: number;

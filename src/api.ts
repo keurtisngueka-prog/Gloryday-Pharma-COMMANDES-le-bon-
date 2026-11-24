@@ -2,6 +2,7 @@ import {
   Product, 
   Pack, 
   Order, 
+  OrderDiscountSummary,
   User, 
   AppNotification, 
   AdminStats, 
@@ -10,6 +11,7 @@ import {
   MediaItem, 
   CommercialQuote, 
   DirectMessage,
+  ClientRecord,
   AppRole,
   DeliveryStage,
   CourierInfo,
@@ -329,6 +331,9 @@ export const api = {
 
   async register(registrationData: {
     phone: string;
+    companyPhone?: string;
+    invoiceName?: string;
+    directorName?: string;
     facilityName: string;
     contactName?: string;
     facilityType?: string;
@@ -346,7 +351,7 @@ export const api = {
   },
 
   async updateClientProfile(profileData: Partial<Pick<User,
-    'facilityName' | 'contactName' | 'secondaryPhone' | 'facilityType' | 'facilityTypeOther' |
+    'facilityName' | 'invoiceName' | 'directorName' | 'companyPhone' | 'contactName' | 'secondaryPhone' | 'facilityType' | 'facilityTypeOther' |
     'neighborhoodId' | 'deliveryInstructions'
   >> & { avatarUrl?: string | null }): Promise<{ user: User }> {
     return request<{ user: User }>('/api/auth/profile', {
@@ -385,6 +390,9 @@ export const api = {
     avatarUrl?: string;
     facilityName: string;
     phone: string;
+    companyPhone?: string;
+    invoiceName?: string;
+    directorName?: string;
     contactName?: string;
     facilityType?: string;
     deliveryAddress?: string;
@@ -454,6 +462,21 @@ export const api = {
 
   async getClients(): Promise<any[]> {
     return request<any[]>('/api/clients');
+  },
+
+  async createClientRecord(data: Omit<ClientRecord, 'id' | 'createdAt' | 'updatedAt' | 'linkedUserId' | 'assignedToCommercialId'>): Promise<ClientRecord> {
+    return request<ClientRecord>('/api/clients', { method: 'POST', body: JSON.stringify(data) });
+  },
+
+  async updateClientRecord(recordId: string, data: Partial<Omit<ClientRecord, 'id' | 'createdAt' | 'updatedAt' | 'linkedUserId' | 'assignedToCommercialId'>>): Promise<ClientRecord> {
+    return request<ClientRecord>(`/api/clients/${encodeURIComponent(recordId)}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+
+  async linkClientRecordToAccount(recordId: string, userId: string): Promise<ClientRecord> {
+    return request<ClientRecord>(`/api/clients/${encodeURIComponent(recordId)}/link-account`, {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
   },
 
   async updateClientCreditTerms(clientId: string, terms: Pick<User, 'creditLimit' | 'minimumCreditOrderAmount' | 'paymentTerms' | 'accountStatus'>): Promise<User> {
@@ -544,6 +567,17 @@ export const api = {
     return request<Order>(`/api/orders/${orderId}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status, cancellationReason })
+    });
+  },
+
+  async getOrderDiscountSummary(orderId: string): Promise<OrderDiscountSummary> {
+    return request<OrderDiscountSummary>(`/api/orders/${encodeURIComponent(orderId)}/discount`);
+  },
+
+  async updateOrderDiscount(orderId: string, discount: { discountType: 'percent' | 'amount'; discountValue: number; note?: string }): Promise<void> {
+    await request<{ success: boolean }>(`/api/orders/${encodeURIComponent(orderId)}/discount`, {
+      method: 'PATCH',
+      body: JSON.stringify(discount)
     });
   },
 

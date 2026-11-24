@@ -5,7 +5,8 @@ import {
   Trash2, 
   MessageCircle, 
   X,
-  Briefcase
+  Briefcase,
+  Search
 } from 'lucide-react';
 import { CommercialQuote, Product, User } from '../types';
 import { api } from '../api';
@@ -27,18 +28,30 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
 }) => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState('');
-  const [selectedItems, setSelectedItems] = useState<{ productId: string; variantIndex: number; quantity: number }[]>([
-    { productId: products[0]?.id || '', variantIndex: 0, quantity: 1 }
+  const [selectedItems, setSelectedItems] = useState<{ productId: string; variantIndex: number; quantity: number; discountPercent: number }[]>([
+    { productId: products[0]?.id || '', variantIndex: 0, quantity: 1, discountPercent: 0 }
   ]);
+  const [productFilter, setProductFilter] = useState('');
   const [discountType, setDiscountType] = useState<'percent' | 'amount'>('percent');
-  const [discountValue, setDiscountValue] = useState<number>(5);
+  const [discountValue, setDiscountValue] = useState<number>(0);
   const [validDays, setValidDays] = useState<number>(15);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const matchingProducts = products.filter((product) =>
+    `${product.name} ${product.reference || ''} ${product.category} ${product.subcategory || ''}`
+      .toLocaleLowerCase('fr')
+      .includes(productFilter.trim().toLocaleLowerCase('fr'))
+  );
+
+  const updateSelectedItem = (index: number, changes: Partial<(typeof selectedItems)[number]>) => {
+    setSelectedItems((previous) => previous.map((item, itemIndex) => itemIndex === index ? { ...item, ...changes } : item));
+  };
+
   const handleAddItem = () => {
-    setSelectedItems(prev => [...prev, { productId: products[0]?.id || '', variantIndex: 0, quantity: 1 }]);
+    if (products.length === 0) return;
+    setSelectedItems(prev => [...prev, { productId: products[0]?.id || '', variantIndex: 0, quantity: 1, discountPercent: 0 }]);
   };
 
   const handleRemoveItem = (idx: number) => {
@@ -50,21 +63,44 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
     return selectedItems.reduce((sum, item) => {
       const prod = products.find(p => p.id === item.productId);
       const v = prod?.variants[item.variantIndex] || prod?.variants[0];
+      if (prod?.isQuote) return sum;
       const p = v?.price || 0;
-      return sum + p * item.quantity;
+      return sum + p * Math.max(1, Math.trunc(Number(item.quantity) || 1));
     }, 0);
   };
 
   const subtotal = calculateSubtotal();
-  const discountAmount = discountType === 'percent'
-    ? Math.round((subtotal * Math.min(100, discountValue)) / 100)
-    : Math.min(subtotal, Math.round(discountValue));
-  const finalTotal = Math.max(0, subtotal - discountAmount);
+  const lineDiscountAmount = selectedItems.reduce((sum, item) => {
+    const product = products.find((candidate) => candidate.id === item.productId);
+    const variant = product?.variants[item.variantIndex] || product?.variants[0];
+    if (product?.isQuote) return sum;
+    const grossLineTotal = (Number(variant?.price) || 0) * Math.max(1, Math.trunc(Number(item.quantity) || 1));
+    return sum + Math.round(grossLineTotal * Math.min(100, Math.max(0, Number(item.discountPercent) || 0)) / 100);
+  }, 0);
+  const subtotalAfterLineDiscount = Math.max(0, subtotal - lineDiscountAmount);
+  const generalDiscountAmount = discountType === 'percent'
+    ? Math.round((subtotalAfterLineDiscount * Math.min(100, discountValue)) / 100)
+    : Math.min(subtotalAfterLineDiscount, Math.round(discountValue));
+  const discountAmount = lineDiscountAmount + generalDiscountAmount;
+  const finalTotal = Math.max(0, subtotalAfterLineDiscount - generalDiscountAmount);
 
   const handleCreateQuote = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedClientId) {
       setError('Veuillez sélectionner un établissement client');
+      return;
+    }
+    if (!Number.isFinite(discountValue) || discountValue < 0 || (discountType === 'percent' && discountValue > 100)) {
+      setError('La remise générale doit être positive et ne peut pas dépasser 100 %.');
+      return;
+    }
+    if (selectedItems.length === 0 || selectedItems.some((item) => {
+      const product = products.find((candidate) => candidate.id === item.productId);
+      const variant = product?.variants?.[item.variantIndex] || product?.variants?.[0];
+      return !product || !variant || !Number.isSafeInteger(item.quantity) || item.quantity < 1 || item.quantity > 10000
+        || !Number.isFinite(item.discountPercent) || item.discountPercent < 0 || item.discountPercent > 100;
+    })) {
+      setError('Vérifiez chaque produit, conditionnement et quantité (1 à 10 000).');
       return;
     }
     const client = assignedClients.find(c => c.id === selectedClientId) || assignedClients[0];
@@ -80,12 +116,15 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
         const v = prod.variants[item.variantIndex] || prod.variants[0];
         return {
           productId: prod.id,
+          productReference: prod.reference,
           productName: prod.name,
           variant: v.label,
           price: v.price,
           quantity: item.quantity,
-          total: v.price * item.quantity,
-          isQuote: v.price === 0
+          total: prod.isQuote || v.price <= 0 ? 0 : v.price * item.quantity,
+          discountPercent: item.discountPercent,
+          savings: prod.isQuote || v.price <= 0 ? 0 : Math.round((v.price || 0) * item.quantity * item.discountPercent / 100),
+          isQuote: v.price === 0 || Boolean(prod.isQuote)
         };
       });
 
@@ -94,7 +133,7 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
         customer: {
           facilityName: client.facilityName,
           contactName: client.contactName || client.facilityName,
-          phone: client.phone,
+          phone: client.companyPhone || client.phone,
           deliveryAddress: client.deliveryAddress || 'Libreville',
           deliveryMode: 'livraison',
           paymentMethod: 'airtel_money'
@@ -125,7 +164,7 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
       '*Détail des articles :*'
     ];
     quote.items.forEach((it, i) => {
-      lines.push(`${i + 1}. ${it.quantity}x ${it.productName} (${it.variant}) = ${it.total.toLocaleString('fr-FR')} FCFA`);
+      lines.push(`${i + 1}. ${it.quantity}x ${it.productName} (${it.variant}) = ${it.isQuote ? 'Sur devis' : `${it.total.toLocaleString('fr-FR')} FCFA${it.savings ? ` · remise article ${it.savings.toLocaleString('fr-FR')} FCFA` : ''}`}`);
     });
     lines.push('');
     lines.push(`💰 Sous-total : ${quote.subtotal.toLocaleString('fr-FR')} FCFA`);
@@ -234,7 +273,7 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
       {/* Modal create quote */}
       {isCreateModalOpen && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4">
-          <form onSubmit={handleCreateQuote} className="w-full sm:max-w-xl rounded-t-3xl sm:rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+          <form onSubmit={handleCreateQuote} className="w-full sm:max-w-2xl rounded-t-3xl sm:rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-4 px-6 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
               <h3 className="font-bold text-sm sm:text-base text-slate-900 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-[#0d44e8]" />
@@ -266,9 +305,10 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
                   onChange={(e) => setSelectedClientId(e.target.value)}
                   className="w-full p-2.5 rounded-xl border border-slate-300 font-bold"
                 >
+                    <option value="">Choisir un établissement</option>
                   {assignedClients.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.facilityName} ({c.facilityType || 'Clinique'}) - {c.phone}
+                      {c.facilityName} ({c.facilityType || 'Clinique'}) - entreprise {c.companyPhone || c.phone}{c.loginPhone ? ` · connexion ${c.loginPhone}` : ''}
                     </option>
                   ))}
                 </select>
@@ -286,49 +326,83 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
                     Ajouter une ligne
                   </button>
                 </div>
+                <label className="relative mb-2 block">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <input
+                    type="search"
+                    value={productFilter}
+                    onChange={(event) => setProductFilter(event.target.value)}
+                    placeholder="Filtrer par nom, référence ou catégorie…"
+                    className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs"
+                  />
+                </label>
                 <div className="space-y-2">
-                  {selectedItems.map((item, idx) => (
-                    <div key={idx} className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center gap-2">
+                  {selectedItems.map((item, idx) => {
+                    const selectedProduct = products.find((candidate) => candidate.id === item.productId);
+                    const selectedVariant = selectedProduct?.variants[item.variantIndex] || selectedProduct?.variants[0];
+                    const quoteLine = !selectedVariant || Boolean(selectedProduct?.isQuote) || Number(selectedVariant.price) <= 0;
+                    const lineGross = quoteLine ? 0 : (Number(selectedVariant?.price) || 0) * Math.max(1, item.quantity || 1);
+                    const lineDiscount = Math.round(lineGross * item.discountPercent / 100);
+                    return <div key={idx} className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)_76px_92px_32px] sm:items-center">
                       <select
                         value={item.productId}
-                        onChange={(e) => {
-                          const newId = e.target.value;
-                          setSelectedItems(prev => {
-                            const copy = [...prev];
-                            copy[idx].productId = newId;
-                            return copy;
-                          });
-                        }}
-                        className="flex-1 p-1.5 rounded-lg border border-slate-300 bg-white"
+                        onChange={(e) => updateSelectedItem(idx, { productId: e.target.value, variantIndex: 0, discountPercent: 0 })}
+                        className="min-w-0 rounded-lg border border-slate-300 bg-white p-2 text-xs"
                       >
-                        {products.map(p => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
+                        <option value="">Choisir un produit</option>
+                        {(() => {
+                          const selectedProduct = products.find((candidate) => candidate.id === item.productId);
+                          const options = matchingProducts.some((candidate) => candidate.id === item.productId) || !selectedProduct
+                            ? matchingProducts
+                            : [selectedProduct, ...matchingProducts];
+                          return options.map(p => (
+                          <option key={p.id} value={p.id}>{p.reference ? `${p.reference} · ` : ''}{p.name}</option>
+                        ));
+                        })()}
+                      </select>
+                      <select
+                        aria-label={`Conditionnement ligne ${idx + 1}`}
+                        value={item.variantIndex}
+                        onChange={(event) => updateSelectedItem(idx, { variantIndex: Number(event.target.value), discountPercent: 0 })}
+                        className="min-w-0 rounded-lg border border-slate-300 bg-white p-2 text-xs"
+                      >
+                        {(products.find((candidate) => candidate.id === item.productId)?.variants || []).map((variant, variantIndex) => (
+                          <option key={`${variant.label}-${variantIndex}`} value={variantIndex}>{variant.label} · {variant.price > 0 ? `${variant.price.toLocaleString('fr-FR')} FCFA` : 'Sur devis'}</option>
                         ))}
                       </select>
                       <input
                         type="number"
                         min="1"
+                        max="10000"
+                        step="1"
                         value={item.quantity}
-                        onChange={(e) => {
-                          const q = parseInt(e.target.value, 10) || 1;
-                          setSelectedItems(prev => {
-                            const copy = [...prev];
-                            copy[idx].quantity = q;
-                            return copy;
-                          });
-                        }}
-                        className="w-16 p-1.5 rounded-lg border border-slate-300 bg-white text-center font-bold"
+                        onChange={(e) => updateSelectedItem(idx, { quantity: Number(e.target.value) })}
+                        className="w-full rounded-lg border border-slate-300 bg-white p-2 text-center text-xs font-bold"
                       />
+                      <label className="text-[10px] font-bold text-slate-600">Remise article %
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={item.discountPercent}
+                          onChange={(event) => updateSelectedItem(idx, { discountPercent: Math.min(100, Math.max(0, Number(event.target.value) || 0)) })}
+                          disabled={quoteLine}
+                          className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-center text-xs font-bold"
+                          aria-label={`Remise pour l’article ${idx + 1}`}
+                        />
+                      </label>
                       <button
                         type="button"
                         onClick={() => handleRemoveItem(idx)}
                         disabled={selectedItems.length <= 1}
-                        className="p-1 text-slate-400 hover:text-rose-600 disabled:opacity-20"
+                        className="justify-self-end p-1 text-slate-400 hover:text-rose-600 disabled:opacity-20"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
+                      {lineDiscount > 0 && <p className="text-[10px] font-semibold text-emerald-700 sm:col-span-5">Remise sur cette ligne : −{lineDiscount.toLocaleString('fr-FR')} FCFA · net après remise : {(lineGross - lineDiscount).toLocaleString('fr-FR')} FCFA</p>}
                     </div>
-                  ))}
+                  })}
                 </div>
               </div>
 
@@ -340,7 +414,7 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
                   <div className="flex gap-1">
                     <button
                       type="button"
-                      onClick={() => setDiscountType('percent')}
+                      onClick={() => { setDiscountType('percent'); setDiscountValue(value => Math.min(100, value)); }}
                       className={`flex-1 py-1.5 rounded-lg font-bold text-xs ${
                         discountType === 'percent' ? 'bg-[#0d44e8] text-white' : 'bg-white border text-slate-700'
                       }`}
@@ -365,8 +439,13 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
                   <input
                     type="number"
                     min="0"
+                    max={discountType === 'percent' ? 100 : undefined}
+                    step="1"
                     value={discountValue}
-                    onChange={(e) => setDiscountValue(parseFloat(e.target.value) || 0)}
+                    onChange={(e) => {
+                      const entered = parseFloat(e.target.value) || 0;
+                      setDiscountValue(Math.max(0, discountType === 'percent' ? Math.min(100, entered) : entered));
+                    }}
                     className="w-full p-1.5 rounded-lg border border-slate-300 bg-white font-bold text-right"
                   />
                 </div>
@@ -374,11 +453,19 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
 
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
                 <div className="flex justify-between text-slate-600">
-                  <span>Sous-total :</span>
+                  <span>Sous-total avant remises :</span>
                   <span className="font-bold tabular-nums">{subtotal.toLocaleString('fr-FR')} FCFA</span>
                 </div>
+                {lineDiscountAmount > 0 && <div className="flex justify-between text-emerald-700 font-semibold">
+                  <span>Remises par article :</span>
+                  <span className="tabular-nums">−{lineDiscountAmount.toLocaleString('fr-FR')} FCFA</span>
+                </div>}
+                {generalDiscountAmount > 0 && <div className="flex justify-between text-emerald-700 font-semibold">
+                  <span>Remise générale :</span>
+                  <span className="tabular-nums">−{generalDiscountAmount.toLocaleString('fr-FR')} FCFA</span>
+                </div>}
                 <div className="flex justify-between text-emerald-700 font-semibold">
-                  <span>Remise déduite :</span>
+                  <span>Total des remises :</span>
                   <span className="tabular-nums">-{discountAmount.toLocaleString('fr-FR')} FCFA</span>
                 </div>
                 <div className="border-t pt-1 flex justify-between font-black text-slate-900 text-sm">

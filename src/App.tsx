@@ -501,11 +501,6 @@ export default function App() {
     }
 
     setCurrentUser(authData.user);
-    if (userHasPermission(authData.user, 'stock_view')) {
-      // The first catalogue request may have run as a visitor, whose response
-      // intentionally omits internal stock quantities. Reload it after auth.
-      void refreshProductCatalog(generation);
-    }
     setCartItems(loadCartForUser(authData.user));
     if (canReadStaffOrders(authData.user)) {
       try {
@@ -1339,7 +1334,7 @@ export default function App() {
                       commandé <span className="text-[#0d44e8]">simplement.</span>
                     </h1>
                     <p className="text-xs sm:text-sm text-[#6a6a6b] mt-2 leading-relaxed">
-                      Consommables, équipements et réactifs pour cliniques, pharmacies et laboratoires. Bon de commande PDF et message WhatsApp préparé pour envoi.
+                      Consommables, équipements et réactifs pour cliniques, pharmacies et laboratoires. Proforma PDF et message WhatsApp préparés pour envoi.
                     </p>
                   </div>
                 </div>

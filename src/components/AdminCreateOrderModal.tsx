@@ -9,6 +9,7 @@ interface AdminCreateOrderModalProps {
   clients: any[];
   products: Product[];
   canManageInvoices: boolean;
+  canOfferDiscount: boolean;
   onClose: () => void;
   onOrderCreated: (order: Order) => void;
   onViewOrderPdf?: (order: Order) => void;
@@ -34,12 +35,13 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
   clients,
   products,
   canManageInvoices,
+  canOfferDiscount,
   onClose,
   onOrderCreated,
   onViewOrderPdf,
 }) => {
   const eligibleClients = useMemo(() => clients
-    .filter(client => client?.id && client.hasAccount !== false)
+    .filter(client => client?.id && (client.hasAccount !== false || client.hasDirectoryRecord === true))
     .sort((a, b) => String(a.facilityName || '').localeCompare(String(b.facilityName || ''), 'fr')),
   [clients]);
   const [clientId, setClientId] = useState('');
@@ -56,7 +58,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<'especes' | 'airtel_money' | 'moov_money' | 'virement' | 'cheque'>('virement');
   const [documentChoice, setDocumentChoice] = useState<DocumentChoice>('bon');
   const [tvaRate, setTvaRate] = useState(0);
-  const [includeStampOnInvoice, setIncludeStampOnInvoice] = useState(true);
+  const [includeStampOnInvoice, setIncludeStampOnInvoice] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [addedLineMessage, setAddedLineMessage] = useState('');
@@ -67,12 +69,13 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
   const product = products.find(candidate => candidate.id === selectedProductId);
   const variant = product?.variants?.find(candidate => candidate.label === selectedVariant);
   const matchingClients = eligibleClients.filter(candidate =>
-    [candidate.facilityName, candidate.contactName, candidate.phone, candidate.secondaryPhone]
+    [candidate.facilityName, candidate.contactName, candidate.phone, candidate.companyPhone, candidate.loginPhone, candidate.secondaryPhone]
       .some(value => String(value || '').toLocaleLowerCase('fr').includes(clientSearch.trim().toLocaleLowerCase('fr'))));
   const productQuery = productSearch.trim().toLocaleLowerCase('fr');
   const matchingProducts = productQuery.length < 2 ? [] : products.filter(candidate =>
-    `${candidate.name} ${candidate.category} ${candidate.id}`.toLocaleLowerCase('fr').includes(productQuery));
-  const previewSubtotal = lines.reduce((sum, line) => sum + (Number(line.price) || 0) * line.quantity, 0);
+    `${candidate.name} ${candidate.category} ${candidate.reference || ''} ${candidate.id}`.toLocaleLowerCase('fr').includes(productQuery));
+  const previewSubtotal = lines.reduce((sum, line) => sum + (line.isQuote ? 0 : (Number(line.price) || 0) * line.quantity), 0);
+  const previewCommercialDiscount = lines.reduce((sum, line) => sum + (line.isQuote ? 0 : Math.round((Number(line.price) || 0) * line.quantity * (Number(line.discountPercent) || 0) / 100)), 0);
   const hasUnknownPrice = lines.some(line => line.isQuote || line.price <= 0);
   const selectedClientPhone = String(client?.phone || '').replace(/\D/g, '');
   const whatsappMessage = successOrder
@@ -98,11 +101,13 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
     const nextLine: DraftLine = {
       key: `${product.id}:${variant.label}`,
       productId: product.id,
+      productReference: product.reference,
       productName: product.name,
       category: product.category,
       variant: variant.label,
       price: Number(variant.price) || 0,
       quantity: requestedQuantity,
+      discountPercent: 0,
       isQuote: Number(variant.price) <= 0 || Boolean(product.isQuote),
     };
     setLines(previous => {
@@ -127,7 +132,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
       type: 'facture',
       number: `FAC-${new Date().getFullYear()}-${order.reference.replace(/[^A-Za-z0-9]/g, '').toUpperCase()}-01`,
       issueDate: todayInLibreville(),
-      clientFacilityName: order.customer.facilityName,
+      clientFacilityName: order.customer.invoiceName || order.customer.facilityName,
       tvaRate,
       tvaAmount: order.estimatedTotal - totalHT,
       totalHT,
@@ -156,7 +161,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
       const tracked = current?.quantityAvailable ?? current?.stockQuantity;
       return tracked !== undefined && tracked < line.quantity;
     }))) {
-      setError('La facture attend une commande entièrement chiffrée et disponible. Enregistrez d’abord le bon de commande ou le devis, puis facturez après validation des prix et du stock.');
+      setError('La facture attend une commande entièrement chiffrée et disponible. Enregistrez d’abord la proforma ou le devis, puis facturez après validation des prix et du stock.');
       return;
     }
 
@@ -175,7 +180,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
       setSuccessOrder(order);
       if (documentChoice === 'facture') {
         if (order.hasQuoteItems || order.items.some(item => item.isQuote || item.isDeferredStock)) {
-          setError('La commande est enregistrée, mais le stock ou le prix nécessite un devis. Le bon de commande reste disponible ; la facture se fera après validation.');
+          setError('La commande est enregistrée, mais le stock ou le prix nécessite un devis. La proforma reste disponible ; la facture se fera après validation.');
           return;
         }
         await createInvoice(order);
@@ -201,8 +206,8 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
           <div>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-blue-700">Commandes clients</p>
-            <h2 id="admin-create-order-title" className="mt-1 text-lg font-black text-slate-950">Créer un bon de commande ou une facture</h2>
-            <p className="mt-1 text-xs text-slate-600">La commande est liée au compte client et son stock est vérifié sur le serveur.</p>
+            <h2 id="admin-create-order-title" className="mt-1 text-lg font-black text-slate-950">Créer une proforma ou une facture</h2>
+            <p className="mt-1 text-xs text-slate-600">Choisissez une fiche client. Un compte de connexion n’est pas nécessaire pour enregistrer la proforma.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-white hover:text-slate-900" aria-label="Fermer"><X className="h-5 w-5" /></button>
         </header>
@@ -216,7 +221,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
             </div>
             {error && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900">{error}</p>}
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => { onViewOrderPdf?.(successOrder); onClose(); }} className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-800"><FileText className="h-4 w-4" />Ouvrir le bon PDF</button>
+              <button type="button" onClick={() => { onViewOrderPdf?.(successOrder); onClose(); }} className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-800"><FileText className="h-4 w-4" />Ouvrir la proforma PDF</button>
               <button type="button" onClick={handleWhatsApp} className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-900 hover:bg-emerald-100"><MessageCircle className="h-4 w-4" />Préparer WhatsApp</button>
               <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50">Terminer</button>
             </div>
@@ -225,11 +230,11 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
         ) : (
           <form onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5 sm:p-6">
             <label className="block text-xs font-bold text-slate-700">
-              Client avec compte actif
+              Fiche client / établissement
               <input value={clientSearch} onChange={event => setClientSearch(event.target.value)} placeholder="Rechercher un établissement ou téléphone" className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-medium outline-none focus:border-blue-500" />
               <select required value={clientId} onChange={event => selectClient(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-blue-500">
                 <option value="">Choisir un client</option>
-                {matchingClients.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.facilityName || candidate.contactName || candidate.phone} — {candidate.phone || 'sans téléphone'}</option>)}
+                {matchingClients.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.facilityName || candidate.contactName || candidate.phone} — entreprise {candidate.companyPhone || candidate.phone || 'sans téléphone'}{candidate.loginPhone ? ` · connexion ${candidate.loginPhone}` : ' · sans compte'}</option>)}
               </select>
             </label>
 
@@ -260,7 +265,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
                     {productPickerOpen && <div id="admin-create-order-product-results" role="listbox" className="absolute inset-x-0 top-full z-[120] mt-1 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
                       {productQuery.length < 2 ? <p className="px-3 py-2 text-xs font-normal text-slate-500">Saisissez au moins 2 caractères pour rechercher.</p> : matchingProducts.length === 0 ? <p className="px-3 py-2 text-xs font-normal text-slate-500">Aucun produit correspondant.</p> : matchingProducts.slice(0, 30).map(item => <button key={item.id} type="button" role="option" aria-selected={item.id === selectedProductId} onClick={() => { setSelectedProductId(item.id); setProductSearch(item.name); setSelectedVariant(''); setProductPickerOpen(false); }} className="block w-full rounded-lg px-3 py-2 text-left hover:bg-blue-50 focus:bg-blue-50 focus:outline-none">
                         <span className="block truncate text-xs font-semibold text-slate-800">{item.name}</span>
-                        <span className="mt-0.5 block truncate text-[10px] font-normal text-slate-500">{item.category} · {item.variants?.length || 0} conditionnement(s)</span>
+                        <span className="mt-0.5 block truncate text-[10px] font-normal text-slate-500">{item.reference ? `${item.reference} · ` : ''}{item.category} · {item.variants?.length || 0} conditionnement(s)</span>
                       </button>)}
                       {matchingProducts.length > 30 && <p className="px-3 py-2 text-[10px] text-slate-500">30 résultats affichés. Affinez la recherche pour les autres.</p>}
                     </div>}
@@ -279,13 +284,19 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
               {product && !product.variants?.length && <p role="alert" className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Ce produit n’a aucun conditionnement enregistré ; il ne peut pas être ajouté à une commande.</p>}
               {addedLineMessage && <p role="status" aria-live="polite" className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">{addedLineMessage}</p>}
               {lines.length > 0 ? <div className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-100">
-                {lines.map(line => <div key={line.key} className="flex items-center justify-between gap-3 px-3 py-2.5 text-xs">
-                  <div className="min-w-0"><p className="truncate font-bold text-slate-800">{line.productName} · {line.variant}</p><p className="text-slate-500">{line.quantity} × {line.isQuote ? 'Sur devis' : formatMoney(line.price)}</p></div>
-                  <div className="flex items-center gap-3"><strong className="whitespace-nowrap">{line.isQuote ? 'Sur devis' : formatMoney(line.quantity * line.price)}</strong><button type="button" onClick={() => setLines(previous => previous.filter(item => item.key !== line.key))} className="rounded-lg p-1 text-rose-700 hover:bg-rose-50" aria-label={`Retirer ${line.productName}`}><Trash2 className="h-4 w-4" /></button></div>
-                </div>)}
+                {lines.map(line => {
+                  const lineGross = (Number(line.price) || 0) * line.quantity;
+                  const lineDiscount = Math.round(lineGross * (Number(line.discountPercent) || 0) / 100);
+                  return <div key={line.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 text-xs sm:grid-cols-[minmax(0,1fr)_104px_auto_auto]">
+                    <div className="min-w-0"><p className="truncate font-bold text-slate-800">{line.productName} · {line.variant}</p><p className="text-slate-500">{line.productReference ? `${line.productReference} · ` : ''}{line.quantity} × {line.isQuote ? 'Sur devis' : formatMoney(line.price)}</p></div>
+                    {canOfferDiscount && !line.isQuote && <label className="text-[10px] font-bold text-slate-600">Remise %<input aria-label={`Remise pour ${line.productName}`} type="number" min={0} max={100} step={1} value={line.discountPercent || 0} onChange={event => { const value = event.target.value === '' ? 0 : Number(event.target.value); setLines(previous => previous.map(item => item.key === line.key ? { ...item, discountPercent: Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0)) } : item)); }} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-center text-xs" /></label>}
+                    <div className="text-right"><strong className="whitespace-nowrap">{line.isQuote ? 'Sur devis' : formatMoney(lineGross - lineDiscount)}</strong>{lineDiscount > 0 && <p className="text-[10px] font-semibold text-emerald-700">−{formatMoney(lineDiscount)}</p>}</div>
+                    <button type="button" onClick={() => setLines(previous => previous.filter(item => item.key !== line.key))} className="rounded-lg p-1 text-rose-700 hover:bg-rose-50" aria-label={`Retirer ${line.productName}`}><Trash2 className="h-4 w-4" /></button>
+                  </div>;
+                })}
               </div> : <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">Aucun article dans la commande pour le moment.</p>}
-              <p className="mt-3 text-right text-sm font-black text-slate-900">Sous-total indicatif : {formatMoney(previewSubtotal)}{hasUnknownPrice && ' + articles sur devis'}</p>
-              <p className="mt-1 text-[10px] text-slate-500">Le total final, les remises, les frais de livraison et la disponibilité sont recalculés côté serveur au moment de l’enregistrement.</p>
+              <p className="mt-3 text-right text-sm font-black text-slate-900">Sous-total indicatif après remise commerciale : {formatMoney(previewSubtotal - previewCommercialDiscount)}{hasUnknownPrice && ' + articles sur devis'}</p>
+              <p className="mt-1 text-[10px] text-slate-500">Les remises commerciales sont appliquées par article. Les remises de volume, frais de livraison et disponibilité sont recalculés côté serveur.</p>
             </section>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -308,10 +319,10 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
             <fieldset className="rounded-2xl border border-slate-200 p-4">
               <legend className="px-1 text-xs font-black text-slate-800">Document à préparer</legend>
               <div className="grid gap-2 sm:grid-cols-2">
-                <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 p-3 text-xs"><input type="radio" name="admin-document-choice" checked={documentChoice === 'bon'} onChange={() => setDocumentChoice('bon')} /><span><strong className="block">Bon de commande</strong><span className="text-slate-500">Disponible après l’enregistrement de la commande.</span></span></label>
+                <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 p-3 text-xs"><input type="radio" name="admin-document-choice" checked={documentChoice === 'bon'} onChange={() => setDocumentChoice('bon')} /><span><strong className="block">Proforma</strong><span className="text-slate-500">Disponible après l’enregistrement de la commande.</span></span></label>
                 <label className={`flex items-start gap-2 rounded-xl border p-3 text-xs ${canManageInvoices ? 'cursor-pointer border-slate-200' : 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400'}`}><input type="radio" name="admin-document-choice" disabled={!canManageInvoices || hasUnknownPrice} checked={documentChoice === 'facture'} onChange={() => setDocumentChoice('facture')} /><span><strong className="block">Facture</strong><span className="text-slate-500">Droit de facturation requis ; prix et stock confirmés.</span></span></label>
               </div>
-              {!canManageInvoices && <p className="mt-2 text-[11px] text-amber-800">La secrétaire peut préparer le bon de commande. Le Super Admin doit lui attribuer « Gérer factures & avoirs » pour créer une facture.</p>}
+              {!canManageInvoices && <p className="mt-2 text-[11px] text-amber-800">La secrétaire peut préparer une proforma. Le Super Admin doit lui attribuer « Gérer factures & avoirs » pour créer une facture.</p>}
               {canManageInvoices && hasUnknownPrice && <p className="mt-2 text-[11px] text-amber-800">Une ligne nécessite un devis : la facture sera disponible après validation du prix et du stock.</p>}
               {documentChoice === 'facture' && canManageInvoices && <label className="mt-3 block max-w-xs text-[11px] font-bold text-slate-700">Taux TVA/CSS appliqué
                 <select value={tvaRate} onChange={event => setTvaRate(Number(event.target.value))} className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs"><option value={0}>0 %</option><option value={0.18}>18 %</option></select>
@@ -326,7 +337,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
             <footer className="sticky bottom-0 -mx-5 flex flex-col-reverse justify-between gap-2 border-t border-slate-100 bg-white/95 px-5 pb-1 pt-4 backdrop-blur sm:-mx-6 sm:flex-row sm:items-center sm:px-6">
               <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50">Annuler</button>
               <button type="submit" disabled={saving || !client || lines.length === 0} className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300">
-                {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />}{saving ? 'Enregistrement…' : documentChoice === 'facture' ? 'Enregistrer et créer la facture' : 'Enregistrer et préparer le bon'}
+                {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />}{saving ? 'Enregistrement…' : documentChoice === 'facture' ? 'Enregistrer et créer la facture' : 'Enregistrer et préparer la proforma'}
               </button>
             </footer>
           </form>

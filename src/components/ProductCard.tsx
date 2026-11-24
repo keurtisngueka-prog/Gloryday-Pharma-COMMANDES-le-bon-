@@ -102,7 +102,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   };
 
   const generateWhatsAppInquiryUrl = () => {
-    const message = `Bonjour Gloryday Pharma Gabon, je souhaite des informations sur l'article "${product.name}" (${selectedVariant?.label || 'Standard'}) - Réf ID: ${product.id}.`;
+    const message = `Bonjour Gloryday Pharma Gabon, je souhaite des informations sur l'article "${product.name}" (${selectedVariant?.label || 'Standard'})${product.reference ? ` - Réf. ${product.reference}` : ''}.`;
     return `https://wa.me/24177003004?text=${encodeURIComponent(message)}`;
   };
 
@@ -176,6 +176,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             <h3 className="text-xs sm:text-sm font-bold text-[#161618] line-clamp-2 leading-snug group-hover:text-[#0d44e8] transition-colors">
               {product.name}
             </h3>
+            {product.reference && <p className="mt-1 text-[10px] font-semibold text-blue-700">Réf. {product.reference}</p>}
 
             {/* Conditionnement hint */}
             <p className="text-[11px] text-[#6a6a6b] mt-1 truncate">
