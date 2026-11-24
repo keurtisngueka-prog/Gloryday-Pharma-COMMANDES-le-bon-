@@ -547,6 +547,7 @@ export async function generateInvoiceProjectPdf(
   doc.text('NIF : 250301 T', margin, 42);
   doc.text('RCCM : GA.LBV-01 2021-A10-00629', margin, 48);
   doc.text('BP 20350 · Libreville, Gabon', margin, 54);
+  doc.text('+241 66 24 03 99 · +241 77 00 30 04', margin, 60);
   doc.setFontSize(6.9);
 
   const metaX = pageWidth - margin;
@@ -815,6 +816,7 @@ export async function generateInvoiceProjectPdf(
   doc.setFontSize(6.1);
   doc.text(text('Consommables, r\u00e9actifs, \u00e9quipements m\u00e9dicaux'), stampX + stampWidth / 2, stampY + 14.5, { align: 'center' });
   doc.setFontSize(6.4);
+  doc.text('+241 77 00 30 04 / +241 66 24 03 99', stampX + stampWidth / 2, stampY + 20, { align: 'center' });
   }
   const pageCount = doc.getNumberOfPages();
   for (let page = 1; page <= pageCount; page += 1) {
