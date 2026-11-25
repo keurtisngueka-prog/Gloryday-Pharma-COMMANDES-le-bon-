@@ -119,6 +119,7 @@ export function downloadProductsCSV(products: Product[]) {
   const dateStr = new Date().toISOString().split('T')[0];
   const headers = [
     'ID Article',
+    'Référence catalogue',
     'Nom du Produit',
     'Catégorie',
     'Sous-catégorie',
@@ -149,6 +150,7 @@ export function downloadProductsCSV(products: Product[]) {
 
       rows.push([
         p.id,
+        p.reference || '',
         p.name,
         p.category,
         p.subcategory || '',
@@ -193,6 +195,7 @@ export async function downloadProductsXLSX(products: Product[]) {
 
       sheetRows.push({
         'ID Article': p.id,
+        'Référence catalogue': p.reference || '',
         'Nom du Produit': p.name,
         'Catégorie': p.category,
         'Sous-catégorie': p.subcategory || '',
@@ -212,6 +215,7 @@ export async function downloadProductsXLSX(products: Product[]) {
   const worksheet = XLSX.utils.json_to_sheet(sheetRows);
   worksheet['!cols'] = [
     { wch: 20 }, // ID Article
+    { wch: 22 }, // Référence catalogue
     { wch: 38 }, // Nom du Produit
     { wch: 24 }, // Catégorie
     { wch: 22 }, // Sous-catégorie
@@ -390,6 +394,7 @@ export async function parseCatalogSpreadsheet(
     // Group rows by Product (by ID Article if matching/present, else by normalized product name)
     interface GroupedProductRows {
       rawId: string;
+      reference: string;
       name: string;
       rows: Record<string, any>[];
     }
@@ -397,38 +402,67 @@ export async function parseCatalogSpreadsheet(
     const groupsMap = new Map<string, GroupedProductRows>();
     const existingById = new Map<string, Product>();
     const existingByName = new Map<string, Product>();
+    const existingByReference = new Map<string, Product>();
 
     existingProducts.forEach(p => {
       existingById.set(p.id.trim().toLowerCase(), p);
       existingByName.set(p.name.trim().toLowerCase(), p);
+      if (p.reference?.trim()) existingByReference.set(p.reference.trim().toLocaleLowerCase('fr'), p);
     });
 
-    rawRows.forEach((row) => {
+    rawRows.forEach((row, rowIndex) => {
       const rawId = String(
-        getRowField(row, ['ID Article', 'ID', 'id', 'Code Article', 'Reference', 'Référence']) ?? ''
+        getRowField(row, ['ID Article', 'ID', 'id', 'Code Article', 'Product ID', 'productId']) ?? ''
+      ).trim();
+      const rawReference = String(
+        getRowField(row, ['Référence catalogue', 'Reference catalogue', 'Référence produit', 'Reference produit', 'Référence', 'Reference', 'productReference', 'reference']) ?? ''
       ).trim();
       const rawName = String(
         getRowField(row, ['Nom du Produit', 'Nom', 'Produit', 'Désignation', 'Article', 'Libellé', 'name']) ?? ''
       ).trim();
 
-      if (!rawId && !rawName) return;
+      if (!rawId && !rawReference && !rawName) return;
+      if (rawId && !/^[A-Za-z0-9_:-]+$/.test(rawId)) {
+        throw new Error(`L’identifiant de la ligne ${rowIndex + 2} contient des caractères non autorisés.`);
+      }
+      if (rawReference.length > 40) {
+        throw new Error(`La référence de la ligne ${rowIndex + 2} dépasse la limite de 40 caractères.`);
+      }
 
-      const matchedExisting =
-        (rawId ? existingById.get(rawId.toLowerCase()) : undefined) ||
-        (rawName ? existingByName.get(rawName.toLowerCase()) : undefined);
+      const idMatch = rawId ? existingById.get(rawId.toLowerCase()) : undefined;
+      const referenceMatch = rawReference ? existingByReference.get(rawReference.toLocaleLowerCase('fr')) : undefined;
+      const nameMatch = rawName ? existingByName.get(rawName.toLocaleLowerCase('fr')) : undefined;
+      const matches = [idMatch, referenceMatch, nameMatch].filter((product): product is Product => Boolean(product));
+      const matchedExisting = matches[0];
+      if (matches.some(product => product.id !== matchedExisting?.id)) {
+        throw new Error(`La ligne ${rowIndex + 2} associe des références et un nom qui désignent des produits différents.`);
+      }
+      if (!rawName && !matchedExisting) {
+        throw new Error(`La ligne ${rowIndex + 2} n’a pas de nom de produit correspondant dans le catalogue.`);
+      }
 
       const groupKey = matchedExisting
         ? `existing:${matchedExisting.id}`
         : rawId
         ? `id:${rawId.toLowerCase()}`
-        : `name:${rawName.toLowerCase()}`;
+        : rawReference
+        ? `reference:${rawReference.toLocaleLowerCase('fr')}`
+        : `name:${rawName.toLocaleLowerCase('fr')}`;
 
       const existingGroup = groupsMap.get(groupKey);
       if (existingGroup) {
+        if (rawName && existingGroup.name && rawName.toLocaleLowerCase('fr') !== existingGroup.name.toLocaleLowerCase('fr')) {
+          throw new Error(`Les lignes du produit « ${existingGroup.name} » indiquent des noms différents.`);
+        }
+        if (rawReference && existingGroup.reference && rawReference.toLocaleLowerCase('fr') !== existingGroup.reference.toLocaleLowerCase('fr')) {
+          throw new Error(`Les lignes du produit « ${existingGroup.name} » indiquent plusieurs références catalogue.`);
+        }
+        if (!existingGroup.reference && rawReference) existingGroup.reference = rawReference;
         existingGroup.rows.push(row);
       } else {
         groupsMap.set(groupKey, {
           rawId: matchedExisting ? matchedExisting.id : rawId,
+          reference: rawReference || matchedExisting?.reference || '',
           name: rawName || matchedExisting?.name || 'Nouvel Article Médical',
           rows: [row]
         });
@@ -437,6 +471,17 @@ export async function parseCatalogSpreadsheet(
 
     if (groupsMap.size === 0) {
       throw new Error('Aucune colonne de nom ou d’identifiant de produit reconnue.');
+    }
+
+    const seenReferences = new Map<string, string>();
+    for (const [groupKey, group] of groupsMap) {
+      const normalizedReference = group.reference.trim().toLocaleLowerCase('fr');
+      if (!normalizedReference) continue;
+      const otherGroup = seenReferences.get(normalizedReference);
+      if (otherGroup && otherGroup !== groupKey) {
+        throw new Error(`La référence « ${group.reference} » apparaît sur plusieurs produits dans le fichier.`);
+      }
+      seenReferences.set(normalizedReference, groupKey);
     }
 
     const updatedItems: CatalogImportDiffItem[] = [];
@@ -450,12 +495,17 @@ export async function parseCatalogSpreadsheet(
       const firstRow = group.rows[0];
       const existing =
         (group.rawId ? existingById.get(group.rawId.toLowerCase()) : undefined) ||
-        (group.name ? existingByName.get(group.name.toLowerCase()) : undefined);
+        (group.reference ? existingByReference.get(group.reference.toLocaleLowerCase('fr')) : undefined) ||
+        (group.name ? existingByName.get(group.name.toLocaleLowerCase('fr')) : undefined);
 
       const rawName = String(
         getRowField(firstRow, ['Nom du Produit', 'Nom', 'Produit', 'Désignation', 'Article', 'Libellé', 'name']) ?? ''
       ).trim();
       const finalName = rawName || existing?.name || 'Article Médical';
+      const rawReference = String(
+        getRowField(firstRow, ['Référence catalogue', 'Reference catalogue', 'Référence produit', 'Reference produit', 'Référence', 'Reference', 'productReference', 'reference']) ?? ''
+      ).trim();
+      const finalReference = rawReference || group.reference || existing?.reference;
 
       const rawCategory = String(
         getRowField(firstRow, ['Catégorie', 'Categorie', 'Category', 'Famille']) ?? ''
@@ -602,6 +652,9 @@ export async function parseCatalogSpreadsheet(
         if (existing.name !== finalName) {
           changes.push(`Nom : ${existing.name} ➔ ${finalName}`);
         }
+        if ((existing.reference || '') !== (finalReference || '')) {
+          changes.push(`Référence catalogue mise à jour : ${existing.reference || '—'} ➔ ${finalReference || '—'}`);
+        }
         if (existing.category !== finalCategory) {
           changes.push(`Catégorie : ${existing.category} ➔ ${finalCategory}`);
         }
@@ -615,6 +668,7 @@ export async function parseCatalogSpreadsheet(
         if (changes.length > 0) {
           const updatedProduct: Product = {
             ...existing,
+            reference: finalReference || undefined,
             name: finalName,
             category: finalCategory,
             subcategory: finalSubcategory,
@@ -648,6 +702,7 @@ export async function parseCatalogSpreadsheet(
         const newId = group.rawId || `prod-import-${Date.now()}-${newIndexCounter++}`;
         const createdProduct: Product = {
           id: newId,
+          reference: finalReference || undefined,
           name: finalName,
           category: finalCategory,
           subcategory: finalSubcategory,

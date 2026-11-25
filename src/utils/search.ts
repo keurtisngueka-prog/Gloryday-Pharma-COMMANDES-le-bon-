@@ -62,6 +62,7 @@ export function scoreProductSearch(product: Product, query: string): number {
   const name = normalizeText(product.name);
   const fields = [
     { text: name, weight: 12 },
+    { text: normalizeText(product.reference || ''), weight: 18 },
     { text: normalizeText(product.category), weight: 7 },
     { text: normalizeText(product.subcategory || ''), weight: 7 },
     { text: normalizeText(product.variants.map(v => v.label).join(' ')), weight: 8 },

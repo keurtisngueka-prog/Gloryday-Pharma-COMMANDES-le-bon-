@@ -38,6 +38,7 @@ import { Order, OrderStatus, AdminStats, Pack, Product, User, AppRole, DeliveryS
 import { api } from '../api';
 import { getActiveVolumeDiscountSettings, setActiveVolumeDiscountSettings } from '../utils/volumeDiscount';
 import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
+import { matchesProductSearch } from '../utils/search';
 import { ProductFormModal } from './ProductFormModal';
 import { StockReceiptModal } from './StockReceiptModal';
 import { BestClientsModule } from './BestClientsModule';
@@ -385,7 +386,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const displayedProducts = products.filter(p => {
     if (!stockSearchQuery.trim()) return true;
-    return p.name.toLowerCase().includes(stockSearchQuery.toLowerCase());
+    return matchesProductSearch(p, stockSearchQuery);
   });
 
   const handleConfirmCancel = async () => {
@@ -1545,7 +1546,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
                 <input
                   type="text"
-                  placeholder="Rechercher produit..."
+                  placeholder="Nom, référence ou catégorie..."
                   value={stockSearchQuery}
                   onChange={(e) => setStockSearchQuery(e.target.value)}
                   className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:bg-white"
@@ -1573,6 +1574,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <div className="min-w-0">
                         <h4 className="font-bold text-slate-900 truncate">{p.name}</h4>
                         <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                          {p.reference && <span className="rounded bg-blue-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-blue-800">Réf. {p.reference}</span>}
                           <span className="text-[11px] text-slate-500">{p.category} · {p.variants.length} variante(s)</span>
                           {canViewStockCosts && (p.purchasePriceVerified === true && Number(p.purchasePrice) > 0 ? (
                             Number(p.variants[0]?.price) > 0 ? (

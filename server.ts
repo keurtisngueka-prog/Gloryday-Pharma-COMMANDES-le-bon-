@@ -1313,6 +1313,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
 
     const normalizedItems: Array<{
       id?: string;
+      reference?: string;
       name: string;
       category?: string;
       subcategory?: string;
@@ -1334,8 +1335,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       }
       const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 255) : '';
       const id = typeof raw.id === 'string' ? raw.id.trim().slice(0, 64) : '';
-      if (!name || (id && !/^[A-Za-z0-9_:-]+$/.test(id))) {
-        res.status(400).json({ error: `Nom ou identifiant invalide à la ligne ${index + 1}.` });
+      const reference = typeof raw.reference === 'string' ? raw.reference.trim() : '';
+      if (!name || (id && !/^[A-Za-z0-9_:-]+$/.test(id)) || reference.length > 40) {
+        res.status(400).json({ error: `Nom, identifiant ou référence invalide à la ligne ${index + 1}.` });
         return;
       }
       const key = id ? `id:${id.toLowerCase()}` : `name:${name.toLocaleLowerCase('fr')}`;
@@ -1391,6 +1393,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
 
       normalizedItems.push({
         ...(id ? { id } : {}),
+        ...(reference ? { reference } : {}),
         name,
         ...(typeof raw.category === 'string' && raw.category.trim() ? { category: raw.category.trim().slice(0, 128) } : {}),
         ...(typeof raw.subcategory === 'string' ? { subcategory: raw.subcategory.trim().slice(0, 128) } : {}),
@@ -1413,17 +1416,29 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       const idMatch = item.id
         ? nextProducts.findIndex(product => product.id.toLowerCase() === item.id?.toLowerCase())
         : -1;
+      const referenceMatch = item.reference
+        ? nextProducts.findIndex(product => product.reference?.trim().toLocaleLowerCase('fr') === item.reference?.toLocaleLowerCase('fr'))
+        : -1;
       const nameMatch = nextProducts.findIndex(product => product.name.trim().toLocaleLowerCase('fr') === item.name.toLocaleLowerCase('fr'));
-      if (idMatch >= 0 && nameMatch >= 0 && idMatch !== nameMatch) {
-        res.status(409).json({ error: `L’identifiant et le nom de « ${item.name} » désignent deux produits différents.` });
+      const matchedIndexes = [idMatch, referenceMatch, nameMatch].filter(index => index >= 0);
+      if (new Set(matchedIndexes).size > 1) {
+        res.status(409).json({ error: `L’identifiant, la référence et le nom de « ${item.name} » désignent des produits différents.` });
         return;
       }
-      const existingIndex = idMatch >= 0 ? idMatch : nameMatch;
+      const existingIndex = idMatch >= 0 ? idMatch : referenceMatch >= 0 ? referenceMatch : nameMatch;
       const existing = existingIndex >= 0 ? nextProducts[existingIndex] : undefined;
+      const duplicateReference = item.reference
+        ? nextProducts.find(product => product.id !== existing?.id && product.reference?.trim().toLocaleLowerCase('fr') === item.reference?.toLocaleLowerCase('fr'))
+        : undefined;
+      if (duplicateReference) {
+        res.status(409).json({ error: `La référence « ${item.reference} » est déjà attribuée au produit « ${duplicateReference.name} ».` });
+        return;
+      }
       const stock = item.stock ?? (existing ? (getTrackedProductStock(existing) ?? 0) : 0);
       const product: Product = enrichProductWithStockState({
         ...(existing || {} as Product),
         id: existing?.id || item.id || `prod-${randomUUID()}`,
+        ...(item.reference ? { reference: item.reference } : {}),
         name: item.name,
         category: item.category || existing?.category || 'Consommables médicaux',
         ...(item.subcategory !== undefined ? { subcategory: item.subcategory || undefined } : {}),
