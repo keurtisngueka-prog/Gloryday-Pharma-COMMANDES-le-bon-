@@ -3179,6 +3179,102 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     res.json(canSeeFinancials ? enrichedClients : enrichedClients.map(redactClientFinancialSummary));
   });
 
+  app.post('/api/clients/import', asyncHandler(async (req, res) => {
+    const user = (req as AuthenticatedRequest).authenticatedUser!;
+    const rawRecords = req.body?.records;
+    if (!Array.isArray(rawRecords) || rawRecords.length === 0) {
+      res.status(400).json({ error: 'Le fichier ne contient aucun client prêt à importer.' });
+      return;
+    }
+    if (rawRecords.length > 500) {
+      res.status(400).json({ error: 'Un import est limité à 500 clients.' });
+      return;
+    }
+
+    const clean = (value: unknown, maxLength: number) =>
+      typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, maxLength) : '';
+    const allowedFacilityTypes: FacilityType[] = ['Clinique', 'Polyclinique', 'Hôpital', 'Laboratoire', 'Pharmacie', 'Cabinet médical', 'Autre'];
+    const prepared: Array<Omit<ClientRecord, 'id' | 'createdAt' | 'updatedAt' | 'linkedUserId'>> = [];
+
+    for (let index = 0; index < rawRecords.length; index++) {
+      const body = rawRecords[index] && typeof rawRecords[index] === 'object' && !Array.isArray(rawRecords[index])
+        ? rawRecords[index]
+        : {};
+      const facilityName = clean(body.facilityName, 120);
+      const contactName = clean(body.contactName, 120);
+      const companyPhone = clean(body.companyPhone, 32);
+      if (!facilityName || !contactName || !companyPhone || !/^\+?\d{8,15}$/.test(normalizePhone(companyPhone))) {
+        res.status(400).json({ error: `La ligne ${index + 1} doit contenir un nom, un contact et un téléphone d’entreprise valide.` });
+        return;
+      }
+      const rawFacilityType = clean(body.facilityType, 60);
+      if (rawFacilityType && !allowedFacilityTypes.includes(rawFacilityType as FacilityType)) {
+        res.status(400).json({ error: `Le type de structure de la ligne ${index + 1} n’est pas reconnu.` });
+        return;
+      }
+      prepared.push({
+        facilityName,
+        invoiceName: clean(body.invoiceName, 120) || undefined,
+        facilityType: (rawFacilityType as FacilityType) || 'Clinique',
+        facilityTypeOther: clean(body.facilityTypeOther, 120) || undefined,
+        contactName,
+        directorName: clean(body.directorName, 120) || undefined,
+        companyPhone,
+        secondaryPhone: clean(body.secondaryPhone, 32) || undefined,
+        city: clean(body.city, 100) || undefined,
+        deliveryAddress: clean(body.deliveryAddress, 300) || undefined,
+        deliveryInstructions: clean(body.deliveryInstructions, 250) || undefined,
+        assignedToCommercialId: user.role === 'Commercial' ? user.id : undefined,
+      });
+    }
+
+    const existingRecords = store.clientRecords || [];
+    const existingClientAccounts = store.accounts.filter((account) => account.user.role === 'client').map((account) => account.user);
+    const normalizeClientName = (value: string) => value.trim().toLocaleLowerCase('fr').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
+    const normalizeClientPhone = (value: string) => normalizePhone(value).replace(/\D/g, '');
+    const knownNames = new Set([
+      ...existingRecords.map((record) => normalizeClientName(record.facilityName)),
+      ...existingClientAccounts.map((account) => normalizeClientName(account.facilityName)),
+    ]);
+    const knownPhones = new Set([
+      ...existingRecords.map((record) => normalizeClientPhone(record.companyPhone)),
+      ...existingClientAccounts.map((account) => normalizeClientPhone(account.companyPhone || account.phone)),
+    ]);
+    const now = new Date().toISOString();
+    const importedRecords: ClientRecord[] = [];
+    let duplicateCount = 0;
+    for (const record of prepared) {
+      const nameKey = normalizeClientName(record.facilityName);
+      const phoneKey = normalizeClientPhone(record.companyPhone);
+      if (knownNames.has(nameKey) || knownPhones.has(phoneKey)) {
+        duplicateCount++;
+        continue;
+      }
+      knownNames.add(nameKey);
+      knownPhones.add(phoneKey);
+      importedRecords.push({ ...record, id: `client-${randomUUID()}`, createdAt: now, updatedAt: now });
+    }
+
+    if (importedRecords.length > 0) {
+      store.clientRecords = [...importedRecords, ...existingRecords];
+      appendStaffLog(user, {
+        category: 'system',
+        severity: 'info',
+        actionLabel: 'Import du répertoire clients',
+        targetType: 'settings',
+        targetId: 'client-directory',
+        targetLabel: 'Répertoire clients',
+        details: `${importedRecords.length} fiche(s) ajoutée(s), ${duplicateCount} doublon(s) ignoré(s).`,
+      });
+      await saveStore(store, persistence);
+    }
+
+    res.status(importedRecords.length > 0 ? 201 : 200).json({
+      createdCount: importedRecords.length,
+      duplicateCount,
+    });
+  }));
+
   app.post('/api/clients', asyncHandler(async (req, res) => {
     const user = (req as AuthenticatedRequest).authenticatedUser!;
     const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};

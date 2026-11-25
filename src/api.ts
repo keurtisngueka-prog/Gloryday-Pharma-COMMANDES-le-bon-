@@ -468,6 +468,13 @@ export const api = {
     return request<ClientRecord>('/api/clients', { method: 'POST', body: JSON.stringify(data) });
   },
 
+  async importClientRecords(records: Array<Omit<ClientRecord, 'id' | 'createdAt' | 'updatedAt' | 'linkedUserId' | 'assignedToCommercialId'>>): Promise<{ createdCount: number; duplicateCount: number }> {
+    return request<{ createdCount: number; duplicateCount: number }>('/api/clients/import', {
+      method: 'POST',
+      body: JSON.stringify({ records }),
+    });
+  },
+
   async updateClientRecord(recordId: string, data: Partial<Omit<ClientRecord, 'id' | 'createdAt' | 'updatedAt' | 'linkedUserId' | 'assignedToCommercialId'>>): Promise<ClientRecord> {
     return request<ClientRecord>(`/api/clients/${encodeURIComponent(recordId)}`, { method: 'PATCH', body: JSON.stringify(data) });
   },

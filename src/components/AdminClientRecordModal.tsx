@@ -73,8 +73,8 @@ export const AdminClientRecordModal: React.FC<AdminClientRecordModalProps> = ({ 
           <div className="flex items-start gap-3">
             <span className="rounded-xl bg-blue-100 p-2 text-blue-800"><Building2 className="h-5 w-5" /></span>
             <div>
-              <h2 id="client-record-title" className="text-lg font-black text-slate-950">{record ? 'Modifier la fiche client' : 'Ajouter un établissement client'}</h2>
-              <p className="mt-1 text-xs text-slate-600">Créez le dossier maintenant. Le client pourra créer son compte plus tard et vous pourrez le rattacher ici.</p>
+              <h2 id="client-record-title" className="text-lg font-black text-slate-950">{record ? 'Modifier la fiche client' : 'Ajouter un client'}</h2>
+              <p className="mt-1 text-xs text-slate-600">Créez la fiche maintenant. Le client pourra créer son compte plus tard et vous pourrez le rattacher ici.</p>
             </div>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-white" aria-label="Fermer"><X className="h-5 w-5" /></button>
@@ -82,7 +82,7 @@ export const AdminClientRecordModal: React.FC<AdminClientRecordModalProps> = ({ 
 
         <form onSubmit={handleSubmit} className="min-h-0 space-y-4 overflow-y-auto p-5">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label className="text-xs font-bold text-slate-700 sm:col-span-2">Nom de l’établissement *
+            <label className="text-xs font-bold text-slate-700 sm:col-span-2">Nom de l’entreprise ou structure *
               <input required maxLength={120} value={facilityName} onChange={(event) => setFacilityName(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-medium" />
             </label>
             <label className="text-xs font-bold text-slate-700">Nom court sur facture

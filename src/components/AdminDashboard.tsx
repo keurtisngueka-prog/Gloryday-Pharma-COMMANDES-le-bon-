@@ -62,7 +62,9 @@ import type { CatalogImportPreviewResult } from '../utils/dataExport';
 import { CatalogExcelImportModal } from './CatalogExcelImportModal';
 import { AdminCreateOrderModal } from './AdminCreateOrderModal';
 import { AdminClientRecordModal } from './AdminClientRecordModal';
+import { ClientDirectoryExcelModal } from './ClientDirectoryExcelModal';
 import { OrderDiscountModal } from './OrderDiscountModal';
+import { downloadClientDirectoryXlsx } from '../utils/clientDirectorySpreadsheet';
 
 const hasValidOrderCoordinates = (order: Order): boolean => {
   const coordinates = order.customer.coordinates;
@@ -197,6 +199,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [targetMessageClient, setTargetMessageClient] = useState<any | null>(null);
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
   const [isClientRecordModalOpen, setIsClientRecordModalOpen] = useState(false);
+  const [isClientDirectoryExcelOpen, setIsClientDirectoryExcelOpen] = useState(false);
+  const [clientDirectoryFeedback, setClientDirectoryFeedback] = useState('');
   const [editingClientRecord, setEditingClientRecord] = useState<(ClientRecord & { linkedUserId?: string }) | null>(null);
   const [selectedHistoryClientId, setSelectedHistoryClientId] = useState<string | null>(null);
   const [clientsModuleView, setClientsModuleView] = useState<'directory' | 'purchase-history'>('directory');
@@ -249,6 +253,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       else exports.downloadProductsCSV(displayedProducts);
     } catch {
       setExcelImportFeedback('L’export n’a pas pu être préparé. Réessayez dans un instant.');
+    }
+  };
+
+  const handleClientDirectoryExport = async () => {
+    try {
+      await downloadClientDirectoryXlsx(clients);
+      setClientDirectoryFeedback('Le répertoire clients a été exporté en Excel.');
+    } catch {
+      setClientDirectoryFeedback('L’export Excel du répertoire clients a échoué. Réessayez dans un instant.');
     }
   };
 
@@ -624,7 +637,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }`}
           >
             <Users className="w-3.5 h-3.5" />
-            <span>Cliniques & Contacts ({clients.length})</span>
+            <span>Clients & structures ({clients.length})</span>
           </button>
         )}
         {hasPerm('messages_view') && (
@@ -1719,7 +1732,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="font-bold text-base text-slate-900">
-                Répertoire des Établissements Hospitaliers & Cliniques
+                Répertoire des clients
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 Consultez les coordonnées, le volume d'affaires et l'historique complet des achats de chaque client.
@@ -1756,6 +1769,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <Megaphone className="w-4 h-4" />
                 <span>Informer tous les clients</span>
               </button>}
+              {canViewClients && <button
+                type="button"
+                onClick={() => void handleClientDirectoryExport()}
+                disabled={!clients.length}
+                className="py-2 px-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                <span>Exporter Excel</span>
+              </button>}
+              {canManageClients && <button
+                type="button"
+                onClick={() => { setIsClientDirectoryExcelOpen(true); setClientDirectoryFeedback(''); }}
+                className="py-2 px-3 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-bold text-xs flex items-center gap-2 cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Importer Excel</span>
+              </button>}
               {canManageClients && <button
                 type="button"
                 onClick={() => { setEditingClientRecord(null); setIsClientRecordModalOpen(true); }}
@@ -1766,6 +1796,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>}
             </div>
           </div>
+          {clientDirectoryFeedback && <p role="status" className="border-b border-emerald-100 bg-emerald-50 px-4 py-2.5 text-xs font-semibold text-emerald-900">{clientDirectoryFeedback}</p>}
           {clientsModuleView === 'purchase-history' ? (
             <ClientPurchaseHistoryView
               clients={clients}
@@ -1790,7 +1821,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 type="text"
                 value={clientDirectorySearch}
                 onChange={(e) => setClientDirectorySearch(e.target.value)}
-                placeholder="Rechercher un établissement, un contact ou un téléphone..."
+                placeholder="Rechercher un client, une structure, un contact ou un téléphone..."
                 className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-[#0d44e8]"
               />
             </div>
@@ -2037,6 +2068,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           clients={clients}
           onClose={() => { setIsClientRecordModalOpen(false); setEditingClientRecord(null); }}
           onSaved={() => { setIsClientRecordModalOpen(false); setEditingClientRecord(null); onRefresh(); }}
+        />
+      )}
+
+      {isClientDirectoryExcelOpen && canManageClients && (
+        <ClientDirectoryExcelModal
+          clients={clients}
+          onClose={() => setIsClientDirectoryExcelOpen(false)}
+          onImported={(message) => {
+            setClientDirectoryFeedback(message);
+            setIsClientDirectoryExcelOpen(false);
+            onRefresh();
+          }}
         />
       )}
 

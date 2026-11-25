@@ -284,7 +284,7 @@ ADMIN_PASSWORD=<secret-unique-de-8-a-85-caracteres>`;
                 Portefeuille Clients CSV
               </h4>
               <p className="text-[11px] text-[#6a6a6b] mt-1 leading-relaxed">
-                Liste des cliniques, pharmacies et hôpitaux avec contacts, numéros de téléphone et volumes d'achats cumulés.
+                Liste des clients et structures avec contacts, numéros de téléphone et volumes d'achats cumulés.
               </p>
             </div>
             <button
