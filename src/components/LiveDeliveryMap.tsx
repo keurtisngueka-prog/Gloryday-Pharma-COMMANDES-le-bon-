@@ -1,4 +1,7 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Coordinates, DeliveryLocationPoint } from '../types';
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+import 'maplibre-gl/dist/maplibre-gl.css';
 
 interface LiveDeliveryMapProps {
   points: DeliveryLocationPoint[];
@@ -6,172 +9,281 @@ interface LiveDeliveryMapProps {
   destinationLabel?: string;
 }
 
-const WIDTH = 800;
-const HEIGHT = 420;
-const TILE_SIZE = 256;
-const MAX_ZOOM = 16;
-const MIN_ZOOM = 10;
-const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+type GeoJsonLine = {
+  type: 'Feature';
+  properties: Record<string, never>;
+  geometry: { type: 'LineString'; coordinates: [number, number][] };
+};
 
-function project(latitude: number, longitude: number, zoom: number) {
-  const boundedLatitude = Math.max(-85.0511, Math.min(85.0511, latitude));
-  const worldSize = TILE_SIZE * 2 ** zoom;
-  const sinLatitude = Math.sin((boundedLatitude * Math.PI) / 180);
-  return {
-    x: ((longitude + 180) / 360) * worldSize,
-    y: (0.5 - Math.log((1 + sinLatitude) / (1 - sinLatitude)) / (4 * Math.PI)) * worldSize,
-  };
+type MapInstance = import('maplibre-gl').Map;
+type MarkerInstance = import('maplibre-gl').Marker;
+
+const OPENFREEMAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+const ROUTING_BASE_URL = (import.meta.env.VITE_ROUTING_API_BASE_URL || 'https://router.project-osrm.org').replace(/\/$/, '');
+const LIBREVILLE_CENTER: [number, number] = [9.4536, 0.3924];
+const EMPTY_LINE: GeoJsonLine = {
+  type: 'Feature',
+  properties: {},
+  geometry: { type: 'LineString', coordinates: [] },
+};
+
+function distanceMeters(from: Coordinates, to: Coordinates) {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const latitudeDelta = radians(to.lat - from.lat);
+  const longitudeDelta = radians(to.lng - from.lng);
+  const startLatitude = radians(from.lat);
+  const endLatitude = radians(to.lat);
+  const a = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(startLatitude) * Math.cos(endLatitude) * Math.sin(longitudeDelta / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function wrapTileX(x: number, count: number) {
-  return ((x % count) + count) % count;
+function markerElement(kind: 'courier' | 'destination') {
+  const element = document.createElement('div');
+  element.style.width = kind === 'courier' ? '30px' : '24px';
+  element.style.height = kind === 'courier' ? '30px' : '32px';
+  element.style.position = 'relative';
+  element.setAttribute('aria-label', kind === 'courier' ? 'Position actuelle du coursier' : 'Destination du client');
+  element.innerHTML = kind === 'courier'
+    ? '<span style="position:absolute;inset:0;border:2px solid #2563eb;border-radius:9999px;background:#2563eb26"></span><span style="position:absolute;inset:5px;border:2px solid #fff;border-radius:9999px;background:#1d4ed8;color:white;display:grid;place-items:center;font:700 12px/1 Arial;box-shadow:0 2px 8px #0f172a55">➤</span>'
+    : '<span style="position:absolute;left:3px;top:1px;width:18px;height:18px;border:3px solid #fff;border-radius:50% 50% 50% 0;background:#e11d48;transform:rotate(-45deg);box-shadow:0 2px 8px #0f172a66"></span><span style="position:absolute;left:9px;top:7px;width:6px;height:6px;border-radius:50%;background:#fff"></span>';
+  return element;
+}
+
+function fitToLatest(map: MapInstance, latest: DeliveryLocationPoint | null, destination?: Coordinates) {
+  const coordinates: [number, number][] = [];
+  if (latest) coordinates.push([latest.longitude, latest.latitude]);
+  if (destination) coordinates.push([destination.lng, destination.lat]);
+  if (!coordinates.length) return;
+  if (coordinates.length === 1) {
+    map.easeTo({ center: coordinates[0], zoom: 14, duration: 500 });
+    return;
+  }
+  const longitudes = coordinates.map(([longitude]) => longitude);
+  const latitudes = coordinates.map(([, latitude]) => latitude);
+  const west = Math.min(...longitudes);
+  const east = Math.max(...longitudes);
+  const south = Math.min(...latitudes);
+  const north = Math.max(...latitudes);
+  if (east - west < 0.0001 && north - south < 0.0001) {
+    map.easeTo({ center: [west, south], zoom: 14, duration: 500 });
+    return;
+  }
+  map.fitBounds([
+    [west, south],
+    [east, north],
+  ], { padding: { top: 70, right: 70, bottom: 85, left: 70 }, maxZoom: 14, duration: 600 });
 }
 
 export function LiveDeliveryMap({ points, destination, destinationLabel }: LiveDeliveryMapProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<MapInstance | null>(null);
+  const courierMarkerRef = useRef<MarkerInstance | null>(null);
+  const destinationMarkerRef = useRef<MarkerInstance | null>(null);
+  const userMovedMapRef = useRef(false);
+  const routeControllerRef = useRef<AbortController | null>(null);
+  const lastRouteRequestRef = useRef<{ start: Coordinates; destination: Coordinates; at: number } | null>(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [routeLine, setRouteLine] = useState<GeoJsonLine>(EMPTY_LINE);
+  const [routeSummary, setRouteSummary] = useState<{ distance: number; duration: number } | null>(null);
+  const [routeState, setRouteState] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
+  const latest = points.length ? points[points.length - 1] : null;
+  const trailLine = useMemo<GeoJsonLine>(() => ({
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'LineString',
+      coordinates: points.slice(-400).map((point) => [point.longitude, point.latitude]),
+    },
+  }), [points]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    let disposed = false;
+    let instance: MapInstance | null = null;
+
+    void import('maplibre-gl').then(({ Map, Marker, NavigationControl, AttributionControl, setWorkerUrl }) => {
+      if (disposed || !containerRef.current) return;
+      setWorkerUrl(maplibreWorkerUrl);
+      const center: [number, number] = latest
+        ? [latest.longitude, latest.latitude]
+        : destination
+          ? [destination.lng, destination.lat]
+          : LIBREVILLE_CENTER;
+      instance = new Map({
+        container: containerRef.current,
+        style: OPENFREEMAP_STYLE,
+        center,
+        zoom: 12,
+        minZoom: 3,
+        maxZoom: 19,
+        attributionControl: false,
+        renderWorldCopies: false,
+        cooperativeGestures: true,
+      });
+      mapRef.current = instance;
+      instance.addControl(new NavigationControl({ showCompass: false }), 'top-right');
+      instance.addControl(new AttributionControl({ compact: true, customAttribution: '© OpenFreeMap' }), 'bottom-right');
+      instance.on('dragstart', () => { userMovedMapRef.current = true; });
+      instance.on('zoomstart', (event) => {
+        if ((event as { originalEvent?: unknown }).originalEvent) userMovedMapRef.current = true;
+      });
+      courierMarkerRef.current = new Marker({ element: markerElement('courier'), anchor: 'center' });
+      destinationMarkerRef.current = new Marker({ element: markerElement('destination'), anchor: 'bottom' });
+
+      instance.on('load', () => {
+        if (disposed || !instance) return;
+        instance.addSource('delivery-route', { type: 'geojson', data: EMPTY_LINE as never });
+        instance.addSource('courier-trail', { type: 'geojson', data: EMPTY_LINE as never });
+        instance.addLayer({
+          id: 'delivery-route-casing',
+          type: 'line',
+          source: 'delivery-route',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.96 },
+        });
+        instance.addLayer({
+          id: 'delivery-route-line',
+          type: 'line',
+          source: 'delivery-route',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#15803d', 'line-width': 5, 'line-opacity': 0.98 },
+        });
+        instance.addLayer({
+          id: 'courier-trail-line',
+          type: 'line',
+          source: 'courier-trail',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#1d4ed8', 'line-width': 4, 'line-opacity': 0.78, 'line-dasharray': [1.5, 1] },
+        });
+        setMapLoaded(true);
+        fitToLatest(instance, latest, destination);
+      });
+    }).catch(() => setRouteState('unavailable'));
+
+    return () => {
+      disposed = true;
+      setMapLoaded(false);
+      routeControllerRef.current?.abort();
+      routeControllerRef.current = null;
+      courierMarkerRef.current?.remove();
+      destinationMarkerRef.current?.remove();
+      courierMarkerRef.current = null;
+      destinationMarkerRef.current = null;
+      mapRef.current?.remove();
+      mapRef.current = null;
+      instance = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapLoaded || !map) return;
+    const routeSource = map.getSource('delivery-route') as import('maplibre-gl').GeoJSONSource | undefined;
+    const trailSource = map.getSource('courier-trail') as import('maplibre-gl').GeoJSONSource | undefined;
+    routeSource?.setData(routeLine as never);
+    trailSource?.setData(trailLine as never);
+
+    if (latest) courierMarkerRef.current?.setLngLat([latest.longitude, latest.latitude]).addTo(map);
+    else courierMarkerRef.current?.remove();
+    if (destination) destinationMarkerRef.current?.setLngLat([destination.lng, destination.lat]).addTo(map);
+    else destinationMarkerRef.current?.remove();
+
+    if (!userMovedMapRef.current) fitToLatest(map, latest, destination);
+  }, [mapLoaded, latest?.latitude, latest?.longitude, destination?.lat, destination?.lng, routeLine, trailLine]);
+
+  useEffect(() => {
+    if (!latest || !destination) {
+      setRouteLine(EMPTY_LINE);
+      setRouteSummary(null);
+      setRouteState('idle');
+      return;
+    }
+    const start = { lat: latest.latitude, lng: latest.longitude };
+    const previous = lastRouteRequestRef.current;
+    const sameDestination = previous && Math.abs(previous.destination.lat - destination.lat) < 0.0001
+      && Math.abs(previous.destination.lng - destination.lng) < 0.0001;
+    if (previous && sameDestination && Date.now() - previous.at < 45_000 && distanceMeters(previous.start, start) < 250) return;
+
+    routeControllerRef.current?.abort();
+    const controller = new AbortController();
+    routeControllerRef.current = controller;
+    const timer = window.setTimeout(async () => {
+      setRouteState('loading');
+      try {
+        const coordinates = `${start.lng},${start.lat};${destination.lng},${destination.lat}`;
+        const response = await fetch(`${ROUTING_BASE_URL}/route/v1/driving/${coordinates}?overview=full&geometries=geojson&steps=false`, {
+          signal: controller.signal,
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) throw new Error('Routing request failed');
+        const result = await response.json();
+        const route = result?.code === 'Ok' ? result.routes?.[0] : undefined;
+        const routeCoordinates = route?.geometry?.coordinates;
+        if (!Array.isArray(routeCoordinates) || routeCoordinates.length < 2) throw new Error('No road route found');
+        const validCoordinates = routeCoordinates.filter((coordinate: unknown) => Array.isArray(coordinate)
+          && coordinate.length >= 2
+          && Number.isFinite(Number(coordinate[0]))
+          && Number.isFinite(Number(coordinate[1]))) as [number, number][];
+        if (validCoordinates.length < 2) throw new Error('Invalid road route');
+        setRouteLine({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: validCoordinates } });
+        setRouteSummary({ distance: Number(route.distance) || 0, duration: Number(route.duration) || 0 });
+        setRouteState('ready');
+        lastRouteRequestRef.current = { start, destination, at: Date.now() };
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        lastRouteRequestRef.current = { start, destination, at: Date.now() };
+        setRouteState('unavailable');
+      }
+    }, 500);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [latest?.latitude, latest?.longitude, destination?.lat, destination?.lng]);
+
+  const recenter = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    userMovedMapRef.current = false;
+    fitToLatest(map, latest, destination);
+  };
+
   if (!points.length && !destination) {
     return (
-      <div className="relative h-[300px] overflow-hidden rounded-[24px] bg-[#eaf2ed] sm:h-[360px]" aria-label="Aperçu illustratif de la carte de livraison">
-        <svg viewBox="0 0 800 420" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full" aria-hidden="true">
-          <rect width="800" height="420" fill="#eaf2ed" />
-          <path d="M0 300C105 248 116 174 212 145S373 163 444 111 621 18 800 54V0H0Z" fill="#d8ead7" />
-          <path d="M0 400C130 360 198 380 310 333S525 279 800 308V420H0Z" fill="#dcebd9" />
-          <path d="M-40 260C120 225 181 290 321 240S543 194 843 213" fill="none" stroke="#c9d8d1" strokeWidth="26" />
-          <path d="M-40 260C120 225 181 290 321 240S543 194 843 213" fill="none" stroke="#fff" strokeWidth="19" />
-          <path d="M90 -40C130 68 180 135 234 219S334 340 380 462" fill="none" stroke="#c9d8d1" strokeWidth="23" />
-          <path d="M90 -40C130 68 180 135 234 219S334 340 380 462" fill="none" stroke="#fff" strokeWidth="17" />
-          <path d="M450 -30C423 92 468 174 510 251S608 347 630 457" fill="none" stroke="#c9d8d1" strokeWidth="22" />
-          <path d="M450 -30C423 92 468 174 510 251S608 347 630 457" fill="none" stroke="#fff" strokeWidth="16" />
-          <path d="M-20 106C115 132 232 104 350 132S587 168 835 126" fill="none" stroke="#d4e0da" strokeWidth="14" />
-          <path d="M-20 106C115 132 232 104 350 132S587 168 835 126" fill="none" stroke="#fff" strokeWidth="10" />
-          <path d="M50 365C167 309 261 322 350 291S540 262 734 300" fill="none" stroke="#d4e0da" strokeWidth="13" />
-          <path d="M50 365C167 309 261 322 350 291S540 262 734 300" fill="none" stroke="#fff" strokeWidth="9" />
-          <path d="M154 89C230 120 264 170 328 191S444 193 511 244 602 286 684 245" fill="none" stroke="#fff" strokeWidth="22" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M154 89C230 120 264 170 328 191S444 193 511 244 602 286 684 245" fill="none" stroke="#1677ef" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="16 11" />
-          <circle cx="154" cy="89" r="16" fill="#1677ef" stroke="#fff" strokeWidth="6" />
-          <circle cx="684" cy="245" r="18" fill="#fff" />
-          <circle cx="684" cy="245" r="12" fill="#e34d59" />
-          <path d="M684 259l-9 15h18z" fill="#e34d59" />
-        </svg>
-        <div className="absolute left-[8%] top-[12%] rounded-2xl bg-white/95 px-3 py-2 shadow-lg ring-1 ring-slate-900/5">
-          <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">Départ</div>
-          <div className="mt-0.5 text-xs font-extrabold text-slate-900">Dépôt Gloryday</div>
-        </div>
-        <div className="absolute right-[5%] top-[52%] max-w-[54%] rounded-2xl bg-white/95 px-3 py-2 shadow-lg ring-1 ring-slate-900/5">
-          <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">Arrivée</div>
-          <div className="mt-0.5 truncate text-xs font-extrabold text-slate-900">{destinationLabel || 'Établissement destinataire'}</div>
-        </div>
-        <div className="absolute left-3 top-3 inline-flex items-center gap-2 rounded-full bg-white/95 px-3 py-2 text-[10px] font-extrabold text-slate-700 shadow-md">
-          <span className="h-2 w-2 rounded-full bg-amber-400" /> Aperçu illustratif · GPS précis non renseigné
-        </div>
-        <div className="absolute bottom-3 left-3 max-w-[72%] rounded-xl bg-white/95 px-3 py-2 text-[10px] font-medium leading-relaxed text-slate-600 shadow-md">
-          Cette illustration n’est pas une carte réelle. La carte réelle s’affiche dès que la destination de cette commande a des coordonnées GPS.
-        </div>
-        <div className="absolute bottom-3 right-3 rounded-xl bg-white/90 p-1.5 text-slate-500 shadow-md" aria-hidden="true">
-          <span className="text-base leading-none">⌖</span>
+      <div className="flex h-[300px] items-center justify-center rounded-[24px] border border-dashed border-slate-300 bg-slate-50 p-6 text-center sm:h-[360px]" aria-label="Coordonnées de livraison absentes">
+        <div className="max-w-sm">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-xl text-emerald-800" aria-hidden="true">⌖</div>
+          <h3 className="mt-3 text-sm font-extrabold text-slate-900">Localisation GPS indisponible</h3>
+          <p className="mt-1 text-xs leading-relaxed text-slate-600">Aucune coordonnée réelle n’est enregistrée pour cette livraison. Ajoutez la position de destination ou démarrez le partage GPS du coursier pour afficher le suivi sur la carte.</p>
+          <p className="mt-2 text-[10px] font-semibold text-slate-400">{destinationLabel || 'Destination de la commande non géolocalisée'}</p>
         </div>
       </div>
     );
   }
-  const latest = points.length ? points[points.length - 1] : null;
-  const coordinates = [
-    ...points.slice(-400).map((point) => ({ latitude: point.latitude, longitude: point.longitude })),
-    ...(destination ? [{ latitude: destination.lat, longitude: destination.lng }] : []),
-  ];
-  let zoom = MAX_ZOOM;
-  let projected = coordinates.map((point) => project(point.latitude, point.longitude, zoom));
-  let bounds = {
-    minX: Math.min(...projected.map((point) => point.x)),
-    maxX: Math.max(...projected.map((point) => point.x)),
-    minY: Math.min(...projected.map((point) => point.y)),
-    maxY: Math.max(...projected.map((point) => point.y)),
-  };
-  while (zoom > MIN_ZOOM && (bounds.maxX - bounds.minX > WIDTH - 70 || bounds.maxY - bounds.minY > HEIGHT - 70)) {
-    zoom -= 1;
-    projected = coordinates.map((point) => project(point.latitude, point.longitude, zoom));
-    bounds = {
-      minX: Math.min(...projected.map((point) => point.x)),
-      maxX: Math.max(...projected.map((point) => point.x)),
-      minY: Math.min(...projected.map((point) => point.y)),
-      maxY: Math.max(...projected.map((point) => point.y)),
-    };
-  }
-  const center = { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 };
-  const screenPoint = (point: Pick<DeliveryLocationPoint, 'latitude' | 'longitude'>) => {
-    const projected = project(point.latitude, point.longitude, zoom);
-    return {
-      x: projected.x - center.x + WIDTH / 2,
-      y: projected.y - center.y + HEIGHT / 2,
-    };
-  };
-  const trail = points.slice(-400).map(screenPoint);
-  const trailPath = trail.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
-  const courierPoint = latest ? screenPoint(latest) : null;
-  const destinationPoint = destination ? screenPoint({ latitude: destination.lat, longitude: destination.lng }) : null;
-  const destinationVisible = destinationPoint && destinationPoint.x >= 0 && destinationPoint.x <= WIDTH && destinationPoint.y >= 0 && destinationPoint.y <= HEIGHT;
-  const tileCount = 2 ** zoom;
-  const centerTileX = Math.floor(center.x / TILE_SIZE);
-  const centerTileY = Math.floor(center.y / TILE_SIZE);
-  const accuracyMetersPerPixel = latest ? 156543.03392 * Math.cos((latest.latitude * Math.PI) / 180) / 2 ** zoom : 0;
-  const accuracyRadius = latest ? Math.max(8, Math.min(70, latest.accuracy / Math.max(accuracyMetersPerPixel, 0.1))) : 0;
 
   return (
-    <div className="relative h-[300px] overflow-hidden rounded-[24px] border border-slate-200 bg-[#e9eef0] sm:h-[360px]" aria-label={latest ? 'Carte du trajet du livreur et de la destination de cette commande' : 'Carte réelle de la destination de cette commande, en attente du GPS livreur'}>
-      <div className="absolute inset-0 overflow-hidden">
-        {[-2, -1, 0, 1, 2].flatMap((offsetX) => [-1, 0, 1].map((offsetY) => {
-          const unwrappedX = centerTileX + offsetX;
-          const tileX = wrapTileX(unwrappedX, tileCount);
-          const tileY = centerTileY + offsetY;
-          if (tileY < 0 || tileY >= tileCount) return null;
-          const left = unwrappedX * TILE_SIZE - center.x + WIDTH / 2;
-          const top = tileY * TILE_SIZE - center.y + HEIGHT / 2;
-          const src = TILE_URL.replace('{z}', String(zoom)).replace('{x}', String(tileX)).replace('{y}', String(tileY));
-          return (
-            <img
-              key={`${tileX}-${tileY}`}
-              src={src}
-              alt=""
-              draggable={false}
-              className="absolute max-w-none select-none"
-              style={{ left, top, width: TILE_SIZE, height: TILE_SIZE }}
-            />
-          );
-        }))}
+    <div className="relative h-[320px] overflow-hidden rounded-[24px] border border-slate-200 bg-[#e9eef0] shadow-sm sm:h-[400px]" aria-label="Carte vectorielle et trajet réel du coursier">
+      <div ref={containerRef} className="absolute inset-0" />
+      {!mapLoaded && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100/90 text-xs font-semibold text-slate-600">Chargement de la carte…</div>}
+      <div className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2">
+        <span className="flex items-center gap-2 rounded-full border border-white/80 bg-white/95 px-3 py-2 text-[10px] font-extrabold text-slate-900 shadow-md backdrop-blur">
+          <span className={`h-2.5 w-2.5 rounded-full ${latest ? 'animate-pulse bg-emerald-500' : 'bg-amber-400'}`} />
+          {latest ? 'Position GPS du coursier' : 'GPS coursier en attente'}
+        </span>
+        {destination && <span className="rounded-full border border-white/80 bg-white/95 px-3 py-2 text-[10px] font-extrabold text-slate-900 shadow-md backdrop-blur">Destination client</span>}
       </div>
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden="true">
-        {trail.length > 1 && <path d={trailPath} fill="none" stroke="white" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" opacity="0.9" />}
-        {trail.length > 1 && <path d={trailPath} fill="none" stroke="#0d44e8" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />}
-        {destinationVisible && (
-          <g transform={`translate(${destinationPoint!.x},${destinationPoint!.y})`}>
-            <circle r="12" fill="#be123c" fillOpacity="0.2" />
-            <circle r="7" fill="#be123c" stroke="white" strokeWidth="3" />
-          </g>
-        )}
-        {courierPoint && <circle cx={courierPoint.x} cy={courierPoint.y} r={accuracyRadius} fill="#0d44e8" fillOpacity="0.12" />}
-        {courierPoint && <circle cx={courierPoint.x} cy={courierPoint.y} r="13" fill="#0d44e8" fillOpacity="0.18" />}
-        {courierPoint && <circle cx={courierPoint.x} cy={courierPoint.y} r="7" fill="#0d44e8" stroke="white" strokeWidth="3" />}
-      </svg>
-      <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-white/95 px-2.5 py-1.5 text-[10px] font-extrabold text-slate-900 shadow">
-        <span className={`h-2 w-2 rounded-full ${latest ? 'animate-pulse bg-emerald-500' : 'bg-amber-400'}`} />
-        {latest ? 'Position du livreur' : 'GPS livreur en attente'}
+      <div className="absolute bottom-3 left-3 z-10 max-w-[78%] rounded-2xl border border-white/80 bg-white/95 px-3 py-2.5 text-[10px] font-semibold leading-relaxed text-slate-700 shadow-lg backdrop-blur">
+        {routeState === 'loading' && 'Calcul du trajet routier…'}
+        {routeState === 'ready' && routeSummary && <><strong className="text-emerald-900">Trajet par les rues</strong> · {(routeSummary.distance / 1000).toFixed(1)} km · {Math.max(1, Math.round(routeSummary.duration / 60))} min estimées · OSRM</>}
+        {routeState === 'unavailable' && 'Trajet routier indisponible pour le moment. Les positions GPS réelles restent affichées.'}
+        {routeState === 'idle' && latest && !destination && 'Position GPS réelle du coursier.'}
+        {routeState === 'idle' && !latest && destination && `Destination GPS${destinationLabel ? ` · ${destinationLabel}` : ''} · en attente du coursier`}
+        {latest && <span className="mt-0.5 block text-[9px] text-slate-500">Dernière position {new Date(latest.recordedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}{typeof latest.accuracy === 'number' ? ` · précision ±${Math.round(latest.accuracy)} m` : ''} · estimation sans trafic en direct</span>}
+        <span className="mt-0.5 block text-[9px] text-slate-500">Fond : OpenFreeMap · données OpenStreetMap</span>
+        {destination?.source === 'neighborhood' && <span className="block text-[9px] font-semibold text-amber-800">Destination indicative du quartier : active le GPS client pour la porte exacte.</span>}
       </div>
-      {destinationVisible && (
-        <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-white/95 px-2.5 py-1.5 text-[10px] font-extrabold text-slate-900 shadow">
-          <span className="h-2 w-2 rounded-full bg-rose-600" /> Destination de cette commande
-        </div>
-      )}
-      {!latest && destination && (
-        <div className="absolute bottom-3 left-3 max-w-[78%] rounded-xl bg-white/95 px-3 py-2 text-[10px] font-semibold leading-relaxed text-slate-700 shadow-md">
-          Épingle rouge : destination GPS de ce client. Le point du livreur apparaîtra après son autorisation de partage.
-        </div>
-      )}
-      <a
-        href="https://www.openstreetmap.org/copyright"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="absolute bottom-1 right-1 rounded bg-white/90 px-1.5 py-0.5 text-[9px] text-slate-700"
-      >
-        © OpenStreetMap contributors
-      </a>
+      <button type="button" onClick={recenter} aria-label="Recentrer la carte sur le coursier et la destination" className="absolute bottom-3 right-3 z-10 flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white/95 text-lg font-black text-emerald-800 shadow-lg transition hover:bg-emerald-50">⌖</button>
     </div>
   );
 }

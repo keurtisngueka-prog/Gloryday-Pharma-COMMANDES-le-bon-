@@ -15,7 +15,8 @@ import {
   Compass,
   ShieldCheck,
   TrendingDown,
-  CheckCircle2
+  CheckCircle2,
+  Smartphone
 } from 'lucide-react';
 import { CartItem, Coordinates, CustomerInfo, Order, User } from '../types';
 import { PhoneNumberInput } from './PhoneNumberInput';
@@ -706,14 +707,20 @@ export const CartView: React.FC<CartViewProps> = ({
                   </p>
                 )}
                 {paymentMethod === 'airtel_money' && (
-                  <p className="mt-1.5 rounded-lg bg-blue-50 p-2 text-[10px] leading-relaxed text-blue-800">
-                    Envoyez le montant au numéro Airtel Money indiqué, gardez le SMS de confirmation, puis transmettez sa référence depuis votre espace client. Le paiement restera en attente jusqu’à sa vérification par Gloryday Pharma.
-                  </p>
+                  <div className="mt-1.5 rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-[10px] leading-relaxed text-rose-900">
+                    <p>Sur un téléphone Airtel, ouvrez le menu <strong>*150#</strong>, choisissez le transfert vers un numéro, saisissez le numéro Gloryday indiqué et le montant de la proforma. Vérifiez le bénéficiaire avant de confirmer. Le paiement sera contrôlé par Gloryday.</p>
+                    <a href={`tel:${encodeURIComponent('*150#')}`} className="mt-2 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-rose-700 px-3 font-bold text-white hover:bg-rose-800">
+                      <Smartphone className="h-4 w-4" /> Ouvrir Airtel Money (*150#)
+                    </a>
+                  </div>
                 )}
                 {paymentMethod === 'moov_money' && (
-                  <p className="mt-1.5 rounded-lg bg-blue-50 p-2 text-[10px] leading-relaxed text-blue-800">
-                    Envoyez le montant au numéro Moov Money indiqué, gardez le SMS de confirmation, puis transmettez sa référence depuis votre espace client. Le paiement restera en attente jusqu’à sa vérification par Gloryday Pharma.
-                  </p>
+                  <div className="mt-1.5 rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-[10px] leading-relaxed text-blue-900">
+                    <p>Sur un téléphone Moov, ouvrez le menu <strong>*555#</strong>, choisissez le transfert vers un numéro, saisissez le numéro Gloryday indiqué et le montant de la proforma. Vérifiez le bénéficiaire avant de confirmer. Le paiement sera contrôlé par Gloryday.</p>
+                    <a href={`tel:${encodeURIComponent('*555#')}`} className="mt-2 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-blue-700 px-3 font-bold text-white hover:bg-blue-800">
+                      <Smartphone className="h-4 w-4" /> Ouvrir Moov Money (*555#)
+                    </a>
+                  </div>
                 )}
                 {paymentMethod === 'virement' && (
                   <p className="mt-1.5 rounded-lg bg-amber-50 p-2 text-[10px] leading-relaxed text-amber-900">

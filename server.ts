@@ -9,6 +9,7 @@ import { createRequire } from 'module';
 import { waitUntil } from '@vercel/functions';
 import { INITIAL_PRODUCTS, INITIAL_PACKS, LEGACY_DEMO_PRODUCT_IDS, LEGACY_DEMO_PACK_IDS } from './src/data/initialProducts.js';
 import { buildNeighborhoodDeliveryAddress, getEstimatedDeliveryText, getNeighborhoodById, resolveOrderDestinationCoordinates } from './src/data/librevilleZones.js';
+import { isGrandLibrevilleLocality } from './src/data/gabonLocations.js';
 import {
   calculateItemVolumePrice,
   DEFAULT_VOLUME_DISCOUNT_SETTINGS,
@@ -17,6 +18,7 @@ import {
 } from './src/utils/volumeDiscount.js';
 import { FREE_DELIVERY_THRESHOLD_FCFA, getOrderPaidAmount, getOrderRemainingBalance } from './src/utils/orderFinance.js';
 import { getInvoiceReadyLineItems, getOrderBillingTotal, getInvoiceReadyTotal } from './src/utils/orderFulfillment.js';
+import { calculateInvoiceTaxAmounts, INVOICE_TVA_RATE } from './src/utils/invoiceTax.js';
 import { ALL_CONFIGURABLE_PERMISSIONS, getDefaultStaffPermissions, normalizeStaffPermissions } from './src/permissions.js';
 import {
   createSupabaseStorePersistence,
@@ -44,9 +46,11 @@ import type {
   OrderStatus,
   PaymentInstallment,
   InvoiceRecord,
+  InvoiceLineItem,
   ClientRemainderRequest,
   CourierInfo,
   DeliveryProof,
+  OrderTimelineEvent,
   DeliveryLocationPoint,
   StaffPermission,
   VolumeDiscountSettings,
@@ -65,6 +69,25 @@ import type {
   CollectionReminderOutcome,
   ClientRecord
 } from './src/types.js';
+
+function appendOrderTimelineEvent(
+  order: Order,
+  event: Omit<OrderTimelineEvent, 'id'> & { id?: string },
+): void {
+  const events = Array.isArray(order.timelineEvents) ? [...order.timelineEvents] : [];
+  if (!events.some((saved) => saved.type === 'order_received')) {
+    events.unshift({
+      id: `received-${order.id}`,
+      type: 'order_received',
+      label: 'Commande reçue',
+      timestamp: order.createdAt,
+    });
+  }
+  const id = event.id || randomUUID();
+  if (events.some((saved) => saved.id === id)) return;
+  events.push({ ...event, id });
+  order.timelineEvents = events.slice(-100);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -146,6 +169,14 @@ function cleanUser(user: User): User {
 
 function normalizePhone(p: string): string {
   return (p || '').replace(/[\s\-\.\(\)]/g, '').toLowerCase();
+}
+
+function normalizeClientName(value: string): string {
+  return (value || '').trim().toLocaleLowerCase('fr').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
+}
+
+function normalizeClientPhone(value: string): string {
+  return normalizePhone(value).replace(/\D/g, '');
 }
 
 function upsertCourierDirectory(store: ServerStore, info: CourierInfo): CourierInfo {
@@ -548,6 +579,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         stockMovements: hydratedStore.stockMovements || [],
         stockBatches: hydratedStore.stockBatches || []
       };
+      ensureProductReferences(store.products);
       await saveStore(store, persistence);
     } catch (error) {
       console.warn('Hydratation Supabase échouée; le démarrage sera interrompu en production :', error instanceof Error ? error.message : error);
@@ -846,7 +878,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       }
       else if (route.endsWith('/tracking-link')) allowed = hasPerm('logistics_manage');
       else if (route.endsWith('/finance')) allowed = [
-        'orders_finance_manage', 'payments_manage', 'receivables_payments_manage',
+        'orders_finance_manage', 'orders_invoice_correct', 'payments_manage', 'receivables_payments_manage',
         'receivables_reminders_manage', 'logistics_manage',
       ].some(permission => hasPerm(permission as StaffPermission));
       else if (route.endsWith('/discount')) allowed = role !== 'client' && ['GET', 'PATCH'].includes(method);
@@ -2389,16 +2421,39 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       return;
     }
     await recordLoginFailure(registrationKey);
-    const { phone, companyPhone, invoiceName, directorName, facilityName, contactName, facilityType, facilityTypeOther, password, deliveryAddress, coordinates, avatarUrl: rawAvatarUrl } = req.body || {};
+    const { phone, email, companyPhone, invoiceName, directorName, facilityName, contactName, facilityType, facilityTypeOther, password, city, neighborhoodId, neighborhoodName, deliveryInstructions, deliveryAddress, coordinates, avatarUrl: rawAvatarUrl } = req.body || {};
     const cleanPhone = normalizePhone(String(phone || ''));
     const cleanCompanyPhone = normalizePhone(String(companyPhone || ''));
+    const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    const cleanFacilityName = typeof facilityName === 'string'
+      ? facilityName.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 120)
+      : '';
+    const cleanCity = typeof city === 'string' ? city.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 100) : '';
+    const cleanNeighborhoodId = typeof neighborhoodId === 'string' ? neighborhoodId.trim().slice(0, 64) : '';
+    const selectedNeighborhood = cleanNeighborhoodId ? getNeighborhoodById(cleanNeighborhoodId) : undefined;
+    const cleanNeighborhoodName = typeof neighborhoodName === 'string'
+      ? neighborhoodName.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 100)
+      : selectedNeighborhood?.name || '';
+    const cleanDeliveryInstructions = typeof deliveryInstructions === 'string'
+      ? deliveryInstructions.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 250)
+      : '';
     const cleanPass = String(password || '');
-    if (!cleanPhone || !facilityName || !/^\+?\d{8,15}$/.test(cleanPhone)) {
+    if (!cleanPhone || !cleanFacilityName || !/^\+?\d{8,15}$/.test(cleanPhone)) {
       res.status(400).json({ error: 'Numéro de téléphone valide et nom de l’établissement obligatoires.' });
+      return;
+    }
+    if (!cleanCity || (isGrandLibrevilleLocality(cleanCity)
+      ? !selectedNeighborhood
+      : !cleanNeighborhoodName)) {
+      res.status(400).json({ error: 'Choisissez une ville et un quartier valides.' });
       return;
     }
     if (companyPhone && (!/^\+?\d{8,15}$/.test(cleanCompanyPhone) || cleanCompanyPhone.length < 8)) {
       res.status(400).json({ error: 'Saisissez un numéro d’entreprise valide ou laissez le champ vide.' });
+      return;
+    }
+    if (cleanEmail && (cleanEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail))) {
+      res.status(400).json({ error: 'Saisissez une adresse e-mail valide ou laissez le champ vide.' });
       return;
     }
     if (cleanPass.length < 8 || cleanPass.length > 85) {
@@ -2412,24 +2467,62 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(400).json({ error: error instanceof Error ? error.message : 'Photo de profil invalide.' });
       return;
     }
-    if (store.accounts.some(a => normalizePhone(a.user.phone) === cleanPhone)) {
-      res.status(409).json({ error: 'Un compte existe déjà avec ce numéro de téléphone. Veuillez vous connecter.' });
+    if (store.accounts.some((account) => account.user.role === 'client' && normalizePhone(account.user.phone) === cleanPhone)) {
+      res.status(409).json({ error: 'Ce numéro de connexion est déjà utilisé. Connectez-vous avec ce numéro ou utilisez-en un autre.' });
       return;
     }
+    if (cleanEmail && store.accounts.some((account) => account.user.role === 'client' && account.user.email?.trim().toLowerCase() === cleanEmail)) {
+      res.status(409).json({ error: 'Cette adresse e-mail est déjà utilisée par un compte client.' });
+      return;
+    }
+
+    const clientRecords = store.clientRecords || [];
+    const facilityNameKey = normalizeClientName(cleanFacilityName);
+    const phoneKey = cleanCompanyPhone ? normalizeClientPhone(cleanCompanyPhone) : '';
+    const phoneMatches = phoneKey
+      ? clientRecords.filter((record) => normalizeClientPhone(record.companyPhone) === phoneKey)
+      : [];
+    const nameMatches = clientRecords.filter((record) => normalizeClientName(record.facilityName) === facilityNameKey);
+    if (phoneMatches.length > 1 || (!phoneMatches.length && !cleanCompanyPhone && nameMatches.length > 1)) {
+      res.status(409).json({ error: 'Plusieurs fiches correspondent à ces informations. Demandez à l’équipe de vérifier le répertoire avant de créer le compte.' });
+      return;
+    }
+    if (phoneMatches.length && nameMatches.some((record) => record.id !== phoneMatches[0].id)) {
+      res.status(409).json({ error: 'Le téléphone et le nom renvoient à deux fiches différentes. Demandez à l’équipe de corriger la fiche client.' });
+      return;
+    }
+    if (!phoneMatches.length && cleanCompanyPhone && nameMatches.length) {
+      res.status(409).json({ error: 'Cette structure existe déjà avec un autre téléphone d’entreprise. Demandez à l’équipe de mettre sa fiche à jour avant de créer le compte.' });
+      return;
+    }
+    const matchedClientRecord = phoneMatches[0] || (!cleanCompanyPhone ? nameMatches[0] : undefined);
+    if (matchedClientRecord?.linkedUserId) {
+      res.status(409).json({ error: 'Cette fiche client est déjà rattachée à un compte. Contactez l’équipe Gloryday Pharma pour vérifier l’accès.' });
+      return;
+    }
+
     const newUser: User = {
       id: `usr-${randomUUID()}`,
       phone: String(phone).trim(),
-      companyPhone: companyPhone ? String(companyPhone).trim().slice(0, 32) : undefined,
-      invoiceName: typeof invoiceName === 'string' ? invoiceName.trim().slice(0, 120) || undefined : undefined,
-      directorName: typeof directorName === 'string' ? directorName.trim().slice(0, 120) || undefined : undefined,
-      facilityName: String(facilityName).trim().slice(0, 120),
-      contactName: contactName ? String(contactName).trim().slice(0, 120) : 'Responsable Approvisionnement',
-      facilityType: facilityType || 'Clinique',
-      facilityTypeOther: facilityTypeOther ? String(facilityTypeOther).slice(0, 120) : undefined,
+      email: cleanEmail || undefined,
+      companyPhone: matchedClientRecord?.companyPhone || (companyPhone ? String(companyPhone).trim().slice(0, 32) : undefined),
+      invoiceName: matchedClientRecord?.invoiceName || (typeof invoiceName === 'string' ? invoiceName.trim().slice(0, 120) || undefined : undefined),
+      directorName: matchedClientRecord?.directorName || (typeof directorName === 'string' ? directorName.trim().slice(0, 120) || undefined : undefined),
+      facilityName: matchedClientRecord?.facilityName || cleanFacilityName,
+      contactName: matchedClientRecord?.contactName || (contactName ? String(contactName).trim().slice(0, 120) : 'Responsable Approvisionnement'),
+      facilityType: matchedClientRecord?.facilityType || facilityType || 'Clinique',
+      facilityTypeOther: matchedClientRecord?.facilityTypeOther || (facilityTypeOther ? String(facilityTypeOther).slice(0, 120) : undefined),
       role: 'client',
       authProvider: 'credentials',
       avatarUrl,
-      deliveryAddress: String(deliveryAddress || 'Libreville, Gabon').slice(0, 300),
+      city: cleanCity,
+      neighborhoodId: selectedNeighborhood && isGrandLibrevilleLocality(cleanCity) ? selectedNeighborhood.id : undefined,
+      neighborhoodName: cleanNeighborhoodName || undefined,
+      deliveryAddress: String(deliveryAddress || matchedClientRecord?.deliveryAddress || `${cleanCity}, Gabon`).slice(0, 300),
+      deliveryInstructions: matchedClientRecord?.deliveryInstructions || cleanDeliveryInstructions || undefined,
+      secondaryPhone: matchedClientRecord?.secondaryPhone,
+      structureId: matchedClientRecord?.id,
+      assignedToCommercialId: matchedClientRecord?.assignedToCommercialId,
       coordinates: coordinates &&
         typeof coordinates.lat === 'number' && Number.isFinite(coordinates.lat) && coordinates.lat >= -90 && coordinates.lat <= 90 &&
         typeof coordinates.lng === 'number' && Number.isFinite(coordinates.lng) && coordinates.lng >= -180 && coordinates.lng <= 180
@@ -2437,8 +2530,57 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         : undefined,
       createdAt: new Date().toISOString()
     };
-    store.accounts.push({ user: newUser, passwordHash: await hashPassword(cleanPass) });
-    await saveStore(store, persistence);
+    const newAccount = { user: newUser, passwordHash: await hashPassword(cleanPass) };
+    const priorRecordState = matchedClientRecord
+      ? { linkedUserId: matchedClientRecord.linkedUserId, updatedAt: matchedClientRecord.updatedAt }
+      : undefined;
+    const priorOrderLinks = matchedClientRecord
+      ? store.orders.filter((order) => !order.clientRecordId
+          && normalizeClientPhone(order.customer?.phone || '') === normalizeClientPhone(matchedClientRecord.companyPhone)
+          && normalizeClientName(order.customer?.facilityName || '') === normalizeClientName(matchedClientRecord.facilityName))
+          .map((order) => ({ order, userId: order.userId, clientRecordId: order.clientRecordId }))
+      : [];
+    store.accounts.push(newAccount);
+    if (matchedClientRecord) {
+      matchedClientRecord.linkedUserId = newUser.id;
+      matchedClientRecord.updatedAt = new Date().toISOString();
+      for (const { order } of priorOrderLinks) {
+        order.userId = newUser.id;
+        order.clientRecordId = matchedClientRecord.id;
+      }
+    }
+    try {
+      if (persistence) {
+        await persistence.registerAccount(newAccount, matchedClientRecord);
+        try {
+          await saveStore(store, persistence);
+        } catch (error) {
+          // The account and optional directory link are already committed atomically.
+          console.warn('The new account was saved, but other registration records could not be synchronized.', error);
+        }
+      } else {
+        await saveStore(store, persistence);
+      }
+    } catch (error) {
+      store.accounts = store.accounts.filter((account) => account.user.id !== newUser.id);
+      if (matchedClientRecord && priorRecordState) {
+        matchedClientRecord.linkedUserId = priorRecordState.linkedUserId;
+        matchedClientRecord.updatedAt = priorRecordState.updatedAt;
+        for (const previous of priorOrderLinks) {
+          previous.order.userId = previous.userId;
+          previous.order.clientRecordId = previous.clientRecordId;
+        }
+      }
+      const errorCode = (error as { code?: string; message?: string })?.code;
+      const errorMessage = String((error as { message?: string })?.message || '');
+      if (errorCode === '23505' || /duplicate key|unique constraint/i.test(errorMessage)) {
+        res.status(409).json({ error: cleanEmail && /email/i.test(errorMessage)
+          ? 'Cette adresse e-mail est déjà utilisée par un compte client.'
+          : 'Ce numéro de connexion est déjà utilisé. Connectez-vous avec ce numéro ou utilisez-en un autre.' });
+        return;
+      }
+      throw error;
+    }
     await clearLoginFailures(registrationKey);
     const welcomeNotification: AppNotification = {
       id: `notif-${randomUUID()}`,
@@ -2554,13 +2696,25 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     if (has('facilityTypeOther')) {
       updatedUser.facilityTypeOther = cleanProfileText(body.facilityTypeOther, 120) || undefined;
     }
+    if (has('city')) {
+      const city = cleanProfileText(body.city, 100);
+      if (!city) {
+        res.status(400).json({ error: 'Choisissez une ville ou une commune.' });
+        return;
+      }
+      updatedUser.city = city;
+    }
     if (has('neighborhoodId')) {
       const neighborhoodId = cleanProfileText(body.neighborhoodId, 64);
-      if (!getNeighborhoodById(neighborhoodId)) {
+      if (neighborhoodId && !getNeighborhoodById(neighborhoodId)) {
         res.status(400).json({ error: 'Choisissez un quartier de livraison valide.' });
         return;
       }
-      updatedUser.neighborhoodId = neighborhoodId;
+      updatedUser.neighborhoodId = neighborhoodId || undefined;
+    }
+    if (has('neighborhoodName')) {
+      const neighborhoodName = cleanProfileText(body.neighborhoodName, 100);
+      updatedUser.neighborhoodName = neighborhoodName || undefined;
     }
     if (has('deliveryInstructions')) {
       if (typeof body.deliveryInstructions !== 'string' || body.deliveryInstructions.length > 250) {
@@ -2569,15 +2723,21 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       }
       updatedUser.deliveryInstructions = cleanProfileText(body.deliveryInstructions, 250) || undefined;
     }
-    if (has('neighborhoodId') || has('deliveryInstructions')) {
-      if (!updatedUser.neighborhoodId || !getNeighborhoodById(updatedUser.neighborhoodId)) {
-        res.status(400).json({ error: 'Choisissez un quartier de livraison valide.' });
+    if (has('city') || has('neighborhoodId') || has('neighborhoodName') || has('deliveryInstructions')) {
+      const city = updatedUser.city || 'Libreville';
+      const isMetroLocality = isGrandLibrevilleLocality(city);
+      const neighborhood = updatedUser.neighborhoodId ? getNeighborhoodById(updatedUser.neighborhoodId) : undefined;
+      if (isMetroLocality && !neighborhood) {
+        res.status(400).json({ error: 'Choisissez un quartier de Libreville, Akanda ou Owendo.' });
         return;
       }
-      updatedUser.deliveryAddress = buildNeighborhoodDeliveryAddress(
-        updatedUser.neighborhoodId,
-        updatedUser.deliveryInstructions || ''
-      );
+      if (!isMetroLocality && !updatedUser.neighborhoodName) {
+        res.status(400).json({ error: 'Choisissez un quartier pour cette ville.' });
+        return;
+      }
+      updatedUser.deliveryAddress = isMetroLocality && neighborhood
+        ? buildNeighborhoodDeliveryAddress(neighborhood.id, updatedUser.deliveryInstructions || '')
+        : [updatedUser.neighborhoodName, city, updatedUser.deliveryInstructions ? `Repère : ${updatedUser.deliveryInstructions}` : '', 'Gabon'].filter(Boolean).join(' · ');
     }
     if (has('avatarUrl')) {
       try {
@@ -3049,7 +3209,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
 
   const canViewOrderFinancials = (user: User) => user.role === 'Super-Admin' || Boolean(
     user.permissions?.some(permission => [
-      'orders_finance_view', 'orders_finance_manage', 'payments_manage',
+      'orders_finance_view', 'orders_finance_manage', 'orders_invoice_correct', 'payments_manage',
       'receivables_view', 'receivables_payments_manage', 'finance_view', 'stats_view',
     ].includes(permission))
   );
@@ -3059,13 +3219,13 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       'receivables_view', 'receivables_payments_manage', 'receivables_reminders_manage', 'payments_manage',
     ].includes(permission)));
     const hasLineAmountAccess = user.role === 'Super-Admin' || Boolean(user.permissions?.some(permission => [
-      'orders_finance_view', 'orders_finance_manage', 'finance_view', 'stats_view',
+      'orders_finance_view', 'orders_finance_manage', 'orders_invoice_correct', 'finance_view', 'stats_view',
     ].includes(permission)));
     const hasPaymentDetailsAccess = user.role === 'Super-Admin' || Boolean(user.permissions?.some(permission => [
-      'orders_finance_view', 'orders_finance_manage', 'payments_manage', 'receivables_payments_manage',
+      'orders_finance_view', 'orders_finance_manage', 'orders_invoice_correct', 'payments_manage', 'receivables_payments_manage',
     ].includes(permission)));
     const hasInvoiceAccess = user.role === 'Super-Admin' || Boolean(user.permissions?.some(permission => [
-      'orders_finance_view', 'orders_finance_manage',
+      'orders_finance_view', 'orders_finance_manage', 'orders_invoice_correct',
     ].includes(permission)));
     return {
       ...order,
@@ -3304,6 +3464,19 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       : 'Clinique';
     if (!facilityName || !companyPhone || !/^\+?\d{8,15}$/.test(normalizedCompanyPhone)) {
       res.status(400).json({ error: 'Le nom de l’établissement et un numéro de téléphone d’entreprise valide sont obligatoires.' });
+      return;
+    }
+    const sameName = normalizeClientName(facilityName);
+    const samePhone = normalizeClientPhone(companyPhone);
+    const duplicateRecord = (store.clientRecords || []).some((item) =>
+      normalizeClientName(item.facilityName) === sameName || normalizeClientPhone(item.companyPhone) === samePhone
+    );
+    const duplicateAccount = store.accounts.some(({ user: client }) => client.role === 'client' && (
+      normalizeClientName(client.facilityName) === sameName
+      || normalizeClientPhone(client.companyPhone || client.phone || '') === samePhone
+    ));
+    if (duplicateRecord || duplicateAccount) {
+      res.status(409).json({ error: 'Une fiche ou un compte existe déjà avec ce nom ou ce téléphone. Vérifiez la fiche existante au lieu d’en créer une seconde.' });
       return;
     }
     const now = new Date().toISOString();
@@ -4081,6 +4254,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(400).json({ error: 'Informations client et articles requis.' });
       return;
     }
+    const isDemoOrder = account?.user.isDemoAccount === true || clientProfile.isDemoAccount === true;
     const rawIdempotencyKey = req.body?.idempotencyKey;
     const idempotencyKey = typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey.trim() : '';
     if (rawIdempotencyKey !== undefined && (!idempotencyKey || !/^[A-Za-z0-9_-]{8,128}$/.test(idempotencyKey))) {
@@ -4149,9 +4323,11 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     }
 
     const requestedByProduct = new Map<string, number>();
-    for (const item of items) {
-      if (item.isQuote || item.price === 0) continue;
-      requestedByProduct.set(item.productId, (requestedByProduct.get(item.productId) || 0) + item.quantity);
+    if (!isDemoOrder) {
+      for (const item of items) {
+        if (item.isQuote || item.price === 0) continue;
+        requestedByProduct.set(item.productId, (requestedByProduct.get(item.productId) || 0) + item.quantity);
+      }
     }
     const stockUpdates: Array<{ product: Product; remaining: number }> = [];
     for (const [productId, requestedQuantity] of requestedByProduct) {
@@ -4211,11 +4387,11 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       directorName: clientProfile.directorName,
       phone: clientProfile.companyPhone || clientRecord?.companyPhone || clientProfile.phone,
       companyPhone: clientProfile.companyPhone || clientRecord?.companyPhone,
-      city: clientRecord?.city,
+      city: clientProfile.city || clientRecord?.city,
       secondaryPhone: clientProfile.secondaryPhone,
       deliveryAddress: String(customerInput.deliveryAddress || clientProfile.deliveryAddress || '').slice(0, 300),
       neighborhoodId: neighborhood?.id,
-      neighborhoodName: neighborhood?.name,
+      neighborhoodName: neighborhood?.name || String(customerInput.neighborhoodName || clientProfile.neighborhoodName || '').slice(0, 100) || undefined,
       notes: [clientRecord?.deliveryInstructions, String(customerInput.notes || '').trim()].filter(Boolean).join(' · ').slice(0, 1000),
       deliveryMode: customerInput.deliveryMode === 'retrait' ? 'retrait' as const : 'livraison' as const,
       paymentMethod: ['especes', 'airtel_money', 'moov_money', 'virement', 'cheque', 'en_compte'].includes(customerInput.paymentMethod) ? customerInput.paymentMethod : 'especes',
@@ -4256,7 +4432,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         total: finalLineTotal,
         isQuote: item.isQuote,
         isDeferredStock: Boolean(item.isDeferredStock),
-        stockReservedQuantity: item.isDeferredStock ? 0 : item.quantity,
+        stockReservedQuantity: isDemoOrder || item.isDeferredStock ? 0 : item.quantity,
         discountPercent: volumePrice.totalWithoutDiscount > 0
           ? Math.round(totalSavings / volumePrice.totalWithoutDiscount * 10000) / 100
           : 0,
@@ -4346,7 +4522,14 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       reference,
       ...(idempotencyKey ? { idempotencyKey } : {}),
       createdAt: createdNow.toISOString(),
+      timelineEvents: [{
+        id: `received-${reference}`,
+        type: 'order_received',
+        label: 'Commande reçue',
+        timestamp: createdNow.toISOString(),
+      }],
       ...(account ? { userId: account.user.id } : {}),
+      ...(isDemoOrder ? { isDemoOrder: true } : {}),
       ...(clientRecordId ? { clientRecordId } : {}),
       ...(isStaffOrderCreation ? {
         createdByUserId: user.id,
@@ -4363,7 +4546,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       isPaid: false,
       mobilePayment: customer.mobilePayment,
       deliveryStage: 'preparation',
-      stockReserved: stockUpdates.some((update) => (getTrackedProductStock(update.product) ?? 0) > update.remaining),
+      stockReserved: isDemoOrder ? false : stockUpdates.some((update) => (getTrackedProductStock(update.product) ?? 0) > update.remaining),
       deliveryZone: zoneName,
       deliveryEstimated: estimatedTime,
       expectedDeliveryDate,
@@ -4910,6 +5093,21 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     if (status === 'Annulée') await clearDeliveryLocations(order.id);
     store.orders[idx].status = status;
     if (status === 'Annulée') store.orders[idx].cancellationReason = cleanCancellationReason;
+    if (currentStatus !== status) {
+      const statusTimelineLabel = status === 'Confirmée'
+        ? 'Commande confirmée'
+        : status === 'En préparation'
+          ? 'Préparation démarrée'
+          : status === 'Annulée'
+            ? 'Commande annulée'
+            : `Statut mis à jour : ${status}`;
+      appendOrderTimelineEvent(store.orders[idx], {
+        type: 'status_changed',
+        label: statusTimelineLabel,
+        timestamp: new Date().toISOString(),
+        ...(status === 'Annulée' ? { description: cleanCancellationReason } : {}),
+      });
+    }
     if (user.role !== 'client') {
       appendStaffLog(user, {
         category: 'orders',
@@ -4990,6 +5188,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
 
     let courierChanged = false;
     let courierToSave: Order['courier'];
+    const deliveryEventTimestamp = new Date().toISOString();
     if (courier !== undefined) {
       if (actorRole !== 'Super-Admin' && actorRole !== 'Admin simple' && actorRole !== 'Logistique') {
         res.status(403).json({ error: 'Seule la logistique peut affecter un coursier.' });
@@ -5030,7 +5229,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         res.status(400).json({ error: 'Indiquez le nom du réceptionnaire et la référence du bon de livraison signé.' });
         return;
       }
-      order.deliveryProof = { receivedBy, receiptReference, timestamp: new Date().toISOString() };
+      order.deliveryProof = { receivedBy, receiptReference, timestamp: deliveryEventTimestamp };
     }
 
     if (courierToSave) {
@@ -5044,6 +5243,31 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         order.status = 'Livrée';
         order.stockReserved = false;
       }
+    }
+    if (courierChanged && courierToSave) {
+      appendOrderTimelineEvent(order, {
+        type: 'courier_assigned',
+        label: 'Livreur affecté',
+        timestamp: deliveryEventTimestamp,
+        description: courierToSave.name,
+      });
+    }
+    if (stageChanged) {
+      const deliveryStageLabels: Record<DeliveryStage, string> = {
+        preparation: 'Préparation démarrée',
+        picked_up: 'Colis remis au livreur',
+        in_transit: 'Commande en cours de livraison',
+        delivered: 'Livraison terminée',
+      };
+      appendOrderTimelineEvent(order, {
+        ...(stage === 'delivered' ? { id: `proof-${deliveryEventTimestamp}` } : {}),
+        type: 'delivery_stage',
+        label: deliveryStageLabels[stage],
+        timestamp: deliveryEventTimestamp,
+        ...(stage === 'delivered' && order.deliveryProof?.receivedBy
+          ? { description: `Réception enregistrée par ${order.deliveryProof.receivedBy}.` }
+          : {}),
+      });
     }
     if (stage === 'delivered') {
       await clearDeliveryLocations(order.id);
@@ -5144,7 +5368,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const staffPermissions = normalizeStaffPermissions(user.permissions, user.role as StaffRole);
     const orderViewPermissions = new Set<StaffPermission>([
       'orders_view', 'orders_create_for_client', 'orders_confirm', 'orders_cancel', 'orders_status_manage',
-      'orders_finance_view', 'orders_finance_manage', 'payments_manage', 'logistics_view', 'logistics_manage',
+      'orders_finance_view', 'orders_finance_manage', 'orders_invoice_correct', 'payments_manage', 'logistics_view', 'logistics_manage',
       'receivables_view', 'receivables_payments_manage', 'receivables_reminders_manage', 'finance_view',
     ]);
     const canAccessOrders = user.role === 'Super-Admin' || staffPermissions.some((permission) => orderViewPermissions.has(permission));
@@ -5337,7 +5561,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     if (persistence) {
       const [freshOrder, invoiceNumbers] = await Promise.all([
         persistence.loadOrderById(req.params.id),
-        Array.isArray(req.body?.invoices) ? persistence.loadInvoiceNumbers() : Promise.resolve(undefined),
+        Array.isArray(req.body?.invoices) || req.body?.invoiceCorrection ? persistence.loadInvoiceNumbers() : Promise.resolve(undefined),
       ]);
       if (!freshOrder) {
         res.status(404).json({ error: 'Commande introuvable.' });
@@ -5359,6 +5583,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     const body = req.body || {};
     const hasPermission = (permission: StaffPermission) => user.role === 'Super-Admin' || user.permissions?.includes(permission) === true;
     const previousCollectionDueDate = order.collectionDueDate;
+    const previousCourier = order.courier;
+    const previousDeliveryProof = order.deliveryProof;
     const sameValue = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
     const currentInvoices = order.invoices || [];
     const currentInstallments = order.installments || [];
@@ -5372,6 +5598,215 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         (body.deliveryFulfillments !== undefined && (!Array.isArray(body.deliveryFulfillments) || submittedFulfillments.length > 200)) ||
         (body.clientRemainderRequests !== undefined && (!Array.isArray(body.clientRemainderRequests) || submittedClientRemainderRequests.length > 20))) {
       res.status(400).json({ error: 'La liste des documents ou des paiements est invalide.' });
+      return;
+    }
+    if (body.invoiceCorrection !== undefined) {
+      if (Object.keys(body).length !== 1 || (!hasPermission('orders_invoice_correct') && !hasPermission('orders_finance_manage'))) {
+        res.status(403).json({ error: 'Vous n’avez pas le droit de corriger une facture émise.' });
+        return;
+      }
+      if (!canAccessDiscountOrder(order, user)) {
+        res.status(403).json({ error: 'Cette facture ne fait pas partie des commandes accessibles à votre compte.' });
+        return;
+      }
+
+      const correction = body.invoiceCorrection;
+      const correctionId = typeof correction?.correctionId === 'string' ? correction.correctionId.trim() : '';
+      const invoiceId = typeof correction?.invoiceId === 'string' ? correction.invoiceId.trim() : '';
+      const reason = typeof correction?.reason === 'string' ? correction.reason.trim().slice(0, 500) : '';
+      const rawLines = Array.isArray(correction?.lineItems) ? correction.lineItems : null;
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(correctionId) ||
+          !invoiceId || !reason || !rawLines || rawLines.length === 0 || rawLines.length > 200) {
+        res.status(400).json({ error: 'Indiquez la facture, le motif et ses lignes corrigées.' });
+        return;
+      }
+      if (currentInvoices.some((invoice) => invoice.correctionGroupId === correctionId)) {
+        res.json(redactOrderFinancialFields(order, user));
+        return;
+      }
+
+      const originalInvoice = currentInvoices.find((invoice) => invoice.id === invoiceId);
+      if (!originalInvoice || originalInvoice.type !== 'facture') {
+        res.status(404).json({ error: 'La facture à corriger est introuvable.' });
+        return;
+      }
+      if (originalInvoice.correctedByInvoiceId) {
+        res.status(409).json({ error: 'Cette version a déjà été remplacée. Corrigez la facture la plus récente.' });
+        return;
+      }
+      const originalLines = originalInvoice.lineItems || [];
+      if (originalLines.length === 0 || rawLines.length !== originalLines.length) {
+        res.status(409).json({ error: 'Cette ancienne facture ne contient pas le détail par article nécessaire à une correction.' });
+        return;
+      }
+
+      const originalLineKeys = originalLines.map((line) => `${line.itemIndex}:${line.quantity}`).sort();
+      const submittedLineKeys = rawLines.map((line: any) => `${Number(line?.itemIndex)}:${Number(line?.quantity)}`).sort();
+      if (JSON.stringify(originalLineKeys) !== JSON.stringify(submittedLineKeys)) {
+        res.status(400).json({ error: 'La correction peut changer la désignation, le conditionnement et les prix; les quantités livrées restent inchangées.' });
+        return;
+      }
+
+      const correctedLines: InvoiceLineItem[] = [];
+      for (const raw of rawLines) {
+        const itemIndex = Number(raw.itemIndex);
+        const quantity = Number(raw.quantity);
+        const previousLine = originalLines.find((line) => line.itemIndex === itemIndex && line.quantity === quantity);
+        const productId = typeof raw.productId === 'string' ? raw.productId.trim().slice(0, 120) : '';
+        const product = store.products.find((candidate) => candidate.id === productId);
+        const sameOriginalProduct = previousLine && productId === previousLine.productId;
+        const productName = product?.name || (sameOriginalProduct ? previousLine.productName : '');
+        const variant = typeof raw.variant === 'string' ? raw.variant.trim().slice(0, 120) : '';
+        const currentVariant = product?.variants.find((candidate) => candidate.label === variant);
+        const unchangedLegacyVariant = sameOriginalProduct && variant === previousLine.variant;
+        const unitPrice = Number(raw.unitPrice);
+        const lineTotal = Number(raw.lineTotal);
+        const savings = raw.savings === undefined ? 0 : Number(raw.savings);
+        if (!previousLine || !productName || !variant || (!currentVariant && !unchangedLegacyVariant) ||
+            !Number.isSafeInteger(unitPrice) || unitPrice < 0 || unitPrice > 1_000_000_000 ||
+            !Number.isSafeInteger(lineTotal) || lineTotal < 0 || lineTotal > 1_000_000_000 ||
+            !Number.isSafeInteger(savings) || savings < 0 || savings > unitPrice * quantity || lineTotal !== unitPrice * quantity - savings) {
+          res.status(400).json({ error: 'Une ligne corrigée contient un produit, un conditionnement ou un montant invalide.' });
+          return;
+        }
+        correctedLines.push({
+          itemIndex,
+          productId: product?.id || previousLine.productId,
+          productReference: product?.reference || (sameOriginalProduct ? previousLine.productReference : undefined),
+          productName,
+          variant,
+          quantity,
+          unitPrice,
+          lineTotal,
+          ...(savings > 0 ? { savings } : {}),
+          ...(Number.isFinite(Number(raw.discountPercent)) && Number(raw.discountPercent) > 0
+            ? { discountPercent: Math.min(100, Math.max(0, Number(raw.discountPercent))) }
+            : {}),
+          isQuote: false,
+        });
+      }
+
+      const deliveryFee = Math.max(0, Math.trunc(Number(originalInvoice.deliveryFee) || 0));
+      const correctedBaseAmount = correctedLines.reduce((sum, line) => sum + line.lineTotal, 0) + deliveryFee;
+      const correctionTaxes = calculateInvoiceTaxAmounts(correctedBaseAmount);
+      if (!Number.isSafeInteger(correctionTaxes.totalTTC) || correctionTaxes.totalTTC <= 0 || correctionTaxes.totalTTC > 1_000_000_000) {
+        res.status(400).json({ error: 'Le total corrigé doit être supérieur à 0 FCFA et rester dans la limite autorisée.' });
+        return;
+      }
+
+      if (currentInvoices.length + 2 > 200) {
+        res.status(409).json({ error: 'La limite de documents de cette commande est atteinte.' });
+        return;
+      }
+      const orderCode = order.reference.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      const documentYear = new Date().getFullYear();
+      const invoiceNumbers = new Set(persistedInvoiceNumbers || store.orders.flatMap((saved) => (saved.invoices || []).map((invoice) => invoice.number)));
+      let sequence = currentInvoices.length + 1;
+      let creditNumber = '';
+      let replacementNumber = '';
+      while (sequence < 10000) {
+        const suffix = String(sequence).padStart(2, '0');
+        creditNumber = `AVOIR-${documentYear}-${orderCode}-${suffix}`;
+        replacementNumber = `FAC-${documentYear}-${orderCode}-${suffix}`;
+        if (!invoiceNumbers.has(creditNumber) && !invoiceNumbers.has(replacementNumber)) break;
+        sequence += 1;
+      }
+      if (sequence >= 10000) {
+        res.status(409).json({ error: 'Aucun numéro de facture disponible pour enregistrer cette correction.' });
+        return;
+      }
+
+      const now = new Date();
+      const timestamp = now.toISOString();
+      const issueDate = timestamp.slice(0, 10);
+      const correctionGroupId = correctionId;
+      const creditId = `DOC-${randomUUID()}`;
+      const replacementId = `DOC-${randomUUID()}`;
+      const previousOrder = JSON.parse(JSON.stringify(order)) as Order;
+      const previousNotifications = [...store.notifications];
+      const previousStaffLogs = [...(store.staffLogs || [])];
+      const paidBeforeCorrection = getOrderPaidAmount(order);
+      const oldInvoice = { ...originalInvoice };
+      const credit: InvoiceRecord = {
+        ...oldInvoice,
+        id: creditId,
+        type: 'avoir',
+        number: creditNumber,
+        issueDate,
+        reason: `Annulation de ${oldInvoice.number} : ${reason}`,
+        correctionGroupId,
+        correctionOfInvoiceId: oldInvoice.id,
+        correctionReason: reason,
+      };
+      const replacement: InvoiceRecord = {
+        id: replacementId,
+        orderId: order.id,
+        orderReference: order.reference,
+        type: 'facture',
+        number: replacementNumber,
+        issueDate,
+        clientFacilityName: oldInvoice.clientFacilityName || order.customer.invoiceName || order.customer.facilityName,
+        tvaRate: correctionTaxes.tvaRate,
+        tvaAmount: correctionTaxes.tvaAmount,
+        cssRate: correctionTaxes.cssRate,
+        cssAmount: correctionTaxes.cssAmount,
+        totalHT: correctionTaxes.totalHT,
+        totalTTC: correctionTaxes.totalTTC,
+        lineItems: correctedLines,
+        deliveryFee,
+        includeStamp: oldInvoice.includeStamp === true,
+        reason: `Facture corrigée après ${oldInvoice.number} : ${reason}`,
+        correctionGroupId,
+        correctionOfInvoiceId: oldInvoice.id,
+        correctionReason: reason,
+      };
+      const correctionTimestamp = timestamp;
+      order.invoices = currentInvoices.map((invoice) => invoice.id === oldInvoice.id
+        ? { ...invoice, correctedByInvoiceId: replacement.id, correctedAt: correctionTimestamp, correctionReason: reason }
+        : invoice).concat(credit, replacement);
+      if (!order.installments?.length && order.isPaid && (!Number.isFinite(Number(order.amountPaid)) || Number(order.amountPaid) <= 0)) {
+        order.amountPaid = paidBeforeCorrection;
+      }
+      order.isPaid = paidBeforeCorrection >= getOrderBillingTotal(order);
+      if (order.isPaid) order.collectionDueDate = undefined;
+
+      const clientNotification: AppNotification = {
+        id: `notification-${randomUUID()}`,
+        timestamp,
+        type: 'admin_message',
+        message: `La facture ${oldInvoice.number} a été corrigée. L’avoir ${credit.number} et la nouvelle facture ${replacement.number} sont disponibles dans votre espace client.`,
+        targetRole: 'client',
+        userId: order.userId,
+        read: false,
+        actionUrl: '/#dashboard',
+      };
+      store.notifications.unshift(clientNotification);
+      const staffLog = appendStaffLog(user, {
+        category: 'finance',
+        severity: 'warning',
+        actionLabel: 'Facture corrigée par avoir et réémission',
+        targetType: 'order',
+        targetId: order.id,
+        targetLabel: `${order.reference} · ${order.customer.facilityName}`,
+        details: `${oldInvoice.number} annulée par ${credit.number}; ${replacement.number} émise. Motif : ${reason}. Livraison et stock inchangés.`,
+        previousValue: `${oldInvoice.totalTTC.toLocaleString('fr-FR')} FCFA TTC`,
+        newValue: `${replacement.totalTTC.toLocaleString('fr-FR')} FCFA TTC`,
+      });
+      try {
+        if (persistence) {
+          await persistence.persistOrderFinance({ order, notifications: [clientNotification], staffLog });
+          if (!process.env.VERCEL) saveStoreLocal(store);
+        } else {
+          saveStoreLocal(store);
+        }
+      } catch (error) {
+        store.orders[idx] = previousOrder;
+        store.notifications = previousNotifications;
+        store.staffLogs = previousStaffLogs;
+        throw error;
+      }
+      scheduleBackgroundTask(sendPushForNotification(clientNotification), `correction de facture ${order.reference}`);
+      res.json(redactOrderFinancialFields(order, user));
       return;
     }
     const remainderResponseUpdates: ClientRemainderRequest[] = [];
@@ -5426,7 +5861,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       const type = raw.type === 'facture' || raw.type === 'avoir' ? raw.type : null;
       const number = typeof raw.number === 'string' ? raw.number.trim().slice(0, 100) : '';
       const issueDate = typeof raw.issueDate === 'string' ? raw.issueDate : '';
-      const tvaRate = Number(raw.tvaRate);
+      const requestedTvaRate = Number(raw.tvaRate);
       const reason = typeof raw.reason === 'string' ? raw.reason.trim().slice(0, 500) : undefined;
       if (raw.includeStamp !== undefined && typeof raw.includeStamp !== 'boolean') {
         res.status(400).json({ error: 'Le choix du cachet sur le document est invalide.' });
@@ -5435,7 +5870,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       const numberMatchesType = type === 'facture' ? /^FAC-\d{4}-[A-Z0-9-]+$/.test(number) : /^AVOIR-\d{4}-[A-Z0-9-]+$/.test(number);
       if (!type || !numberMatchesType || invoiceNumbers.has(number) ||
           !/^\d{4}-\d{2}-\d{2}$/.test(issueDate) || !Number.isFinite(Date.parse(issueDate)) ||
-          !Number.isFinite(tvaRate) || tvaRate < 0 || tvaRate > 1 || (type === 'avoir' && !reason)) {
+          !Number.isFinite(requestedTvaRate) || requestedTvaRate !== INVOICE_TVA_RATE || (type === 'avoir' && !reason)) {
         res.status(400).json({ error: 'Les informations de la facture ou de l’avoir sont invalides.' });
         return;
       }
@@ -5457,12 +5892,12 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         res.status(409).json({ error: 'Une ancienne facture sans détail par article existe déjà. Cette commande doit être vérifiée avant toute nouvelle facture partielle.' });
         return;
       }
-      const totalTTC = type === 'avoir'
+      const baseAmount = type === 'avoir'
         ? getOrderBillingTotal(order)
         : deliveryTracked
           ? getInvoiceReadyTotal(order)
           : Math.max(0, Math.trunc(order.estimatedTotal));
-      if (type === 'facture' && totalTTC <= 0) {
+      if (type === 'facture' && baseAmount <= 0) {
         res.status(409).json({ error: deliveryTracked
           ? 'Aucune quantité livrée et non facturée. Enregistrez d’abord une livraison réelle avant d’émettre la facture.'
           : 'Le total de cette commande ne permet pas d’émettre une facture.' });
@@ -5470,9 +5905,11 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       }
       const lineItemsTotal = lineItems.reduce((sum, item) => sum + item.lineTotal, 0);
       const deliveryFee = type === 'facture' && (deliveryTracked || order.deliveryFee)
-        ? Math.max(0, totalTTC - lineItemsTotal)
+        ? Math.max(0, baseAmount - lineItemsTotal)
         : 0;
-      const totalHT = tvaRate > 0 ? Math.round(totalTTC / (1 + tvaRate)) : totalTTC;
+      const invoiceTaxes = type === 'facture'
+        ? calculateInvoiceTaxAmounts(baseAmount)
+        : { totalHT: baseAmount, tvaRate: 0, tvaAmount: 0, cssRate: 0, cssAmount: 0, totalTTC: baseAmount };
       newInvoices.push({
         id: raw.id.slice(0, 120),
         orderId: order.id,
@@ -5481,10 +5918,12 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         number,
         issueDate,
         clientFacilityName: order.customer.facilityName,
-        tvaRate,
-        tvaAmount: totalTTC - totalHT,
-        totalHT,
-        totalTTC,
+        tvaRate: invoiceTaxes.tvaRate,
+        tvaAmount: invoiceTaxes.tvaAmount,
+        cssRate: invoiceTaxes.cssRate,
+        cssAmount: invoiceTaxes.cssAmount,
+        totalHT: invoiceTaxes.totalHT,
+        totalTTC: invoiceTaxes.totalTTC,
         lineItems: type === 'facture' ? lineItems : undefined,
         deliveryFee,
         includeStamp: raw.includeStamp === true,
@@ -5595,6 +6034,14 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         return;
       }
     }
+    if (order.courier && !sameValue(previousCourier, order.courier)) {
+      appendOrderTimelineEvent(order, {
+        type: 'courier_assigned',
+        label: 'Livreur affecté',
+        timestamp: new Date().toISOString(),
+        description: order.courier.name,
+      });
+    }
 
     if (body.deliveryProof !== undefined) {
       if (!sameValue(body.deliveryProof, order.deliveryProof) && !hasPermission('logistics_manage')) {
@@ -5620,6 +6067,15 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         res.status(400).json({ error: 'Les informations de preuve de livraison sont invalides.' });
         return;
       }
+    }
+    if (order.deliveryProof && !sameValue(previousDeliveryProof, order.deliveryProof)) {
+      appendOrderTimelineEvent(order, {
+        id: `proof-${order.deliveryProof.timestamp}`,
+        type: 'delivery_stage',
+        label: 'Preuve de réception enregistrée',
+        timestamp: order.deliveryProof.timestamp,
+        description: `Réceptionnaire : ${order.deliveryProof.receivedBy}${order.deliveryProof.receiptReference ? ` · Bon ${order.deliveryProof.receiptReference}` : ''}`,
+      });
     }
 
     if (body.isPartialDelivery !== undefined) {
@@ -5750,6 +6206,16 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         });
         order.isPartialDelivery = !fullyResolved;
         order.partialDeliveryNotes = newFulfillments[newFulfillments.length - 1]?.notes;
+        for (const fulfillment of newFulfillments) {
+          const handedOverLines = fulfillment.lines.map((line) => `${line.quantity} × ${order.items[line.itemIndex]?.productName || 'article'}`);
+          appendOrderTimelineEvent(order, {
+            id: `fulfillment-${fulfillment.id}`,
+            type: 'delivery_fulfillment',
+            label: fullyResolved ? 'Livraison terminée · toutes les quantités remises' : 'Remise partielle enregistrée',
+            timestamp: fulfillment.fulfilledAt,
+            ...(handedOverLines.length ? { description: handedOverLines.join(' · ').slice(0, 400) } : {}),
+          });
+        }
         if (order.status !== 'Annulée') {
           order.status = fullyResolved ? 'Livrée' : 'En préparation';
           order.deliveryStage = fullyResolved ? 'delivered' : 'preparation';

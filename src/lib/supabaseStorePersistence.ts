@@ -21,7 +21,8 @@ import type {
   OperatingExpense,
   CollectionReminder,
   OrderDraft,
-  ClientRecord
+  ClientRecord,
+  FacilityType
 } from '../types.js';
 
 const INITIAL_PRODUCT_IMAGES = new Map<string, string>();
@@ -499,7 +500,7 @@ export class SupabaseStorePersistence {
   }
 
   async hydrate(local: PersistentServerStore): Promise<PersistentServerStore> {
-    const [productsResult, variantsResult, packsResult, ordersResult, itemsResult, usersResult, quotesResult, messagesResult, notificationsResult, expensesResult, collectionRemindersResult, staffAccountsResult, activityLogsResult, runtimeSettingsResult] = await Promise.all([
+    const [productsResult, variantsResult, packsResult, ordersResult, itemsResult, usersResult, quotesResult, messagesResult, notificationsResult, expensesResult, collectionRemindersResult, staffAccountsResult, activityLogsResult, runtimeSettingsResult, clientRecordsResult] = await Promise.all([
       this.client.from('products').select('*').order('created_at', { ascending: true }),
       this.client.from('product_variants').select('*').order('id', { ascending: true }),
       this.client.from('packs').select('*').order('created_at', { ascending: true }),
@@ -514,6 +515,7 @@ export class SupabaseStorePersistence {
       this.client.from('app_staff_accounts').select('*'),
       this.client.from('activity_logs').select('*').limit(500),
       this.client.from('app_runtime_settings').select('*'),
+      this.client.from('app_client_records').select('*').order('created_at', { ascending: true }),
     ]);
 
     assertNoError('lecture des produits', productsResult.error);
@@ -545,6 +547,10 @@ export class SupabaseStorePersistence {
     const runtimeSettingsMissing = this.isMissingTableError(runtimeSettingsResult.error, 'app_runtime_settings');
     if (runtimeSettingsResult.error && !runtimeSettingsMissing) {
       assertNoError('lecture des paramètres runtime', runtimeSettingsResult.error);
+    }
+    const clientRecordsTableMissing = this.isMissingTableError(clientRecordsResult.error, 'app_client_records');
+    if (clientRecordsResult.error && !clientRecordsTableMissing) {
+      assertNoError('lecture du répertoire clients', clientRecordsResult.error);
     }
 
     const variantRows = rows(variantsResult.data);
@@ -829,11 +835,32 @@ export class SupabaseStorePersistence {
       ? [{ ...order.courier, id: order.courier.courierId || `historic-${normalizeCourierPhone(order.courier.phone)}`, active: true }]
       : []);
     const remoteCouriers = mergeCourierDirectories(couriersFromOrders, savedCouriers);
-    const remoteClientRecords = Array.isArray(clientDirectoryRow?.setting_value)
+    const legacyClientRecords = Array.isArray(clientDirectoryRow?.setting_value)
       ? (clientDirectoryRow.setting_value as ClientRecord[]).filter((record) =>
           record && typeof record.id === 'string' && typeof record.facilityName === 'string'
         )
       : [];
+    const tableClientRecords: ClientRecord[] = clientRecordsTableMissing ? [] : rows(clientRecordsResult.data).map((row) => ({
+      id: String(row.id),
+      facilityName: String(row.facility_name || ''),
+      invoiceName: row.invoice_name || undefined,
+      facilityType: row.facility_type ? String(row.facility_type) as FacilityType : undefined,
+      facilityTypeOther: row.facility_type_other || undefined,
+      contactName: String(row.contact_name || ''),
+      directorName: row.director_name || undefined,
+      companyPhone: String(row.company_phone || ''),
+      secondaryPhone: row.secondary_phone || undefined,
+      city: row.city || undefined,
+      deliveryAddress: row.delivery_address || undefined,
+      deliveryInstructions: row.delivery_instructions || undefined,
+      linkedUserId: row.linked_user_id || undefined,
+      assignedToCommercialId: row.assigned_to_commercial_id || undefined,
+      createdAt: String(row.created_at || new Date(0).toISOString()),
+      updatedAt: String(row.updated_at || row.created_at || new Date(0).toISOString()),
+    }));
+    const remoteClientRecords = clientRecordsTableMissing
+      ? legacyClientRecords
+      : tableClientRecords.length > 0 ? tableClientRecords : legacyClientRecords;
 
     const mergedStaffLogs = mergeById(remoteActivityLogs, local.staffLogs || [], (item) => item.id)
       .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
@@ -1188,6 +1215,32 @@ export class SupabaseStorePersistence {
     assertNoError('push_subscriptions.delete_expired', error);
   }
 
+  async registerAccount(account: StoredUserAccount, linkedRecord?: ClientRecord): Promise<void> {
+    const operation = this.queue.then(async () => {
+      if (!this.baseline) throw new Error('Supabase doit être initialisé avant la création d’un compte.');
+      let profileId: string;
+      if (linkedRecord) {
+        const { data, error } = await this.client.rpc('app_register_user_with_client_record', {
+          p_app_user_id: account.user.id,
+          p_profile: this.profileRow(account.user),
+          p_password_hash: account.passwordHash,
+          p_user_data: account.user,
+          p_client_record_id: linkedRecord.id,
+        });
+        assertNoError('création et rattachement atomiques du compte client', error);
+        profileId = String(data || '');
+      } else {
+        profileId = await this.saveAccount(account);
+      }
+      if (profileId) this.profileIds.set(account.user.id, profileId);
+      const nextBaseline = clone(this.baseline);
+      nextBaseline.accounts = mergeById(nextBaseline.accounts || [], [account], (item) => item.user.id);
+      this.baseline = nextBaseline;
+    });
+    this.queue = operation.catch(() => undefined);
+    await operation;
+  }
+
   async persist(store: PersistentServerStore): Promise<void> {
     const snapshot = clone(store);
     const operation = this.queue.then(async () => {
@@ -1202,6 +1255,7 @@ export class SupabaseStorePersistence {
         this.persistStaffAccounts(snapshot),
         this.persistExpenses(snapshot),
         this.persistRuntimeSettings(snapshot),
+        this.persistClientRecords(snapshot),
       ]);
       await this.persistOrders(snapshot);
       await Promise.all([
@@ -1593,9 +1647,11 @@ export class SupabaseStorePersistence {
     });
 
     const requestedByProduct = new Map<string, number>();
-    for (const item of order.items || []) {
-      if (item.isQuote || numberOr(item.price) <= 0 || !item.productId) continue;
-      requestedByProduct.set(item.productId, (requestedByProduct.get(item.productId) || 0) + Math.max(1, Math.trunc(numberOr(item.quantity, 1))));
+    if (!order.isDemoOrder) {
+      for (const item of order.items || []) {
+        if (item.isQuote || numberOr(item.price) <= 0 || !item.productId) continue;
+        requestedByProduct.set(item.productId, (requestedByProduct.get(item.productId) || 0) + Math.max(1, Math.trunc(numberOr(item.quantity, 1))));
+      }
     }
 
     const { data, error } = await this.client.rpc('app_create_order_atomic', {
@@ -1654,12 +1710,20 @@ export class SupabaseStorePersistence {
         || previous.purchasePriceVerified !== product.purchasePriceVerified;
       const extra = {
         reference: product.reference,
+        brand: product.brand,
+        manufacturer: product.manufacturer,
+        supplier: product.supplier,
+        imageSourceUrl: product.imageSourceUrl,
         specialty: product.specialty,
         specifications: product.specifications,
         thumbnailUrl: product.thumbnailUrl,
         galleryImages: product.galleryImages,
         pdfNoticeUrl: product.pdfNoticeUrl,
         pdfNoticeName: product.pdfNoticeName,
+        modeOfOperation: product.modeOfOperation,
+        packagingNeedsReview: product.packagingNeedsReview,
+        stockCountStatus: product.stockCountStatus,
+        inventoryStockEntries: product.inventoryStockEntries,
         stockQuantity: product.stockQuantity,
         quantityAvailable: product.quantityAvailable,
         lowStockAlertThreshold: product.lowStockAlertThreshold,
@@ -1772,6 +1836,50 @@ export class SupabaseStorePersistence {
         error = fallbackResult.error;
       }
       assertNoError(`enregistrement du compte collaborateur ${account.id}`, error);
+    }
+  }
+
+  private clientRecordRow(record: ClientRecord): Row {
+    return {
+      id: record.id,
+      facility_name: record.facilityName,
+      invoice_name: record.invoiceName || null,
+      facility_type: record.facilityType || null,
+      facility_type_other: record.facilityTypeOther || null,
+      contact_name: record.contactName,
+      director_name: record.directorName || null,
+      company_phone: record.companyPhone,
+      secondary_phone: record.secondaryPhone || null,
+      city: record.city || null,
+      delivery_address: record.deliveryAddress || null,
+      delivery_instructions: record.deliveryInstructions || null,
+      linked_user_id: record.linkedUserId || null,
+      assigned_to_commercial_id: record.assignedToCommercialId || null,
+      created_at: record.createdAt,
+      updated_at: record.updatedAt,
+    };
+  }
+
+  private async persistClientRecords(store: PersistentServerStore): Promise<void> {
+    const previousRecords = this.baseline?.clientRecords || [];
+    const currentRecords = store.clientRecords || [];
+    if (same(previousRecords, currentRecords)) return;
+
+    if (currentRecords.length > 0) {
+      const { error } = await this.client.from('app_client_records').upsert(
+        currentRecords.map((record) => this.clientRecordRow(record)),
+        { onConflict: 'id' }
+      );
+      if (this.isMissingTableError(error, 'app_client_records')) return;
+      assertNoError('enregistrement des fiches du répertoire clients', error);
+    }
+
+    const currentIds = new Set(currentRecords.map((record) => record.id));
+    const removedIds = previousRecords.filter((record) => !currentIds.has(record.id)).map((record) => record.id);
+    if (removedIds.length > 0) {
+      const { error } = await this.client.from('app_client_records').delete().in('id', removedIds);
+      if (this.isMissingTableError(error, 'app_client_records')) return;
+      assertNoError('suppression des fiches retirées du répertoire clients', error);
     }
   }
 

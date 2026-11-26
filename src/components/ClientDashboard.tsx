@@ -7,8 +7,10 @@ import {
   RotateCcw, 
   RefreshCw,
   FileText, 
+  FileDown,
   MessageCircle, 
   Truck, 
+  CreditCard,
   Printer,
   Smartphone, 
   ShieldCheck, 
@@ -17,17 +19,19 @@ import {
   MapPin,
   CheckCircle2,
   Calendar,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  History,
   ListFilter,
   CalendarDays,
   CalendarClock,
   UserRound
 } from 'lucide-react';
-import { Order, OrderStatus, User, MobilePaymentDetails, ClientRemainderChoice } from '../types';
+import { Order, OrderStatus, OrderTimelineEvent, User, MobilePaymentDetails, ClientRemainderChoice } from '../types';
 import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
 import { getOrderBillingTotal, getOrderDeliveredQuantity, getOrderRemainingQuantity } from '../utils/orderFulfillment';
-import { generateInternalPurchaseOrderPdf } from '../utils/pdfGenerator';
+import { downloadInvoiceProjectPdf, generateInternalPurchaseOrderPdf } from '../utils/pdfGenerator';
 import { 
   computeDeliveryTimeWindow, 
   detectNeighborhoodFromAddress, 
@@ -90,6 +94,86 @@ function summarizeOrderItems(order: Order): string {
     const progress = (order.deliveryFulfillments || []).length > 0 ? ` · remis ${delivered}/${item.quantity}${remaining ? ` · reste à livrer ${remaining}` : ''}` : '';
     return `${item.quantity}x ${item.productName}${progress}`;
   }).join(', ');
+}
+
+function formatClientEventDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('fr-FR', {
+    timeZone: 'Africa/Libreville',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function getClientOrderTimeline(order: Order): OrderTimelineEvent[] {
+  const events = Array.isArray(order.timelineEvents) ? [...order.timelineEvents] : [];
+  if (!events.some((event) => event.type === 'order_received')) {
+    events.push({ id: `received-${order.id}`, type: 'order_received', label: 'Commande reçue', timestamp: order.createdAt });
+  }
+  for (const fulfillment of order.deliveryFulfillments || []) {
+    if (events.some((event) => event.id === `fulfillment-${fulfillment.id}`)) continue;
+    const details = fulfillment.lines.map((line) => `${line.quantity} × ${order.items[line.itemIndex]?.productName || 'article'}`);
+    events.push({
+      id: `fulfillment-${fulfillment.id}`,
+      type: 'delivery_fulfillment',
+      label: 'Remise d’articles enregistrée',
+      timestamp: fulfillment.fulfilledAt,
+      ...(details.length ? { description: details.join(' · ').slice(0, 400) } : {}),
+    });
+  }
+  for (const invoice of order.invoices || []) {
+    if (events.some((event) => event.id === `invoice-${invoice.id}`)) continue;
+    events.push({
+      id: `invoice-${invoice.id}`,
+      type: 'status_changed',
+      label: `${invoice.type === 'facture' ? 'Facture' : 'Avoir'} émis · ${invoice.number}`,
+      timestamp: invoice.issueDate,
+      description: `${invoice.totalTTC.toLocaleString('fr-FR')} FCFA`,
+    });
+  }
+  for (const installment of order.installments || []) {
+    if (events.some((event) => event.id === `payment-${installment.id}`)) continue;
+    events.push({
+      id: `payment-${installment.id}`,
+      type: 'status_changed',
+      label: installment.status === 'valide'
+        ? 'Paiement confirmé'
+        : installment.status === 'rejete'
+          ? 'Versement refusé'
+          : 'Versement en attente de validation',
+      timestamp: installment.paidAt,
+      description: `${installment.amount.toLocaleString('fr-FR')} FCFA · ${installment.type === 'acompte' ? 'acompte' : 'règlement du solde'}`,
+    });
+  }
+  if (order.deliveryProof?.timestamp && !events.some((event) => event.id === `proof-${order.deliveryProof?.timestamp}`)) {
+    events.push({
+      id: `proof-${order.deliveryProof.timestamp}`,
+      type: 'delivery_stage',
+      label: 'Preuve de réception enregistrée',
+      timestamp: order.deliveryProof.timestamp,
+      description: `Réceptionnaire : ${order.deliveryProof.receivedBy}${order.deliveryProof.receiptReference ? ` · Bon ${order.deliveryProof.receiptReference}` : ''}`,
+    });
+  }
+  return events
+    .filter((event) => Number.isFinite(Date.parse(event.timestamp)))
+    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+}
+
+function safeProofImageSource(value?: string): string | undefined {
+  const source = value?.trim();
+  if (!source) return undefined;
+  if (/^data:image\/(?:png|jpeg|jpg|webp);base64,/i.test(source) || source.startsWith('blob:')) return source;
+  if (source.startsWith('/') && !source.startsWith('//')) return source;
+  try {
+    const url = new URL(source);
+    return url.protocol === 'https:' ? source : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function resolveOrderDeliverySchedule(order: Order): ResolvedOrderSchedule {
@@ -199,7 +283,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const lastOrdersRefreshAt = useRef(Date.now());
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_progress' | 'delivered' | 'unpaid'>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('calendar');
+  const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'payments' | 'invoices'>('calendar');
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
+  const [invoiceDownloadError, setInvoiceDownloadError] = useState('');
 
   const todayKey = useMemo(() => toLocalDateKey(new Date()), []);
   const [selectedDateKey, setSelectedDateKey] = useState<string>(todayKey);
@@ -271,6 +357,45 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const unpaidOrders = orders.filter(o => getOrderRemainingBalance(o) > 0 && o.status !== 'Annulée');
   const totalOutstanding = unpaidOrders.reduce((sum, order) => sum + getOrderRemainingBalance(order), 0);
   const overdueOrders = unpaidOrders.filter(isCollectionOverdue);
+  const paymentAndRemainderOrders = useMemo(() => orders
+    .filter((order) => order.status !== 'Annulée' && (
+      getOrderRemainingBalance(order) > 0
+      || order.items.some((_, index) => getOrderRemainingQuantity(order, index) > 0)
+    ))
+    .sort((a, b) => {
+      const dueA = a.collectionDueDate ? Date.parse(a.collectionDueDate) : Number.MAX_SAFE_INTEGER;
+      const dueB = b.collectionDueDate ? Date.parse(b.collectionDueDate) : Number.MAX_SAFE_INTEGER;
+      return dueA - dueB || Date.parse(b.createdAt) - Date.parse(a.createdAt);
+    }), [orders]);
+  const remainingDeliveryUnits = paymentAndRemainderOrders.reduce((sum, order) =>
+    sum + order.items.reduce((itemSum, _, index) => itemSum + getOrderRemainingQuantity(order, index), 0), 0);
+
+  const invoiceRecords = useMemo(() => orders
+    .flatMap((order) => (order.invoices || []).map((invoice) => ({ order, invoice })))
+    .sort((a, b) => Date.parse(b.invoice.issueDate) - Date.parse(a.invoice.issueDate)), [orders]);
+  const filteredInvoiceRecords = useMemo(() => {
+    const query = searchQuery.trim().toLocaleLowerCase('fr');
+    if (!query) return invoiceRecords;
+    return invoiceRecords.filter(({ order, invoice }) => [
+      invoice.number,
+      invoice.orderReference,
+      invoice.clientFacilityName,
+      invoice.type,
+      order.reference,
+    ].some((value) => value?.toLocaleLowerCase('fr').includes(query)));
+  }, [invoiceRecords, searchQuery]);
+
+  const handleDownloadInvoice = async (order: Order, invoice: NonNullable<Order['invoices']>[number]) => {
+    setDownloadingInvoiceId(invoice.id);
+    setInvoiceDownloadError('');
+    try {
+      await downloadInvoiceProjectPdf(order, invoice);
+    } catch {
+      setInvoiceDownloadError(`Impossible de télécharger le document ${invoice.number}. Réessayez.`);
+    } finally {
+      setDownloadingInvoiceId(null);
+    }
+  };
 
   // Resolve delivery schedules for all orders
   const resolvedSchedules = useMemo(
@@ -281,6 +406,8 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   // Filtered schedules matching current statusFilter & searchQuery
   const filteredSchedules = useMemo(() => {
     return resolvedSchedules.filter(({ order }) => {
+      if (viewMode === 'payments' && getOrderRemainingBalance(order) <= 0
+        && !order.items.some((_, index) => getOrderRemainingQuantity(order, index) > 0)) return false;
       if (statusFilter === 'in_progress' && (order.status === 'Livrée' || order.status === 'Annulée')) return false;
       if (statusFilter === 'delivered' && order.status !== 'Livrée') return false;
       if (statusFilter === 'unpaid' && (getOrderRemainingBalance(order) <= 0 || order.status === 'Annulée')) return false;
@@ -294,7 +421,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       }
       return true;
     });
-  }, [resolvedSchedules, statusFilter, searchQuery]);
+  }, [resolvedSchedules, statusFilter, searchQuery, viewMode]);
 
   const filteredOrders = useMemo(
     () => filteredSchedules.map(s => s.order),
@@ -565,6 +692,16 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         </div>
       </div>
 
+      {currentUser?.isDemoAccount && (
+        <div role="status" className="flex items-start gap-3 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-950">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-violet-700" />
+          <div>
+            <p className="font-extrabold">Compte de démonstration</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-violet-900">Vous pouvez passer des commandes pour la démonstration. Elles ne modifient pas le stock réel.</p>
+          </div>
+        </div>
+      )}
+
       {ordersRefreshError && (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-900">
           <span>{ordersRefreshError}</span>
@@ -784,6 +921,16 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                   <CalendarDays className="w-5 h-5 text-[#0d44e8]" />
                   <span>Calendrier des livraisons prévues</span>
                 </>
+              ) : viewMode === 'payments' ? (
+                <>
+                  <CreditCard className="w-5 h-5 text-amber-700" />
+                  <span>Paiements et reliquats ({filteredOrders.length})</span>
+                </>
+              ) : viewMode === 'invoices' ? (
+                <>
+                  <FileText className="w-5 h-5 text-emerald-700" />
+                  <span>Mes factures ({filteredInvoiceRecords.length})</span>
+                </>
               ) : (
                 <>
                   <Package className="w-5 h-5 text-[#0d44e8]" />
@@ -794,7 +941,11 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             <p className="text-xs text-slate-500 mt-0.5">
               {viewMode === 'calendar'
                 ? 'Visualisez les dates et créneaux de livraison prévus pour vos commandes et ajustez vos réceptions.'
-                : 'Consultez vos commandes passées et téléchargez les bons de commande PDF.'}
+                : viewMode === 'payments'
+                  ? 'Retrouvez les montants à régler, leurs échéances et les articles restant à livrer au même endroit.'
+                  : viewMode === 'invoices'
+                    ? 'Retrouvez ici vos factures et avoirs émis, avec leur commande associée et leur PDF.'
+                  : 'Consultez vos commandes passées et téléchargez les bons de commande PDF.'}
             </p>
           </div>
 
@@ -825,13 +976,39 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 <ListFilter className="w-3.5 h-3.5" />
                 <span>Vue Liste ({filteredOrders.length})</span>
               </button>
+              <button
+                type="button"
+                onClick={() => { setStatusFilter('all'); setViewMode('payments'); }}
+                aria-pressed={viewMode === 'payments'}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                  viewMode === 'payments'
+                    ? 'bg-white text-amber-800 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>Échéances / reliquats ({paymentAndRemainderOrders.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setStatusFilter('all'); setViewMode('invoices'); }}
+                aria-pressed={viewMode === 'invoices'}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                  viewMode === 'invoices'
+                    ? 'bg-white text-emerald-800 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Factures ({invoiceRecords.length})</span>
+              </button>
             </div>
 
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="text"
-                placeholder="Rechercher réf, produit, zone..."
+                placeholder={viewMode === 'invoices' ? 'Rechercher n° facture ou commande…' : 'Rechercher réf, produit, zone...'}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#0d44e8] w-48 sm:w-56"
@@ -841,7 +1018,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         </div>
 
         {/* Filter tabs bar */}
-        <div className="px-4 py-2.5 bg-slate-50/70 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto text-xs">
+        {viewMode !== 'invoices' && <div className="px-4 py-2.5 bg-slate-50/70 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto text-xs">
           <button
             type="button"
             onClick={() => setStatusFilter('all')}
@@ -881,7 +1058,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             <Smartphone className="w-3.5 h-3.5" />
             <span>À régler ({unpaidOrders.length})</span>
           </button>
-        </div>
+        </div>}
 
         {/* Feedback banner when delivery schedule is updated */}
         {scheduleFeedback && (
@@ -1297,12 +1474,88 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             </div>
           </div>
         ) : (
-          /* VIEW MODE 2: CLASSIC ORDERS LIST */
-          filteredOrders.length === 0 ? (
+          <>
+          {viewMode === 'payments' && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-b border-slate-100 bg-amber-50/50 p-4 sm:p-5">
+              <div className="rounded-2xl border border-amber-200 bg-white p-4">
+                <p className="text-xs font-semibold text-slate-500">Total restant à régler</p>
+                <p className="mt-1 text-xl font-black tabular-nums text-amber-800">{totalOutstanding.toLocaleString('fr-FR')} FCFA</p>
+                <p className="mt-1 text-[11px] text-slate-500">Sur {unpaidOrders.length} commande(s) non soldée(s)</p>
+              </div>
+              <div className="rounded-2xl border border-rose-200 bg-white p-4">
+                <p className="text-xs font-semibold text-slate-500">Échéances dépassées</p>
+                <p className="mt-1 text-xl font-black tabular-nums text-rose-700">{overdueOrders.length}</p>
+                <p className="mt-1 text-[11px] text-slate-500">{overdueOrders.reduce((sum, order) => sum + getOrderRemainingBalance(order), 0).toLocaleString('fr-FR')} FCFA concernés</p>
+              </div>
+              <div className="rounded-2xl border border-blue-200 bg-white p-4">
+                <p className="text-xs font-semibold text-slate-500">Articles restant à livrer</p>
+                <p className="mt-1 text-xl font-black tabular-nums text-blue-800">{remainingDeliveryUnits}</p>
+                <p className="mt-1 text-[11px] text-slate-500">Sur {paymentAndRemainderOrders.length} commande(s) à suivre</p>
+              </div>
+            </div>
+          )}
+          {/* VIEW MODE 2: CLASSIC ORDERS LIST */}
+          {viewMode === 'invoices' ? (
+            <div className="dashboard-tab-enter space-y-3 p-4 sm:p-5">
+              {invoiceDownloadError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">{invoiceDownloadError}</p>}
+              {filteredInvoiceRecords.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-12 text-center">
+                  <FileText className="mx-auto h-10 w-10 text-slate-300" />
+                  <p className="mt-3 text-sm font-bold text-slate-800">Aucun document de facturation trouvé</p>
+                  <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-slate-500">Les factures et avoirs apparaîtront ici dès qu’ils auront été émis pour vos commandes.</p>
+                </div>
+              ) : filteredInvoiceRecords.map(({ order, invoice }) => {
+                const issueDate = new Date(invoice.issueDate);
+                const issueDateLabel = Number.isNaN(issueDate.getTime())
+                  ? invoice.issueDate
+                  : issueDate.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+                const replacement = invoice.correctedByInvoiceId
+                  ? order.invoices?.find((document) => document.id === invoice.correctedByInvoiceId)
+                  : undefined;
+                const lineSummary = (invoice.lineItems || []).slice(0, 2).map((line) => `${line.quantity} × ${line.productName}`).join(' · ');
+                return (
+                  <article key={invoice.id} className="group flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-emerald-200 hover:shadow-md sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${invoice.type === 'facture' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                        <FileText className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="truncate font-mono text-sm font-black text-slate-950">{invoice.number}</h4>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide ${invoice.type === 'facture' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                            {invoice.type === 'facture' ? 'Facture' : 'Avoir'}
+                          </span>
+                          {replacement && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">Remplacée par {replacement.number}</span>}
+                        </div>
+                        <p className="mt-1 truncate text-xs font-semibold text-slate-700">Commande {invoice.orderReference || order.reference} · {issueDateLabel}</p>
+                        <p className="mt-1 line-clamp-1 text-[11px] text-slate-500">{lineSummary || invoice.clientFacilityName || order.customer.facilityName}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-4 border-t border-slate-100 pt-3 sm:justify-end sm:border-0 sm:pt-0">
+                      <div className="text-left sm:text-right">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Montant du document</div>
+                        <div className="mt-0.5 whitespace-nowrap text-base font-black tabular-nums text-slate-950">{invoice.totalTTC.toLocaleString('fr-FR')} <span className="text-xs font-bold text-slate-500">FCFA</span></div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={downloadingInvoiceId === invoice.id}
+                        onClick={() => void handleDownloadInvoice(order, invoice)}
+                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-700 px-3.5 py-2.5 text-xs font-extrabold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60"
+                        aria-label={`Télécharger le PDF ${invoice.number}`}
+                      >
+                        <FileDown className="h-4 w-4" />
+                        {downloadingInvoiceId === invoice.id ? 'Préparation…' : 'Télécharger'}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : filteredOrders.length === 0 ? (
             <div className="p-12 text-center text-slate-400 space-y-2">
               <Package className="w-10 h-10 mx-auto text-slate-300" />
-              <p className="text-sm font-semibold text-slate-700">Aucune commande ne correspond à ce filtre.</p>
-              <p className="text-xs text-slate-400">Consultez notre catalogue pour initier un approvisionnement médical.</p>
+              <p className="text-sm font-semibold text-slate-700">{viewMode === 'payments' ? 'Aucun paiement ni reliquat à suivre.' : 'Aucune commande ne correspond à ce filtre.'}</p>
+              <p className="text-xs text-slate-400">{viewMode === 'payments' ? 'Toutes vos factures sont réglées et vos articles ont été livrés.' : 'Consultez notre catalogue pour initier un approvisionnement médical.'}</p>
             </div>
           ) : (
             <div key="view-list" className="dashboard-tab-enter divide-y divide-slate-100">
@@ -1354,6 +1607,12 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                               ? 'Paiement à terme'
                               : 'Aucun versement confirmé';
                 const remainingProductUnits = pendingProductLines.reduce((sum, line) => sum + line.remainingQuantity, 0);
+                const issuedInvoiceTotal = (order.invoices || []).reduce((sum, invoice) =>
+                  sum + (invoice.type === 'facture' ? 1 : -1) * Math.max(0, Math.trunc(Number(invoice.totalTTC) || 0)), 0);
+                const invoiceAwaitingDelivery = deliveryTrackingActive && issuedInvoiceTotal <= 0;
+                const clientTimeline = getClientOrderTimeline(order);
+                const hasTimestampedStatusHistory = (order.timelineEvents || []).some((event) =>
+                  event.type === 'status_changed' || event.type === 'delivery_stage' || event.type === 'courier_assigned');
                 const deliveryStatusLabel = order.status === 'Annulée'
                   ? 'Sans livraison · commande annulée'
                   : remainingProductUnits > 0
@@ -1454,6 +1713,105 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                       <div className="text-xs text-slate-500 line-clamp-1">
                         {summarizeOrderItems(order)}
                       </div>
+                      <details className="group mt-2 rounded-2xl border border-emerald-100 bg-white shadow-xs">
+                        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-2xl px-3.5 py-3 text-xs font-extrabold text-emerald-900 transition hover:bg-emerald-50/70 [&::-webkit-details-marker]:hidden">
+                          <span className="flex items-center gap-2"><Package className="h-4 w-4" /> Détail des produits, du suivi et de la réception</span>
+                          <ChevronDown className="h-4 w-4 shrink-0 text-emerald-700 transition group-open:rotate-180" />
+                        </summary>
+                        <div className="grid gap-4 border-t border-emerald-100 p-3.5 sm:p-4 lg:grid-cols-2">
+                          <section className="min-w-0">
+                            <h4 className="mb-2 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Quantités par produit</h4>
+                            <div className="space-y-2">
+                              {order.items.map((item, itemIndex) => {
+                                const trackedDeliveries = (order.deliveryFulfillments || []).length > 0;
+                                const deliveredQuantity = order.status === 'Livrée' && !trackedDeliveries
+                                  ? item.quantity
+                                  : getOrderDeliveredQuantity(order, itemIndex);
+                                const remainingQuantity = Math.max(0, item.quantity - deliveredQuantity);
+                                const deliveryLineStatus = item.isQuote
+                                  ? 'À chiffrer'
+                                  : remainingQuantity === 0
+                                    ? 'Tout remis'
+                                    : deliveredQuantity > 0
+                                      ? 'Remise partielle'
+                                      : item.isDeferredStock
+                                        ? 'Réapprovisionnement à confirmer'
+                                        : 'En préparation';
+                                return (
+                                  <div key={`${order.id}-line-${itemIndex}`} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <div className="text-xs font-bold text-slate-900">{item.productName}</div>
+                                        {item.variant && <div className="mt-0.5 text-[10px] text-slate-500">{item.variant}</div>}
+                                      </div>
+                                      <span className={`rounded-full px-2 py-1 text-[9px] font-extrabold ${remainingQuantity > 0 ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>{deliveryLineStatus}</span>
+                                    </div>
+                                    <div className="mt-2 grid grid-cols-3 gap-2 text-center">
+                                      <div className="rounded-lg bg-white px-1.5 py-1.5"><div className="text-[9px] font-bold text-slate-400">Commandé</div><div className="mt-0.5 text-xs font-black tabular-nums text-slate-800">{item.quantity}</div></div>
+                                      <div className="rounded-lg bg-white px-1.5 py-1.5"><div className="text-[9px] font-bold text-slate-400">Remis</div><div className="mt-0.5 text-xs font-black tabular-nums text-emerald-800">{deliveredQuantity}</div></div>
+                                      <div className="rounded-lg bg-white px-1.5 py-1.5"><div className="text-[9px] font-bold text-slate-400">Reste</div><div className="mt-0.5 text-xs font-black tabular-nums text-amber-800">{remainingQuantity}</div></div>
+                                    </div>
+                                    {remainingQuantity > 0 && !item.isQuote && (
+                                      <p className="mt-2 text-[10px] leading-relaxed text-slate-600">
+                                        {nextPendingDelivery
+                                          ? <>Prochaine remise prévue : <strong>{nextPendingDelivery}</strong></>
+                                          : item.isDeferredStock
+                                            ? 'Date de réapprovisionnement à confirmer par Gloryday Pharma.'
+                                            : 'La date de remise du reliquat sera affichée dès qu’elle sera confirmée.'}
+                                      </p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </section>
+
+                          <section className="min-w-0">
+                            <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500"><History className="h-3.5 w-3.5" /> Historique daté</h4>
+                            <ol className="space-y-0 border-l-2 border-emerald-100 pl-3.5">
+                              {clientTimeline.map((event) => (
+                                <li key={event.id} className="relative pb-3 last:pb-0">
+                                  <span className="absolute -left-[21px] top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-600 ring-1 ring-emerald-200" />
+                                  <div className="text-[11px] font-extrabold text-slate-800">{event.label}</div>
+                                  <div className="mt-0.5 text-[10px] text-slate-500">{formatClientEventDate(event.timestamp)}</div>
+                                  {event.description && <div className="mt-0.5 break-words text-[10px] leading-relaxed text-slate-600">{event.description}</div>}
+                                </li>
+                              ))}
+                            </ol>
+                            {!hasTimestampedStatusHistory && order.status !== 'À confirmer' && (
+                              <p className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-2 text-[10px] leading-relaxed text-blue-900">Pour cette ancienne commande, les dates de confirmation ou de préparation n’avaient pas été conservées. Les dates disponibles sont affichées; les prochaines étapes seront horodatées.</p>
+                            )}
+                          </section>
+
+                          <section className="rounded-xl border border-slate-200 bg-slate-50 p-3 sm:col-span-2 sm:p-3.5">
+                            <h4 className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Preuve de réception</h4>
+                            {order.deliveryProof ? (
+                              <div className="mt-2 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                                <div className="space-y-1 text-[11px] text-slate-700">
+                                  <p>Réceptionné par : <strong>{order.deliveryProof.receivedBy}</strong></p>
+                                  {order.deliveryProof.receiptReference && <p>Bon de livraison : <strong>{order.deliveryProof.receiptReference}</strong></p>}
+                                  <p>Réception enregistrée le : <strong>{formatClientEventDate(order.deliveryProof.timestamp)}</strong></p>
+                                  {order.deliveryProof.signatureUrl && !safeProofImageSource(order.deliveryProof.signatureUrl) && <p className="rounded-lg bg-white p-2 text-slate-600">Émargement : {order.deliveryProof.signatureUrl}</p>}
+                                  {!order.deliveryProof.photoUrl && !safeProofImageSource(order.deliveryProof.signatureUrl) && <p className="text-[10px] text-slate-500">Aucune photo ou signature image n’est jointe à cette preuve.</p>}
+                                </div>
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                  {[
+                                    { label: 'Photo de réception', source: safeProofImageSource(order.deliveryProof.photoUrl) },
+                                    { label: 'Signature', source: safeProofImageSource(order.deliveryProof.signatureUrl) },
+                                  ].filter((proof): proof is { label: string; source: string } => Boolean(proof.source)).map((proof) => (
+                                    <a key={proof.label} href={proof.source} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-lg border border-slate-200 bg-white">
+                                      <img src={proof.source} alt={proof.label} loading="lazy" referrerPolicy="no-referrer" className="h-32 w-full object-contain p-2" />
+                                      <span className="block border-t border-slate-100 px-2 py-1.5 text-center text-[10px] font-bold text-emerald-800">{proof.label} · ouvrir</span>
+                                    </a>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="mt-1 text-[11px] text-slate-600">{order.status === 'Livrée' ? 'Aucune preuve numérique n’a été enregistrée pour cette réception.' : 'La preuve de réception apparaîtra ici après la livraison.'}</p>
+                            )}
+                          </section>
+                        </div>
+                      </details>
                       {order.status !== 'Annulée' && pendingProductLines.length > 0 && (
                         <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5 text-xs text-amber-950">
                           <div className="flex items-center gap-1.5 font-bold">
@@ -1503,15 +1861,37 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                         </div>
                       )}
                       {order.status !== 'Annulée' && (
-                        <div className={`text-xs font-semibold ${collectionOverdue ? 'text-rose-700' : 'text-slate-600'}`}>
-                          {deliveryTrackingActive ? 'Total facturé à date' : 'Total commande'} : {(deliveryTrackingActive ? billingTotal : order.estimatedTotal).toLocaleString('fr-FR')} FCFA · Confirmé/encaissé : {paidAmount.toLocaleString('fr-FR')} FCFA · Solde restant : {remainingBalance.toLocaleString('fr-FR')} FCFA
-                          {deliveryTrackingActive && <span className="block mt-0.5 text-slate-500">Montant initial de la proforma : {order.estimatedTotal.toLocaleString('fr-FR')} FCFA. Les articles non remis ne sont pas facturés.</span>}
-                          {order.collectionDueDate && remainingBalance > 0 && (
-                            <span className="block mt-0.5">
-                              {collectionOverdue ? 'Échéance de recouvrement dépassée : ' : 'Échéance de recouvrement : '}{formatCollectionDueDate(order.collectionDueDate)}
-                            </span>
+                        <section className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 sm:p-3.5" aria-label={`Résumé financier de la commande ${order.reference}`}>
+                          <h4 className="mb-2.5 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                            <CreditCard className="h-3.5 w-3.5 text-emerald-700" /> Résumé financier
+                          </h4>
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            <div className="rounded-xl bg-white px-2.5 py-2 ring-1 ring-slate-900/5">
+                              <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Total proforma</div>
+                              <div className="mt-0.5 text-xs font-extrabold tabular-nums text-slate-900">{order.estimatedTotal.toLocaleString('fr-FR')} FCFA</div>
+                            </div>
+                            <div className="rounded-xl bg-white px-2.5 py-2 ring-1 ring-slate-900/5">
+                              <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Facturé à date</div>
+                              <div className="mt-0.5 text-xs font-extrabold tabular-nums text-slate-900">{issuedInvoiceTotal.toLocaleString('fr-FR')} FCFA</div>
+                            </div>
+                            <div className="rounded-xl bg-white px-2.5 py-2 ring-1 ring-slate-900/5">
+                              <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Paiements validés</div>
+                              <div className="mt-0.5 text-xs font-extrabold tabular-nums text-emerald-800">{paidAmount.toLocaleString('fr-FR')} FCFA</div>
+                            </div>
+                            <div className={`rounded-xl bg-white px-2.5 py-2 ring-1 ring-slate-900/5 ${collectionOverdue ? 'ring-rose-200' : ''}`}>
+                              <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">{invoiceAwaitingDelivery ? 'Solde' : 'Reste à régler'}</div>
+                              <div className={`mt-0.5 text-xs font-extrabold tabular-nums ${collectionOverdue ? 'text-rose-700' : 'text-amber-800'}`}>
+                                {invoiceAwaitingDelivery ? 'Après facturation' : `${remainingBalance.toLocaleString('fr-FR')} FCFA`}
+                              </div>
+                            </div>
+                          </div>
+                          {deliveryTrackingActive && <p className="mt-2 text-[10px] leading-relaxed text-slate-600">La proforma initiale est estimative. Les produits sont facturés au fur et à mesure de leur remise.</p>}
+                          {order.collectionDueDate && remainingBalance > 0 && !invoiceAwaitingDelivery && (
+                            <p className={`mt-2 text-[11px] font-semibold ${collectionOverdue ? 'text-rose-700' : 'text-slate-600'}`}>
+                              {collectionOverdue ? 'Échéance dépassée : ' : 'Échéance de paiement : '}{formatCollectionDueDate(order.collectionDueDate)}
+                            </p>
                           )}
-                        </div>
+                        </section>
                       )}
                       {order.status !== 'Annulée' && ((order.installments?.length || 0) > 0 || Boolean(mp?.transactionReference)) && (
                         <details className="mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs">
@@ -1630,7 +2010,8 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 );
               })}
             </div>
-          )
+          )}
+          </>
         )}
       </div>
 

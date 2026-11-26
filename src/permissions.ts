@@ -41,6 +41,7 @@ export const STAFF_PERMISSION_GROUPS: PermissionGroup[] = [
       { id: 'orders_cancel', label: 'Annuler une commande', description: 'Annuler une commande autorisée et déclencher la restitution de stock.' },
       { id: 'orders_finance_view', label: 'Voir les montants', description: 'Voir les prix, totaux, acomptes et soldes.' },
       { id: 'orders_finance_manage', label: 'Gérer factures & avoirs', description: 'Ouvrir et mettre à jour les documents financiers.' },
+      { id: 'orders_invoice_correct', label: 'Corriger une facture émise', description: 'Annuler une facture erronée par un avoir et émettre sa version corrigée, avec historique conservé.' },
       { id: 'payments_manage', label: 'Enregistrer un paiement', description: 'Pointer un règlement ou modifier le statut de paiement.' },
     ],
   },
@@ -131,7 +132,7 @@ export function getDefaultStaffPermissions(role: StaffRole): StaffPermission[] {
     case 'Logistique':
       return ['orders_view', 'logistics_view', 'logistics_manage'];
     case 'Secrétaire':
-      return ['orders_create_for_client', 'clients_view'];
+      return ['orders_create_for_client', 'clients_view', 'orders_view', 'orders_finance_view', 'orders_invoice_correct'];
     default:
       return [];
   }

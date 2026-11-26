@@ -512,11 +512,11 @@ export async function generateInvoiceProjectPdf(
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;
   const contentWidth = pageWidth - margin * 2;
-  const stampBlue = [48, 58, 154];
+  const stampBlue = [34, 112, 70];
   const ink = [35, 38, 45];
   const muted = [105, 108, 116];
-  const rule = [196, 199, 207];
-  const pale = [248, 248, 251];
+  const rule = [195, 216, 202];
+  const pale = [242, 249, 244];
   const text = (value: unknown) => normalizePdfText(value);
   const title = invoice.type === 'facture' ? 'FACTURE' : 'AVOIR';
   const paymentLabels: Record<string, string> = {
@@ -628,9 +628,9 @@ export async function generateInvoiceProjectPdf(
     doc.text('Référence', referenceX, top + 5.5);
     doc.text('Désignation', designationX, top + 5.5);
     doc.text('Qté', quantityX, top + 5.5, { align: 'center' });
-    doc.text('P.U. TTC', unitPriceX, top + 5.5, { align: 'right' });
+    doc.text('P.U. HT', unitPriceX, top + 5.5, { align: 'right' });
     doc.text('Remise', discountX, top + 5.5, { align: 'right' });
-    doc.text('Montant TTC', totalX, top + 5.5, { align: 'right' });
+    doc.text('Montant HT', totalX, top + 5.5, { align: 'right' });
     doc.setDrawColor(255, 255, 255);
     doc.setLineWidth(0.2);
     x.forEach((edge) => doc.line(edge, top, edge, top + 8));
@@ -751,7 +751,7 @@ export async function generateInvoiceProjectPdf(
   const summaryY = tableBottom + 7;
   const panelGap = 8;
   const panelWidth = (contentWidth - panelGap) / 2;
-  const paymentHeight = 43;
+  const paymentHeight = 48;
   doc.setFillColor(pale[0], pale[1], pale[2]);
   doc.setDrawColor(rule[0], rule[1], rule[2]);
   doc.rect(paymentX, summaryY, panelWidth, paymentHeight, 'FD');
@@ -789,13 +789,14 @@ export async function generateInvoiceProjectPdf(
   };
   doc.setFontSize(7.7);
   doc.setTextColor(ink[0], ink[1], ink[2]);
-  totalRow('Total HT', invoice.totalHT, summaryY + 15);
-  totalRow(`TVA / CSS (${Math.round(invoice.tvaRate * 100)}%)`, invoice.tvaAmount, summaryY + 22);
+  totalRow('Total HT', invoice.totalHT, summaryY + 14);
+  totalRow(`TVA (${Math.round(invoice.tvaRate * 100)}%)${invoice.tvaRate === 0 ? ' · non appliquée' : ''}`, invoice.tvaAmount, summaryY + 21);
+  totalRow(`CSS (${Math.round((invoice.cssRate || 0) * 100)}%)`, invoice.cssAmount || 0, summaryY + 28);
   doc.setDrawColor(rule[0], rule[1], rule[2]);
-  doc.line(totalsX + 4, summaryY + 26, totalsX + totalsWidth - 4, summaryY + 26);
+  doc.line(totalsX + 4, summaryY + 32, totalsX + totalsWidth - 4, summaryY + 32);
   doc.setTextColor(stampBlue[0], stampBlue[1], stampBlue[2]);
   doc.setFontSize(9.5);
-  totalRow('Total TTC', invoice.totalTTC, summaryY + 35, true);
+  totalRow('Total TTC', invoice.totalTTC, summaryY + 40, true);
 
   // Keep the stamp in its own lower-left area, without an extra container around it.
   if (includeStamp) {

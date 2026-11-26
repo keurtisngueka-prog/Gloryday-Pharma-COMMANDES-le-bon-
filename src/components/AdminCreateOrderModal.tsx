@@ -4,6 +4,7 @@ import type { CartItem, InvoiceRecord, Order, Product } from '../types';
 import { api } from '../api';
 import { NeighborhoodPicker } from './NeighborhoodPicker';
 import { downloadInvoiceProjectPdf } from '../utils/pdfGenerator';
+import { calculateInvoiceTaxAmounts } from '../utils/invoiceTax';
 
 interface AdminCreateOrderModalProps {
   clients: any[];
@@ -57,7 +58,6 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'especes' | 'airtel_money' | 'moov_money' | 'virement' | 'cheque'>('virement');
   const [documentChoice, setDocumentChoice] = useState<DocumentChoice>('bon');
-  const [tvaRate, setTvaRate] = useState(0);
   const [includeStampOnInvoice, setIncludeStampOnInvoice] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -124,7 +124,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
   };
 
   const createInvoice = async (order: Order) => {
-    const totalHT = tvaRate > 0 ? Math.round(order.estimatedTotal / (1 + tvaRate)) : order.estimatedTotal;
+    const taxAmounts = calculateInvoiceTaxAmounts(order.estimatedTotal);
     const invoice: InvoiceRecord = {
       id: `DOC-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       orderId: order.id,
@@ -133,10 +133,12 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
       number: `FAC-${new Date().getFullYear()}-${order.reference.replace(/[^A-Za-z0-9]/g, '').toUpperCase()}-01`,
       issueDate: todayInLibreville(),
       clientFacilityName: order.customer.invoiceName || order.customer.facilityName,
-      tvaRate,
-      tvaAmount: order.estimatedTotal - totalHT,
-      totalHT,
-      totalTTC: order.estimatedTotal,
+      tvaRate: taxAmounts.tvaRate,
+      tvaAmount: taxAmounts.tvaAmount,
+      cssRate: taxAmounts.cssRate,
+      cssAmount: taxAmounts.cssAmount,
+      totalHT: taxAmounts.totalHT,
+      totalTTC: taxAmounts.totalTTC,
       includeStamp: includeStampOnInvoice,
     };
     const saved = await api.updateOrderFinance(order.id, { invoices: [...(order.invoices || []), invoice] });
@@ -324,9 +326,10 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
               </div>
               {!canManageInvoices && <p className="mt-2 text-[11px] text-amber-800">La secrétaire peut préparer une proforma. Le Super Admin doit lui attribuer « Gérer factures & avoirs » pour créer une facture.</p>}
               {canManageInvoices && hasUnknownPrice && <p className="mt-2 text-[11px] text-amber-800">Une ligne nécessite un devis : la facture sera disponible après validation du prix et du stock.</p>}
-              {documentChoice === 'facture' && canManageInvoices && <label className="mt-3 block max-w-xs text-[11px] font-bold text-slate-700">Taux TVA/CSS appliqué
-                <select value={tvaRate} onChange={event => setTvaRate(Number(event.target.value))} className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs"><option value={0}>0 %</option><option value={0.18}>18 %</option></select>
-              </label>}
+              {documentChoice === 'facture' && canManageInvoices && <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-[11px] text-emerald-950">
+                <strong className="block">TVA : 0 % (non appliquée)</strong>
+                <span>CSS : 1 % appliquée sur le montant hors taxe.</span>
+              </div>}
               {documentChoice === 'facture' && canManageInvoices && <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 bg-white p-3 text-[11px] text-slate-700">
                 <input type="checkbox" checked={includeStampOnInvoice} onChange={event => setIncludeStampOnInvoice(event.target.checked)} className="mt-0.5 accent-blue-700" />
                 <span><strong className="block">Inclure le cachet Gloryday sur le PDF</strong><span className="text-slate-500">Ce choix sera conservé pour cette facture.</span></span>

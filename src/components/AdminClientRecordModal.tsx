@@ -2,6 +2,9 @@ import React, { useMemo, useState } from 'react';
 import { Building2, LoaderCircle, X } from 'lucide-react';
 import type { ClientRecord, FacilityType } from '../types';
 import { api } from '../api';
+import { GabonLocationPicker } from './GabonLocationPicker';
+import { buildGabonDeliveryAddress, isGrandLibrevilleLocality } from '../data/gabonLocations';
+import { getNeighborhoodById } from '../data/librevilleZones';
 
 interface AdminClientRecordModalProps {
   record?: (ClientRecord & { linkedUserId?: string }) | null;
@@ -25,6 +28,8 @@ export const AdminClientRecordModal: React.FC<AdminClientRecordModalProps> = ({ 
   const [companyPhone, setCompanyPhone] = useState(record?.companyPhone || '');
   const [secondaryPhone, setSecondaryPhone] = useState(record?.secondaryPhone || '');
   const [city, setCity] = useState(record?.city || '');
+  const [neighborhoodId, setNeighborhoodId] = useState('');
+  const [neighborhoodName, setNeighborhoodName] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState(record?.deliveryAddress || '');
   const [deliveryInstructions, setDeliveryInstructions] = useState(record?.deliveryInstructions || '');
   const [linkedUserId, setLinkedUserId] = useState(record?.linkedUserId || '');
@@ -38,6 +43,13 @@ export const AdminClientRecordModal: React.FC<AdminClientRecordModalProps> = ({ 
       setError('Renseignez le nom de l’établissement et son téléphone de contact.');
       return;
     }
+    const hasValidLocation = isGrandLibrevilleLocality(city)
+      ? Boolean(getNeighborhoodById(neighborhoodId))
+      : Boolean(city.trim() && neighborhoodName.trim());
+    if (!hasValidLocation) {
+      setError('Choisissez une ville et un quartier pour cette fiche client.');
+      return;
+    }
     setSaving(true);
     try {
       const data = {
@@ -49,7 +61,7 @@ export const AdminClientRecordModal: React.FC<AdminClientRecordModalProps> = ({ 
         companyPhone: companyPhone.trim(),
         secondaryPhone: secondaryPhone.trim() || undefined,
         city: city.trim() || undefined,
-        deliveryAddress: deliveryAddress.trim() || undefined,
+        deliveryAddress: buildGabonDeliveryAddress(city, neighborhoodName, deliveryAddress, isGrandLibrevilleLocality(city) ? neighborhoodId : undefined) || undefined,
         deliveryInstructions: deliveryInstructions.trim() || undefined,
       };
       const saved = record?.id
@@ -105,11 +117,20 @@ export const AdminClientRecordModal: React.FC<AdminClientRecordModalProps> = ({ 
             <label className="text-xs font-bold text-slate-700">Téléphone secondaire
               <input maxLength={32} type="tel" value={secondaryPhone} onChange={(event) => setSecondaryPhone(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-medium" />
             </label>
-            <label className="text-xs font-bold text-slate-700">Ville
-              <input maxLength={100} value={city} onChange={(event) => setCity(event.target.value)} placeholder="Libreville" className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-medium" />
-            </label>
-            <label className="text-xs font-bold text-slate-700">Adresse
-              <input maxLength={300} value={deliveryAddress} onChange={(event) => setDeliveryAddress(event.target.value)} placeholder="Quartier et rue" className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-medium" />
+            <div className="sm:col-span-2">
+              <GabonLocationPicker
+                idPrefix="client-record"
+                city={city}
+                neighborhoodName={neighborhoodName}
+                neighborhoodId={neighborhoodId}
+                onCityChange={setCity}
+                onNeighborhoodNameChange={setNeighborhoodName}
+                onNeighborhoodIdChange={setNeighborhoodId}
+                compact
+              />
+            </div>
+            <label className="text-xs font-bold text-slate-700 sm:col-span-2">Adresse / rue / repère
+              <input maxLength={300} value={deliveryAddress} onChange={(event) => setDeliveryAddress(event.target.value)} placeholder="Rue, avenue ou indication utile" className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-medium" />
             </label>
             <label className="text-xs font-bold text-slate-700 sm:col-span-2">Précision / repère de livraison
               <textarea maxLength={250} rows={2} value={deliveryInstructions} onChange={(event) => setDeliveryInstructions(event.target.value)} placeholder="Bâtiment, entrée, repère…" className="mt-1 w-full resize-y rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-medium" />

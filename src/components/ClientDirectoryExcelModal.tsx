@@ -1,8 +1,9 @@
 import React, { useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, FileSpreadsheet, LoaderCircle, Upload, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Download, FileSpreadsheet, LoaderCircle, Upload, X } from 'lucide-react';
 import { api } from '../api';
 import {
   parseClientDirectorySpreadsheet,
+  downloadClientDirectoryTemplateXlsx,
   type ClientDirectoryImportPreview,
 } from '../utils/clientDirectorySpreadsheet';
 
@@ -53,6 +54,15 @@ export const ClientDirectoryExcelModal: React.FC<ClientDirectoryExcelModalProps>
     }
   };
 
+  const handleDownloadTemplate = async () => {
+    setFileError('');
+    try {
+      await downloadClientDirectoryTemplateXlsx();
+    } catch {
+      setFileError('Le modèle Excel n’a pas pu être préparé. Réessayez dans un instant.');
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/60 p-3 sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !isSaving) onClose(); }}>
       <section role="dialog" aria-modal="true" aria-labelledby="client-directory-import-title" className="flex max-h-[94dvh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
@@ -73,9 +83,14 @@ export const ClientDirectoryExcelModal: React.FC<ClientDirectoryExcelModalProps>
               <p className="text-sm font-bold text-slate-900">Fichier Excel ou CSV</p>
               <p className="mt-1 text-xs text-slate-500">Formats .xlsx, .xls ou .csv · maximum 5 Mo et 500 lignes clients.</p>
             </div>
-            <button type="button" onClick={() => inputRef.current?.click()} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white hover:bg-slate-800">
-              <Upload className="h-4 w-4" /> Choisir un fichier
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => void handleDownloadTemplate()} className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-bold text-emerald-900 hover:bg-emerald-100">
+                <Download className="h-4 w-4" /> Télécharger le modèle vierge
+              </button>
+              <button type="button" onClick={() => inputRef.current?.click()} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white hover:bg-slate-800">
+                <Upload className="h-4 w-4" /> Choisir un fichier
+              </button>
+            </div>
             <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileSelected} />
           </div>
 

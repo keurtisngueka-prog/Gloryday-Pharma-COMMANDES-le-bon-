@@ -20,6 +20,7 @@ export default defineConfig(async ({ command, mode }) => {
     process.env.SUPABASE_ANON_KEY ||
     '';
   const resolvedVapidPublicKey = env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBLIC_KEY || '';
+  const resolvedRoutingApiBaseUrl = env.VITE_ROUTING_API_BASE_URL || process.env.VITE_ROUTING_API_BASE_URL || '';
 
   const plugins = [react(), tailwindcss()];
   if (command === 'build') {
@@ -32,6 +33,8 @@ export default defineConfig(async ({ command, mode }) => {
         manifest: false,
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,webmanifest}'],
+          // Keep the map renderer lazy so the courier map does not enlarge the install-time PWA cache.
+          globIgnores: ['**/maplibre-gl-*.js', '**/maplibre-gl-worker-*.js'],
           importScripts: ['/push-handler.js'],
         },
       })
@@ -49,6 +52,7 @@ export default defineConfig(async ({ command, mode }) => {
       'import.meta.env.SUPABASE_ANON_KEY': JSON.stringify(resolvedSupabaseAnonKey),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(resolvedSupabaseAnonKey),
       'import.meta.env.APP_PUBLIC_VAPID_KEY': JSON.stringify(resolvedVapidPublicKey),
+      'import.meta.env.VITE_ROUTING_API_BASE_URL': JSON.stringify(resolvedRoutingApiBaseUrl),
     },
     plugins,
     build: {

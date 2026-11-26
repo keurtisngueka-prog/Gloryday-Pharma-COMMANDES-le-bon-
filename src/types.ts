@@ -29,11 +29,28 @@ export interface ProductVariant {
   discountPercentage?: number;
 }
 
+export interface InventoryStockEntry {
+  sourceRow: number;
+  quantity: number;
+  lotNumber?: string;
+  expiryDate?: string;
+  expiryYear?: number;
+  expiryRaw?: string;
+}
+
 export interface Product {
   id: string;
   /** Human-readable catalogue code, for example GP 326. */
   reference?: string;
   name: string;
+  /** Product brand printed on the packaging, separate from the legal manufacturer. */
+  brand?: string;
+  /** Verified company that manufactures this specific product. */
+  manufacturer?: string;
+  /** Trading company that supplies this product to Gloryday Pharma; kept internal. */
+  supplier?: string;
+  /** Page or catalog URL documenting the product image/manufacturer. */
+  imageSourceUrl?: string;
   category: string;
   subcategory?: string;
   specialty?: string;
@@ -46,6 +63,14 @@ export interface Product {
   pdfNoticeUrl?: string;
   pdfNoticeName?: string;
   description?: string;
+  /** Manufacturer-sourced or operator-reviewed instructions for using the product. */
+  modeOfOperation?: string;
+  /** Flags labels whose sale unit was not stated explicitly in the source inventory. */
+  packagingNeedsReview?: boolean;
+  /** Distinguishes a counted zero from a blank count in the source inventory. */
+  stockCountStatus?: 'counted' | 'not_recorded';
+  /** Source stock rows retained for the prepared opening-stock import. */
+  inventoryStockEntries?: InventoryStockEntry[];
   isPromotion?: boolean;
   isQuote?: boolean;
   price?: number;
@@ -266,6 +291,9 @@ export interface InvoiceRecord {
   clientFacilityName: string;
   tvaRate: number;
   tvaAmount: number;
+  /** CSS rate and amount are stored separately from TVA. */
+  cssRate?: number;
+  cssAmount?: number;
   totalHT: number;
   totalTTC: number;
   /** Immutable item snapshot. For partial deliveries only delivered, unbilled quantities are included. */
@@ -274,6 +302,13 @@ export interface InvoiceRecord {
   /** Whether the Gloryday company stamp should appear on the generated PDF. */
   includeStamp?: boolean;
   reason?: string;
+  /** Links an avoir or replacement invoice to the issued document being corrected. */
+  correctionGroupId?: string;
+  correctionOfInvoiceId?: string;
+  /** Set on the old invoice when a correction pair replaces it. */
+  correctedByInvoiceId?: string;
+  correctedAt?: string;
+  correctionReason?: string;
 }
 
 export interface DeliveryProof {
@@ -282,6 +317,16 @@ export interface DeliveryProof {
   signatureUrl?: string;
   photoUrl?: string;
   timestamp: string;
+}
+
+export type OrderTimelineEventType = 'order_received' | 'status_changed' | 'courier_assigned' | 'delivery_stage' | 'delivery_fulfillment';
+
+export interface OrderTimelineEvent {
+  id: string;
+  type: OrderTimelineEventType;
+  label: string;
+  timestamp: string;
+  description?: string;
 }
 
 export interface DeliveryLocationPoint {
@@ -341,6 +386,8 @@ export interface Order {
   orderDiscountUpdatedBy?: string;
   hasQuoteItems: boolean;
   status: OrderStatus;
+  /** Customer-visible, timestamped order and delivery milestones. */
+  timelineEvents?: OrderTimelineEvent[];
   cancellationReason?: string;
   isPaid: boolean;
   amountPaid?: number;
@@ -357,6 +404,8 @@ export interface Order {
   mobilePayment?: MobilePaymentDetails;
   deliveryStage?: DeliveryStage;
   stockReserved?: boolean;
+  /** True when the order was placed through the non-stock-affecting demo account. */
+  isDemoOrder?: boolean;
   courier?: CourierInfo;
   courierTrackingToken?: string;
   courierTrackingExpiresAt?: string;
@@ -417,7 +466,7 @@ export interface StockBatch {
   productId: string;
   productName?: string;
   lotNumber: string;
-  expiryDate: string;
+  expiryDate?: string;
   quantity: number;
   initialQuantity?: number;
   quantityRemaining?: number;
@@ -519,6 +568,8 @@ export interface User {
   email?: string;
   avatarUrl?: string;
   authProvider?: 'credentials' | 'google';
+  /** Demo accounts can place orders without reserving real inventory. */
+  isDemoAccount?: boolean;
   jobTitle?: JobTitle;
   directorApprovalStatus?: DirectorApprovalStatus;
   structureId?: string;
@@ -532,6 +583,8 @@ export interface User {
   assignedToCommercialId?: string;
   assignedToCommercialName?: string;
   coordinates?: Coordinates;
+  city?: string;
+  neighborhoodName?: string;
   deliveryAddress?: string;
   neighborhoodId?: string;
   deliveryInstructions?: string;
@@ -670,6 +723,7 @@ export type StaffPermission =
   | 'orders_status_manage'
   | 'orders_finance_view'
   | 'orders_finance_manage'
+  | 'orders_invoice_correct'
   | 'payments_manage'
   | 'quotes_view'
   | 'quotes_manage'

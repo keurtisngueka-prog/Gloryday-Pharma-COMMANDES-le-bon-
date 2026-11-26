@@ -12,28 +12,33 @@ import {
   UserCheck, 
   Clock,
   Plus,
-  Download
+  Download,
+  Pencil,
 } from 'lucide-react';
-import { Order, User, Courier, PaymentInstallment, InvoiceRecord } from '../types';
-import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
+import { Order, User, Courier, PaymentInstallment, InvoiceRecord, InvoiceLineItem, Product } from '../types';
+import { formatCollectionDueDate, getOrderCreditBalance, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
 import { getOrderBillingTotal } from '../utils/orderFulfillment';
 import { normalizeCourierPhone } from '../utils/courierDirectory';
 import { logAuditEvent } from '../utils/auditLogger';
 import { downloadDeliveryNotePdf, downloadInvoiceProjectPdf } from '../utils/pdfGenerator';
 import { api } from '../api';
 import { getInvoiceReadyLineItems, getInvoiceReadyTotal, getOrderDeliveredQuantity, getOrderRemainingQuantity } from '../utils/orderFulfillment';
+import { calculateInvoiceTaxAmounts } from '../utils/invoiceTax';
 
 interface OrderFinanceModalProps {
   order: Order;
   currentUser: User;
+  products: Product[];
   canViewInvoices: boolean;
   canManageInvoices: boolean;
+  canManageInvoiceCorrections: boolean;
   canViewPayments: boolean;
   canManagePayments: boolean;
   canManageCollectionDate: boolean;
   canManageLogistics: boolean;
   onClose: () => void;
   onUpdateOrder: (updated: Order) => Promise<void> | void;
+  onOrderUpdated: (updated: Order) => void;
 }
 
 const PAYMENT_METHOD_LABELS: Record<PaymentInstallment['paymentMethod'], string> = {
@@ -47,14 +52,17 @@ const PAYMENT_METHOD_LABELS: Record<PaymentInstallment['paymentMethod'], string>
 export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
   order,
   currentUser,
+  products,
   canViewInvoices,
   canManageInvoices,
+  canManageInvoiceCorrections,
   canViewPayments,
   canManagePayments,
   canManageCollectionDate,
   canManageLogistics,
   onClose,
-  onUpdateOrder
+  onUpdateOrder,
+  onOrderUpdated
 }) => {
   const availableTabs = [
     ...(canViewPayments || canManageCollectionDate ? ['installments' as const] : []),
@@ -79,9 +87,11 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
   // Invoice State
   const [invoiceType, setInvoiceType] = useState<'facture' | 'avoir'>('facture');
-  const [tvaRate, setTvaRate] = useState<number>(0); // 0% dispositifs médicaux ou 18%
   const [includeStampOnInvoice, setIncludeStampOnInvoice] = useState(false);
   const [creditReason, setCreditReason] = useState('');
+  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
+  const [correctionReason, setCorrectionReason] = useState('');
+  const [correctionLines, setCorrectionLines] = useState<InvoiceLineItem[]>([]);
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [invoiceDownloadError, setInvoiceDownloadError] = useState('');
   const [downloadingDeliveryNote, setDownloadingDeliveryNote] = useState(false);
@@ -125,11 +135,13 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
 
   const totalPaid = getOrderPaidAmount(order);
   const remainingDue = getOrderRemainingBalance(order);
+  const customerCredit = getOrderCreditBalance(order);
   const deliveryTrackingActive = (order.deliveryFulfillments || []).length > 0;
   const invoiceReadyLines = getInvoiceReadyLineItems(order);
   const invoiceReadyTotal = deliveryTrackingActive ? getInvoiceReadyTotal(order) : order.estimatedTotal;
   const collectionOverdue = canViewPayments && isCollectionOverdue({ ...order, collectionDueDate: collectionDueDate || undefined });
   const latestClientRemainderRequest = order.clientRemainderRequests?.[order.clientRemainderRequests.length - 1];
+  const invoiceBeingCorrected = order.invoices?.find((invoice) => invoice.id === editingInvoiceId);
   const clientRemainderChoiceLabels = {
     continue_partial: 'Recevoir les articles disponibles puis le reste',
     wait_for_restock: 'Attendre que les articles manquants soient disponibles',
@@ -252,13 +264,14 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       : `AVOIR-${documentYear}-${orderCode}-${sequence}`;
 
     const deliveryTrackingActive = (order.deliveryFulfillments || []).length > 0;
-    const totalTTC = isFacture
+    const baseAmount = isFacture
       ? deliveryTrackingActive ? getInvoiceReadyTotal(order) : order.estimatedTotal
       : getOrderBillingTotal(order);
-    const totalHT = tvaRate > 0 ? Math.round(totalTTC / (1 + tvaRate)) : totalTTC;
-    const tvaAmount = totalTTC - totalHT;
+    const taxAmounts = isFacture
+      ? calculateInvoiceTaxAmounts(baseAmount)
+      : { totalHT: baseAmount, tvaRate: 0, tvaAmount: 0, cssRate: 0, cssAmount: 0, totalTTC: baseAmount };
     const lineItems = isFacture ? getInvoiceReadyLineItems(order) : [];
-    if (isFacture && totalTTC <= 0) {
+    if (isFacture && taxAmounts.totalTTC <= 0) {
       setSaveError('Aucune quantité livrée non facturée ne peut être mise sur cette facture.');
       return;
     }
@@ -271,12 +284,14 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       number: num,
       issueDate: new Date().toISOString().slice(0, 10),
       clientFacilityName: order.customer.invoiceName || order.customer.facilityName,
-      tvaRate,
-      tvaAmount,
-      totalHT,
-      totalTTC,
+      tvaRate: taxAmounts.tvaRate,
+      tvaAmount: taxAmounts.tvaAmount,
+      cssRate: taxAmounts.cssRate,
+      cssAmount: taxAmounts.cssAmount,
+      totalHT: taxAmounts.totalHT,
+      totalTTC: taxAmounts.totalTTC,
       lineItems: isFacture ? lineItems : undefined,
-      deliveryFee: isFacture ? Math.max(0, totalTTC - lineItems.reduce((sum, line) => sum + line.lineTotal, 0)) : 0,
+      deliveryFee: isFacture ? Math.max(0, baseAmount - lineItems.reduce((sum, line) => sum + line.lineTotal, 0)) : 0,
       includeStamp: includeStampOnInvoice,
       reason: isFacture ? undefined : (creditReason.trim() || 'Retour dispositifs / ajustement tarifaire')
     };
@@ -294,10 +309,91 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
       'export_donnees',
       'Facturation B2B',
       order.reference,
-      `Émission de ${invoiceType === 'facture' ? 'Facture' : 'Avoir'} ${num} (${totalTTC.toLocaleString('fr-FR')} FCFA TTC)`
+      `Émission de ${invoiceType === 'facture' ? 'Facture' : 'Avoir'} ${num} (${taxAmounts.totalTTC.toLocaleString('fr-FR')} FCFA TTC)`
     );
     } finally {
       invoiceSubmitLockRef.current = false;
+    }
+  };
+
+  const beginInvoiceCorrection = (invoice: InvoiceRecord) => {
+    if (!canManageInvoiceCorrections || invoice.type !== 'facture' || !invoice.lineItems?.length || invoice.correctedByInvoiceId) return;
+    setSaveError('');
+    setCorrectionReason('');
+    setCorrectionLines(invoice.lineItems.map((line) => ({ ...line })));
+    setEditingInvoiceId(invoice.id);
+  };
+
+  const changeCorrectionProduct = (lineIndex: number, productId: string) => {
+    const product = products.find((candidate) => candidate.id === productId);
+    if (!product) return;
+    const variant = product.variants[0];
+    const unitPrice = Math.max(0, Math.trunc(Number(variant?.price) || 0));
+    setCorrectionLines((previous) => previous.map((line, index) => index === lineIndex ? {
+      ...line,
+      productId: product.id,
+      productReference: product.reference,
+      productName: product.name,
+      variant: variant?.label || 'Unité',
+      unitPrice,
+      lineTotal: unitPrice * line.quantity,
+      savings: undefined,
+      discountPercent: undefined,
+      isQuote: false,
+    } : line));
+  };
+
+  const changeCorrectionVariant = (lineIndex: number, variantLabel: string) => {
+    setCorrectionLines((previous) => previous.map((line, index) => {
+      if (index !== lineIndex) return line;
+      const product = products.find((candidate) => candidate.id === line.productId);
+      const variant = product?.variants.find((candidate) => candidate.label === variantLabel);
+      if (!variant) return { ...line, variant: variantLabel };
+      const unitPrice = Math.max(0, Math.trunc(Number(variant.price) || 0));
+      return {
+        ...line,
+        variant: variant.label,
+        unitPrice,
+        lineTotal: unitPrice * line.quantity,
+        savings: undefined,
+        discountPercent: undefined,
+      };
+    }));
+  };
+
+  const changeCorrectionPrice = (lineIndex: number, rawValue: string) => {
+    const unitPrice = rawValue === '' ? 0 : Math.max(0, Math.trunc(Number(rawValue) || 0));
+    setCorrectionLines((previous) => previous.map((line, index) => index === lineIndex ? {
+      ...line,
+      unitPrice,
+      lineTotal: unitPrice * line.quantity,
+      savings: undefined,
+      discountPercent: undefined,
+    } : line));
+  };
+
+  const handleCorrectInvoice = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!invoiceBeingCorrected || !canManageInvoiceCorrections || !correctionReason.trim() || correctionLines.length === 0 || invoiceSubmitLockRef.current) return;
+    invoiceSubmitLockRef.current = true;
+    setIsSaving(true);
+    setSaveError('');
+    try {
+      const savedOrder = await api.correctInvoice(order.id, {
+        correctionId: crypto.randomUUID(),
+        invoiceId: invoiceBeingCorrected.id,
+        reason: correctionReason.trim(),
+        lineItems: correctionLines,
+      });
+      onOrderUpdated(savedOrder);
+      setEditingInvoiceId(null);
+      setCorrectionLines([]);
+      setCorrectionReason('');
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'La facture n’a pas pu être corrigée. Réessayez.');
+    } finally {
+      invoiceSubmitLockRef.current = false;
+      setIsSaving(false);
     }
   };
 
@@ -648,7 +744,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
               <div className="space-y-1">
                 <span className="font-bold text-slate-700 text-[11px]">Documents de commande :</span>
                 <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[10px] text-amber-900">
-                  La facture et l’avoir sont enregistrés dans le dossier de cette commande. Vérifiez les mentions et le taux applicable avant de transmettre le document.
+                  Une correction annule l’ancienne facture par un avoir et crée une nouvelle facture. L’historique reste visible; les quantités livrées et le stock ne changent pas.
                 </p>
                 {deliveryTrackingActive && (
                   <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-[11px] text-blue-950">
@@ -661,17 +757,28 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                   <p className="text-slate-400 italic">Aucune facture ou note d'avoir générée pour cette commande.</p>
                 ) : (
                   order.invoices.map((inv) => (
-                    <div key={inv.id} className="p-2.5 border border-slate-200 rounded-xl flex items-center justify-between">
+                    <div key={inv.id} className={`p-2.5 border rounded-xl flex items-center justify-between ${inv.correctedByInvoiceId ? 'border-slate-200 bg-slate-50 opacity-80' : 'border-emerald-100 bg-white'}`}>
                       <div>
                         <div className="font-bold text-slate-900 font-mono">{inv.number}</div>
                         <div className="text-[10px] text-slate-500">
                           {inv.type === 'facture' ? 'Facture' : 'Avoir'} · Créé le {inv.issueDate}
                           {inv.reason && ` · Motif : ${inv.reason}`}
+                          {inv.correctedByInvoiceId && ` · Remplacée par ${order.invoices?.find((item) => item.id === inv.correctedByInvoiceId)?.number || 'une facture corrigée'}`}
+                          {inv.correctionOfInvoiceId && ` · Correction de ${order.invoices?.find((item) => item.id === inv.correctionOfInvoiceId)?.number || 'une facture précédente'}`}
                         </div>
                       </div>
                       <div className="text-right">
                         <strong className="font-mono text-slate-900">{inv.totalTTC.toLocaleString('fr-FR')} F</strong>
-                        <div className="text-[10px] text-slate-400">TVA: {inv.tvaRate * 100}%</div>
+                        <div className="text-[10px] text-slate-400">TVA {Math.round(inv.tvaRate * 100)}% · CSS {Math.round((inv.cssRate || 0) * 100)}%</div>
+                        {canManageInvoiceCorrections && inv.type === 'facture' && !inv.correctedByInvoiceId && inv.lineItems?.length ? (
+                          <button
+                            type="button"
+                            onClick={() => beginInvoiceCorrection(inv)}
+                            className="mt-1 mr-1 inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-800 hover:bg-emerald-100"
+                          >
+                            <Pencil className="h-3 w-3" /> Corriger
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => void handleDownloadInvoiceProject(inv)}
@@ -686,6 +793,59 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                   ))
                 )}
               </div>
+              {customerCredit > 0 && <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-950"><strong>Avance à réaffecter ou à rembourser : {customerCredit.toLocaleString('fr-FR')} FCFA.</strong> Les versements existants sont conservés; cette différence ne confirme pas un remboursement.</div>}
+
+              {invoiceBeingCorrected && (
+                <form onSubmit={handleCorrectInvoice} className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
+                  <div>
+                    <h3 className="text-sm font-black text-emerald-950">Corriger {invoiceBeingCorrected.number}</h3>
+                    <p className="mt-1 text-[10px] leading-4 text-emerald-900">L’ancienne facture sera conservée, annulée par un avoir, puis remplacée. La correction conserve les quantités livrées; elle ne modifie pas le stock.</p>
+                  </div>
+                  <div className="space-y-2">
+                    {correctionLines.map((line, index) => {
+                      const selectedProduct = products.find((product) => product.id === line.productId);
+                      const variants = selectedProduct?.variants || [];
+                      return (
+                        <div key={`${line.itemIndex}-${index}`} className="space-y-2 rounded-lg border border-emerald-100 bg-white p-2.5">
+                          <div className="text-[10px] font-bold text-slate-500">Quantité livrée conservée : {line.quantity}</div>
+                          <label className="block text-[10px] font-bold text-slate-600">Produit
+                            <select value={line.productId} onChange={(event) => changeCorrectionProduct(index, event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-xs">
+                              {!selectedProduct && <option value={line.productId}>{line.productName} · ancien produit</option>}
+                              {products.map((product) => <option key={product.id} value={product.id}>{product.reference ? `${product.reference} · ` : ''}{product.name}</option>)}
+                            </select>
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="block text-[10px] font-bold text-slate-600">Conditionnement
+                              {variants.length > 0 ? (
+                                <select value={line.variant} onChange={(event) => changeCorrectionVariant(index, event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-xs">
+                                  {!variants.some((variant) => variant.label === line.variant) && <option value={line.variant}>{line.variant} · ancien</option>}
+                                  {variants.map((variant) => <option key={variant.label} value={variant.label}>{variant.label}</option>)}
+                                </select>
+                              ) : <input value={line.variant} onChange={(event) => setCorrectionLines(previous => previous.map((item, itemIndex) => itemIndex === index ? { ...item, variant: event.target.value } : item))} maxLength={120} className="mt-1 w-full rounded-lg border border-slate-300 p-2 text-xs" />}
+                            </label>
+                            <label className="block text-[10px] font-bold text-slate-600">Prix unitaire (FCFA)
+                              <input type="number" min={0} max={1_000_000_000} step={1} required value={line.unitPrice} onChange={(event) => changeCorrectionPrice(index, event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 p-2 text-xs tabular-nums" />
+                            </label>
+                          </div>
+                          <div className="text-right text-xs font-black text-slate-800">Ligne : {line.lineTotal.toLocaleString('fr-FR')} FCFA{(line.savings || 0) > 0 && <span className="ml-1 text-[10px] font-medium text-slate-500">· remise conservée {line.savings!.toLocaleString('fr-FR')} FCFA</span>}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <label className="block text-[10px] font-bold text-slate-700">Motif obligatoire
+                    <textarea required maxLength={500} rows={2} value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} placeholder="Ex. remplacement de l’article à la demande du client, erreur de prix…" className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-xs" />
+                  </label>
+                  {(() => {
+                    const base = correctionLines.reduce((sum, line) => sum + line.lineTotal, 0) + Math.max(0, Math.trunc(Number(invoiceBeingCorrected.deliveryFee) || 0));
+                    const taxes = calculateInvoiceTaxAmounts(base);
+                    return <div className="rounded-lg bg-white p-2 text-right text-[11px] text-slate-600">TVA 0 % : 0 FCFA · CSS 1 % : {taxes.cssAmount.toLocaleString('fr-FR')} FCFA <strong className="ml-2 text-sm text-emerald-900">Total : {taxes.totalTTC.toLocaleString('fr-FR')} FCFA</strong></div>;
+                  })()}
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => { setEditingInvoiceId(null); setCorrectionLines([]); setCorrectionReason(''); }} disabled={isSaving} className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700">Annuler</button>
+                    <button type="submit" disabled={isSaving || !correctionReason.trim() || correctionLines.some((line) => !Number.isSafeInteger(line.unitPrice) || line.unitPrice < 0)} className="flex-1 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-50">{isSaving ? 'Enregistrement…' : 'Créer l’avoir et la facture corrigée'}</button>
+                  </div>
+                </form>
+              )}
 
               {invoiceDownloadError && (
                 <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">
@@ -707,16 +867,9 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                       <option value="avoir">Avoir / retour</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-slate-600 mb-0.5">Régime TVA</label>
-                    <select
-                      value={tvaRate}
-                      onChange={(e) => setTvaRate(Number(e.target.value))}
-                      className="w-full p-1.5 border border-slate-300 rounded-lg bg-white"
-                    >
-                      <option value="0">0% (à confirmer)</option>
-                      <option value="0.18">18% (à confirmer)</option>
-                    </select>
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[10px] text-emerald-950">
+                    <strong className="block">TVA : 0 % · non appliquée</strong>
+                    <span>CSS : 1 % · appliquée aux factures</span>
                   </div>
                 </div>
 

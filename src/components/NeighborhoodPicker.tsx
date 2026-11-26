@@ -5,6 +5,7 @@ import {
   getNeighborhoodAdministrativeArea,
   getNeighborhoodById
 } from '../data/librevilleZones';
+import { getNeighborhoodLocality } from '../data/gabonLocations';
 
 interface NeighborhoodPickerProps {
   value: string;
@@ -13,6 +14,7 @@ interface NeighborhoodPickerProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  city?: string;
 }
 
 const normalizeSearchText = (value: string) => value
@@ -26,7 +28,8 @@ export const NeighborhoodPicker: React.FC<NeighborhoodPickerProps> = ({
   id,
   placeholder = 'Rechercher un quartier…',
   disabled = false,
-  className = ''
+  className = '',
+  city
 }) => {
   const generatedId = useId().replace(/:/g, '');
   const inputId = id || `neighborhood-${generatedId}`;
@@ -47,6 +50,7 @@ export const NeighborhoodPicker: React.FC<NeighborhoodPickerProps> = ({
 
   const normalizedQuery = normalizeSearchText(query.trim());
   const filteredNeighborhoods = ALL_LIBREVILLE_NEIGHBORHOODS.filter((neighborhood) => {
+    if (city && getNeighborhoodLocality(neighborhood.id) !== city) return false;
     if (!normalizedQuery) return true;
     return normalizeSearchText([
       neighborhood.name,

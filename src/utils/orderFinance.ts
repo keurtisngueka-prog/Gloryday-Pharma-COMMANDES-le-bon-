@@ -14,20 +14,23 @@ export function getOrderPaidAmount(order: FinanceOrder): number {
       (sum, installment) => sum + (installment.status === 'valide' ? Math.max(0, Math.trunc(Number(installment.amount) || 0)) : 0),
       0,
     );
-    return (order.deliveryFulfillments || []).length ? confirmed : Math.min(total, confirmed);
+    return confirmed;
   }
   if (order.isPaid && (!Number.isFinite(Number(order.amountPaid)) || Number(order.amountPaid) <= 0)) {
     return Math.max(total, Math.max(0, Math.trunc(Number(order.estimatedTotal) || 0)));
   }
   if (Number.isFinite(Number(order.amountPaid))) {
-    const paid = Math.max(0, Math.trunc(Number(order.amountPaid)));
-    return (order.deliveryFulfillments || []).length ? paid : Math.min(total, paid);
+    return Math.max(0, Math.trunc(Number(order.amountPaid)));
   }
   return order.isPaid ? Math.max(total, Math.max(0, Math.trunc(Number(order.estimatedTotal) || 0))) : 0;
 }
 
 export function getOrderRemainingBalance(order: FinanceOrder): number {
   return Math.max(0, getOrderBillingTotal(order) - getOrderPaidAmount(order));
+}
+
+export function getOrderCreditBalance(order: FinanceOrder): number {
+  return Math.max(0, getOrderPaidAmount(order) - getOrderBillingTotal(order));
 }
 
 export function isCollectionOverdue(order: FinanceOrder & Pick<Order, 'collectionDueDate'>): boolean {

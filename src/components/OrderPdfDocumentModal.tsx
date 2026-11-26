@@ -276,6 +276,9 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
                         <tr key={idx} className={idx % 2 === 1 ? 'bg-slate-50/70' : 'bg-white'}>
                           <td className="py-2.5 px-3">
                             <div className="font-bold text-slate-900">{item.productName}</div>
+                            {item.productReference && (
+                              <div className="mt-0.5 font-mono text-[10px] text-slate-500">Réf. produit : {item.productReference}</div>
+                            )}
                             {item.variant && item.variant !== 'Standard' && (
                               <div className="text-[11px] text-slate-500">{item.variant}</div>
                             )}

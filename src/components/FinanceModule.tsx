@@ -151,7 +151,7 @@ export const FinanceModule: React.FC<FinanceModuleProps> = ({ orders, products, 
       expense.voidReason || '',
     ].map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(';'));
     const content = '\uFEFF' + [
-      ['Date', 'Catégorie', 'Dépense', 'Fournisseur', 'Référence', 'Montant FCFA', 'Paiement', 'Statut', 'Enregistrée par', 'Annulée par', 'Motif annulation'].join(';'),
+      ['Date', 'Catégorie', 'Motif / libellé', 'Fournisseur', 'Référence', 'Montant FCFA', 'Paiement', 'Statut', 'Enregistrée par', 'Annulée par', 'Motif annulation'].join(';'),
       ...rows,
     ].join('\r\n');
     const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8;' }));
@@ -208,8 +208,14 @@ export const FinanceModule: React.FC<FinanceModuleProps> = ({ orders, products, 
                 {categories.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
             </label>
-            <label className="text-xs font-semibold text-slate-700 sm:col-span-2">Libellé
-              <input required minLength={3} maxLength={500} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Ex. Transport livraison fournisseur" className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm" />
+            <label className="text-xs font-semibold text-slate-700 sm:col-span-2">{form.category === 'autre' ? 'Précisez la nature de la dépense *' : 'Libellé de la dépense *'}
+              <input required minLength={3} maxLength={500} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder={form.category === 'autre' ? 'Ex. Réparation du groupe électrogène' : 'Ex. Transport livraison fournisseur'} className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm" />
+              {form.category === 'autre' && (
+                <span className="mt-1.5 block rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium leading-relaxed text-amber-900">
+                  La précision sera enregistrée dans le journal et le CSV avec la catégorie « Autre ». Elle comptera dans les dépenses actives, le total de la période et la marge indicative après frais.
+                  {form.description.trim() && <strong className="mt-1 block">Aperçu : Autre · {form.description.trim()}</strong>}
+                </span>
+              )}
             </label>
             <label className="text-xs font-semibold text-slate-700">Montant (FCFA)
               <input required type="number" min="1" step="1" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="Ex. 25000" className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm tabular-nums" />

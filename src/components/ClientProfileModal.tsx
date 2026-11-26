@@ -4,12 +4,12 @@ import type { FacilityType, User } from '../types';
 import { api } from '../api';
 import { processAvatarFile } from '../utils/avatarImage';
 import {
-  buildNeighborhoodDeliveryAddress,
   detectNeighborhoodFromAddress,
   extractDeliveryInstructions,
   getNeighborhoodById,
 } from '../data/librevilleZones';
-import { NeighborhoodPicker } from './NeighborhoodPicker';
+import { GabonLocationPicker } from './GabonLocationPicker';
+import { buildGabonDeliveryAddress, getNeighborhoodLocality, isGrandLibrevilleLocality } from '../data/gabonLocations';
 
 interface ClientProfileModalProps {
   user: User;
@@ -31,6 +31,8 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
   const initialNeighborhood = user.neighborhoodId && getNeighborhoodById(user.neighborhoodId)
     ? user.neighborhoodId
     : detectNeighborhoodFromAddress(user.deliveryAddress || '')?.id || '';
+  const [city, setCity] = useState(user.city || (initialNeighborhood ? getNeighborhoodLocality(initialNeighborhood) : 'Libreville'));
+  const [neighborhoodName, setNeighborhoodName] = useState(user.neighborhoodName || '');
   const [facilityName, setFacilityName] = useState(user.facilityName || '');
   const [contactName, setContactName] = useState(user.contactName || '');
   const [secondaryPhone, setSecondaryPhone] = useState(user.secondaryPhone || '');
@@ -86,8 +88,11 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
       setErrorMessage('Le nom de votre établissement est obligatoire.');
       return;
     }
-    if (!neighborhoodId || !getNeighborhoodById(neighborhoodId)) {
-      setErrorMessage('Sélectionnez votre quartier de livraison.');
+    const hasValidLocation = isGrandLibrevilleLocality(city)
+      ? Boolean(neighborhoodId && getNeighborhoodById(neighborhoodId))
+      : Boolean(city.trim() && neighborhoodName.trim());
+    if (!hasValidLocation) {
+      setErrorMessage('Choisissez votre ville et votre quartier.');
       return;
     }
 
@@ -99,7 +104,9 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
         secondaryPhone: secondaryPhone.trim(),
         facilityType,
         facilityTypeOther: facilityType === 'Autre' ? facilityTypeOther.trim() : '',
-        neighborhoodId,
+        city: city.trim(),
+        neighborhoodId: isGrandLibrevilleLocality(city) ? neighborhoodId : '',
+        neighborhoodName: isGrandLibrevilleLocality(city) ? (getNeighborhoodById(neighborhoodId)?.name || '') : neighborhoodName.trim(),
         deliveryInstructions: deliveryInstructions.trim()
       };
       if (avatarChanged) profileData.avatarUrl = avatarUrl;
@@ -117,8 +124,8 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
   };
 
   const selectedNeighborhood = getNeighborhoodById(neighborhoodId);
-  const addressPreview = selectedNeighborhood
-    ? buildNeighborhoodDeliveryAddress(neighborhoodId, deliveryInstructions)
+  const addressPreview = (isGrandLibrevilleLocality(city) ? selectedNeighborhood : neighborhoodName)
+    ? buildGabonDeliveryAddress(city, isGrandLibrevilleLocality(city) ? selectedNeighborhood?.name || '' : neighborhoodName, deliveryInstructions, isGrandLibrevilleLocality(city) ? neighborhoodId : undefined)
     : user.deliveryAddress || 'Votre adresse sera ajoutée à la prochaine commande.';
 
   return (
@@ -188,13 +195,15 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
               </label>
             )}
             <label className="block sm:col-span-2">
-              <span className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-slate-700"><MapPin className="h-3.5 w-3.5 text-blue-700" /> Quartier de livraison *</span>
-              <NeighborhoodPicker
-                id="client-profile-neighborhood"
-                value={neighborhoodId}
-                onChange={setNeighborhoodId}
-                placeholder="Rechercher un quartier…"
-                className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-10 pr-3.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              <span className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-slate-700"><MapPin className="h-3.5 w-3.5 text-blue-700" /> Ville et quartier de livraison *</span>
+              <GabonLocationPicker
+                idPrefix="client-profile"
+                city={city}
+                neighborhoodName={neighborhoodName}
+                neighborhoodId={neighborhoodId}
+                onCityChange={(nextCity) => { setCity(nextCity); setNeighborhoodId(''); setNeighborhoodName(''); }}
+                onNeighborhoodNameChange={setNeighborhoodName}
+                onNeighborhoodIdChange={setNeighborhoodId}
               />
             </label>
             <label className="block sm:col-span-2">

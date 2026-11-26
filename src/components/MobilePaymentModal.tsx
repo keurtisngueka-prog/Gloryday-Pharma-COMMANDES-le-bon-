@@ -9,7 +9,8 @@ import {
   Clock, 
   ArrowRight,
   ShieldCheck,
-  AlertCircle
+  AlertCircle,
+  ExternalLink
 } from 'lucide-react';
 import { Order } from '../types';
 
@@ -40,11 +41,7 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
 
   const airtelNumber = '+241 77 003 004';
   const moovNumber = '+241 66 240 399';
-  const airtelMerchantCode = 'GLORYDAY-AIRTEL';
-  const moovMerchantCode = 'GLORYDAY-MOOV';
-
   const activeNumber = operator === 'airtel_money' ? airtelNumber : moovNumber;
-  const activeCode = operator === 'airtel_money' ? airtelMerchantCode : moovMerchantCode;
   const activeUssd = operator === 'airtel_money' ? '*150#' : '*555#';
 
   const handleCopy = (text: string, type: 'code' | 'phone') => {
@@ -185,11 +182,11 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
             <div className="space-y-1.5 text-[11px] text-slate-700">
               <div className="flex items-start gap-2">
                 <span className="w-4 h-4 rounded-full bg-slate-200 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
-                <span>Composez <strong>{activeUssd}</strong> sur votre téléphone.</span>
+                <span>Ouvrez le menu <strong>{activeUssd}</strong> sur votre téléphone.</span>
               </div>
               <div className="flex items-start gap-2">
                 <span className="w-4 h-4 rounded-full bg-slate-200 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
-                <span>Sélectionnez <strong>Paiement / Marchand</strong> ou <strong>Transfert direct</strong> vers le numéro :</span>
+                <span>Choisissez le transfert vers un numéro, puis saisissez le numéro de réception indiqué ci-dessous :</span>
               </div>
               <div className="p-2 rounded-xl bg-white border border-slate-200 flex items-center justify-between ml-6">
                 <strong className="font-mono text-slate-900 text-xs">{activeNumber}</strong>
@@ -204,9 +201,16 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
               </div>
               <div className="flex items-start gap-2">
                 <span className="w-4 h-4 rounded-full bg-slate-200 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
-                <span>Indiquez le montant exact de <strong>{order.estimatedTotal.toLocaleString('fr-FR')} FCFA</strong> et validez avec votre code secret.</span>
+                <span>Saisissez <strong>{order.estimatedTotal.toLocaleString('fr-FR')} FCFA</strong>, vérifiez le nom du bénéficiaire et confirmez dans le menu opérateur.</span>
               </div>
             </div>
+            <a
+              href={`tel:${encodeURIComponent(activeUssd)}`}
+              className={`inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold text-white shadow-xs ${operator === 'airtel_money' ? 'bg-rose-700 hover:bg-rose-800' : 'bg-blue-700 hover:bg-blue-800'}`}
+            >
+              <ExternalLink className="h-4 w-4" /> Ouvrir {operator === 'airtel_money' ? 'Airtel Money' : 'Moov Money'} ({activeUssd})
+            </a>
+            <p className="text-[10px] leading-relaxed text-slate-500">Le lien ouvre le composeur du téléphone avec le code. Selon le téléphone et la SIM, vous devrez encore appuyer sur Appeler. Le menu demande ensuite les informations et le montant.</p>
           </div>
 
           {/* Transaction Confirmation Form */}

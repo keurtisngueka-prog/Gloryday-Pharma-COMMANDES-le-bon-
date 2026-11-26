@@ -282,3 +282,28 @@ export async function downloadClientDirectoryXlsx(clients: any[]): Promise<void>
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Clients');
   XLSX.writeFile(workbook, `gloryday-repertoire-clients-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
+
+export async function downloadClientDirectoryTemplateXlsx(): Promise<void> {
+  const XLSX = await import('xlsx');
+  const headers = EXPORT_COLUMNS.map((column) => column.label);
+  const worksheet = XLSX.utils.aoa_to_sheet([headers, Array(headers.length).fill('')]);
+  worksheet['!cols'] = [34, 28, 21, 23, 28, 30, 24, 23, 21, 38, 38].map((wch) => ({ wch }));
+  worksheet['!autofilter'] = { ref: `A1:K2` };
+  worksheet['!freeze'] = { xSplit: 0, ySplit: 1, topLeftCell: 'A2', activePane: 'bottomLeft', state: 'frozen' };
+
+  const instructions = XLSX.utils.aoa_to_sheet([
+    ['MODE D’EMPLOI — RÉPERTOIRE CLIENTS GLORYDAY PHARMA'],
+    ['1. Remplir la feuille « Clients », une structure par ligne.'],
+    ['2. Le nom de la structure, le contact principal et le téléphone de l’entreprise sont obligatoires.'],
+    ['3. Garder les téléphones au format texte pour conserver le +241 et les zéros initiaux.'],
+    ['4. Enregistrer en .xlsx, .xls ou .csv puis importer dans l’application.'],
+    ['5. Limite : 500 clients par import. Les doublons sont signalés et ignorés; les lignes invalides doivent être corrigées.'],
+    ['Types acceptés : Clinique, Polyclinique, Hôpital, Laboratoire, Pharmacie, Cabinet médical, Autre.'],
+  ]);
+  instructions['!cols'] = [{ wch: 115 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Clients');
+  XLSX.utils.book_append_sheet(workbook, instructions, 'Consignes');
+  XLSX.writeFile(workbook, 'modele-vierge-repertoire-clients-gloryday.xlsx');
+}

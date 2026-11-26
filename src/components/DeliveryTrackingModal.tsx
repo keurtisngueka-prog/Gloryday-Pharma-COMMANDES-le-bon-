@@ -29,6 +29,18 @@ import { api } from '../api';
 import { normalizeCourierPhone } from '../utils/courierDirectory';
 import { LiveDeliveryMap } from './LiveDeliveryMap';
 
+function safeProofImageSource(value?: string): string | undefined {
+  const source = value?.trim();
+  if (!source) return undefined;
+  if (/^data:image\/(?:png|jpeg|jpg|webp);base64,/i.test(source) || source.startsWith('blob:')) return source;
+  if (source.startsWith('/') && !source.startsWith('//')) return source;
+  try {
+    return new URL(source).protocol === 'https:' ? source : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 interface DeliveryTrackingModalProps {
   isOpen: boolean;
   order: Order;
@@ -198,7 +210,7 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
     'preparation'
   );
 
-  const courierName = order.courier?.name || 'Aucun coursier affecté';
+  const courierName = order.courier?.name || (isAdmin ? 'Aucun coursier affecté' : 'En cours d’affectation');
   const courierPhone = order.courier?.phone || '';
   const courierVehicle = order.courier?.vehicle || 'À renseigner';
   const deliveryZone = order.deliveryZone || (
@@ -219,28 +231,12 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
   const mapDestinationCoords = hasPreciseCoordinates
     ? { lat: coordinates!.lat, lng: coordinates!.lng, source: coordinates?.source || 'neighborhood' }
     : { lat: fallbackNeighborhoodCoords.lat, lng: fallbackNeighborhoodCoords.lng, source: 'neighborhood' as const };
-  const providedMapsUrl = (() => {
-    try {
-      const url = new URL(order.customer.googleMapsUrl || '');
-      return url.protocol === 'https:' && (url.hostname === 'maps.app.goo.gl' || url.hostname === 'google.com' || url.hostname.endsWith('.google.com'))
-        ? url.href
-        : '';
-    } catch {
-      return '';
-    }
-  })();
-  const addressQuery = [order.customer.deliveryAddress, order.customer.neighborhoodName, order.customer.city]
-    .filter(value => typeof value === 'string' && value.trim())
-    .join(', ');
-  const mapDestination = hasConfirmedOrderGps
-    ? `${coordinates!.lat},${coordinates!.lng}`
-    : addressQuery || `${mapDestinationCoords.lat},${mapDestinationCoords.lng}`;
-  const mapQuery = mapDestination && /gabon/i.test(mapDestination) ? mapDestination : `${mapDestination}, Gabon`;
-  const googleMapsUrl = order.customer.deliveryMode === 'retrait'
+  const currentCourierPoint = locationPoints[locationPoints.length - 1];
+  const openStreetMapDirectionsUrl = order.customer.deliveryMode === 'retrait'
     ? ''
-    : mapDestination
-      ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mapQuery)}&travelmode=driving`
-      : providedMapsUrl;
+    : currentCourierPoint
+      ? `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${encodeURIComponent(`${currentCourierPoint.latitude},${currentCourierPoint.longitude};${mapDestinationCoords.lat},${mapDestinationCoords.lng}`)}`
+      : `https://www.openstreetmap.org/?mlat=${mapDestinationCoords.lat}&mlon=${mapDestinationCoords.lng}#map=16/${mapDestinationCoords.lat}/${mapDestinationCoords.lng}`;
 
   const stages: {
     key: DeliveryStage;
@@ -450,19 +446,19 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
       <div className="relative w-full max-w-5xl bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden my-auto">
         {/* Modal Top Header */}
-        <div className="bg-slate-900 text-white p-5 sm:p-6 flex items-start justify-between relative overflow-hidden">
-          <div className="absolute top-0 right-0 -mt-6 -mr-6 w-40 h-40 bg-[#0d44e8]/30 rounded-full blur-2xl pointer-events-none"></div>
+        <div className="bg-gradient-to-br from-slate-950 via-emerald-950 to-slate-900 text-white p-5 sm:p-6 flex items-start justify-between relative overflow-hidden">
+          <div className="absolute top-0 right-0 -mt-6 -mr-6 w-40 h-40 bg-emerald-400/20 rounded-full blur-2xl pointer-events-none"></div>
 
           <div className="relative z-10">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-bold uppercase tracking-wider mb-2 border border-blue-400/20">
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-400/15 text-emerald-200 text-[10px] font-bold uppercase tracking-wider mb-2 border border-emerald-300/20">
               <Truck className="w-3 h-3" />
-              Suivi de Livraison
+              {isAdmin ? 'Suivi logistique' : 'Suivi de votre livraison'}
             </div>
             <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
               Commande {order.reference}
             </h2>
             <p className="text-slate-300 text-xs mt-0.5 flex items-center gap-1.5">
-              <Building2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+              <Building2 className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
               <span>{order.customer.facilityName}</span>
               <span>·</span>
               <span className="text-slate-400">{order.customer.city || 'Libreville'}</span>
@@ -481,19 +477,19 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
         {/* Modal Content */}
         <div className="p-5 sm:p-6 space-y-6 max-h-[75vh] overflow-y-auto">
           {/* Status Alert Banner */}
-          <div className={`p-4 rounded-2xl border flex items-center justify-between gap-3 ${
+          <div className={`p-4 sm:p-5 rounded-2xl border flex items-center justify-between gap-3 ${
             currentStage === 'delivered'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-              : 'bg-blue-50 border-blue-200 text-blue-950'
+              : 'bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-200 text-emerald-950'
           }`}>
             <div className="flex items-center gap-3">
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0 ${
-                currentStage === 'delivered' ? 'bg-emerald-600' : 'bg-[#0d44e8]'
+                currentStage === 'delivered' ? 'bg-emerald-600' : 'bg-emerald-700'
               }`}>
                 {currentStage === 'delivered' ? <CheckCircle2 className="w-5 h-5" /> : <Truck className="w-5 h-5" />}
               </div>
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider block opacity-75">Statut Actuel</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider block opacity-75">{isAdmin ? 'Statut logistique' : 'Votre commande'}</span>
                 <span className="font-extrabold text-sm sm:text-base">
                   {stages[currentStageIndex]?.label}
                 </span>
@@ -501,7 +497,7 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
             </div>
 
             <div className="text-right">
-              <span className="text-[10px] uppercase font-bold text-slate-500 block">Créneau estimé</span>
+              <span className="text-[10px] uppercase font-bold text-slate-500 block">{currentStage === 'delivered' ? 'Réception' : 'Arrivée estimée'}</span>
               <span className="font-bold text-xs sm:text-sm text-slate-900 block">
                 {currentStage === 'delivered' 
                   ? (hasCompleteDeliveryProof ? 'Livré · Réception enregistrée' : 'Livré')
@@ -516,7 +512,7 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
           {/* Interactive Timeline (4 Steps) */}
           <div className="space-y-4">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 px-1">
-              Timeline de la Livraison
+              {isAdmin ? 'Étapes de la livraison' : 'Les étapes de votre livraison'}
             </h3>
 
             <div className="relative pl-7 sm:pl-9 space-y-6 before:content-[''] before:absolute before:left-3.5 before:top-3 before:bottom-3 before:w-0.5 before:bg-slate-200">
@@ -585,10 +581,15 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-extrabold text-slate-900">{courierName}</span>
-                    {order.courier?.name && <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">Coursier affecté</span>}
+                    {order.courier?.name
+                      ? <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">Coursier affecté</span>
+                      : !isAdmin && <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">En préparation</span>}
                   </div>
                   <div className="text-[11px] text-slate-500 mt-0.5">
-                    Véhicule : <strong className="text-slate-700">{courierVehicle}</strong> · Zone : <strong className="text-slate-700">{deliveryZone}</strong>
+                    {order.courier?.name
+                      ? <>Véhicule : <strong className="text-slate-700">{courierVehicle}</strong> · Zone : <strong className="text-slate-700">{deliveryZone}</strong></>
+                      : isAdmin ? <>Véhicule : <strong className="text-slate-700">{courierVehicle}</strong> · Zone : <strong className="text-slate-700">{deliveryZone}</strong></>
+                        : 'Le nom et le contact seront affichés dès l’affectation du livreur.'}
                   </div>
                 </div>
               </div>
@@ -618,17 +619,17 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
             </div>}
 
             {/* Quick copy phone number */}
-            <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-200/80 px-1">
-              <span>Numéro direct : <strong className="text-slate-800 font-mono">{courierPhone}</strong></span>
+            {courierPhone && <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-200/80 px-1">
+              <span>Contact direct : <strong className="text-slate-800 font-mono">{courierPhone}</strong></span>
               <button
                 type="button"
                 onClick={handleCopyPhone}
-                className="text-[#0d44e8] font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                className="text-emerald-800 font-bold hover:underline flex items-center gap-1 cursor-pointer"
               >
                 {copiedPhone ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
                 <span>{copiedPhone ? 'Copié !' : 'Copier'}</span>
               </button>
-            </div>
+            </div>}
           </div>
 
           {/* GPS link for the courier's phone and live route map */}
@@ -637,7 +638,7 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
               <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl bg-slate-950 p-4 text-white">
                 <div>
                 <h3 className="flex items-center gap-2 text-sm font-black tracking-tight text-white">
-                  <MapPin className="h-4 w-4 text-[#0d44e8]" /> Position du livreur
+                  <MapPin className="h-4 w-4 text-emerald-400" /> {isAdmin ? 'Position du livreur' : 'Votre livraison sur la carte'}
                 </h3>
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-300">
                   {latestLocation
@@ -748,7 +749,7 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                         <div className="mt-2 rounded-xl bg-blue-50 px-3 py-2 ring-1 ring-blue-100">
                           <div className="text-[9px] font-black uppercase tracking-wider text-blue-800">Carte du quartier : {order.customer.neighborhoodName || fallbackNeighborhoodCoords.neighborhoodName}</div>
                           <div className="mt-1 font-mono text-[11px] font-extrabold tabular-nums text-slate-900">{mapDestinationCoords.lat.toFixed(4)}, {mapDestinationCoords.lng.toFixed(4)}</div>
-                          <div className="mt-0.5 text-[10px] font-semibold leading-relaxed text-blue-900">Carte OpenStreetMap centrée sur le quartier choisi à Libreville.</div>
+                          <div className="mt-0.5 text-[10px] font-semibold leading-relaxed text-blue-900">Position indicative sur la carte OpenFreeMap, basée sur le quartier enregistré.</div>
                         </div>
                       )}
                     </div>
@@ -756,11 +757,11 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                   <div className="border-t border-slate-100 pt-3"><div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Étape actuelle</div><div className="mt-1 text-xs font-bold text-slate-800">{stages[currentStageIndex]?.label}</div></div>
                   {latestLocation && <div className="border-t border-slate-100 pt-3 text-[10px] leading-relaxed text-slate-500">Dernier signal à {new Date(latestLocation.recordedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} · précision ±{Math.round(latestLocation.accuracy)} m</div>}
                 </div>
-                {googleMapsUrl && <a href={googleMapsUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800"><Navigation className="h-4 w-4" /> Ouvrir l’itinéraire <ExternalLink className="h-3.5 w-3.5" /></a>}
+                {openStreetMapDirectionsUrl && <a href={openStreetMapDirectionsUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-800 px-4 py-3 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-900"><Navigation className="h-4 w-4" /> Ouvrir dans OpenStreetMap <ExternalLink className="h-3.5 w-3.5" /></a>}
               </aside>
               </div>
-              <div className="rounded-xl bg-blue-50 px-3 py-2 text-[10px] leading-relaxed text-blue-900">
-                Épingle rouge : destination de cette commande. Point bleu : dernière position transmise par le livreur. Le trait bleu relie les relevés reçus ; il ne calcule pas un itinéraire routier.
+              <div className="rounded-xl bg-emerald-50 px-3 py-2 text-[10px] leading-relaxed text-emerald-950">
+                Trait vert : itinéraire routier estimé. Point bleu : dernière position GPS du livreur. Trait bleu pointillé : relevés GPS antérieurs. Le temps estimé ne tient pas compte du trafic en direct.
               </div>
               {locationLoadError && <div role="alert" className="rounded-lg bg-rose-50 p-2 text-[11px] font-semibold text-rose-800">{locationLoadError}</div>}
               {isAdmin && canTrackCourier && <p className="text-[10px] leading-relaxed text-slate-600">La position est actualisée environ toutes les 15 secondes pendant que le coursier garde la page ouverte. Le client de cette commande et la logistique voient la carte.</p>}
@@ -778,27 +779,42 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                 <strong className="text-slate-900">{order.customer.facilityName}</strong>
                 <div className="text-slate-500 text-[11px]">{order.customer.deliveryAddress}</div>
                 <div className="text-slate-500 text-[11px]">Contact réception : {order.customer.contactName} ({order.customer.phone})</div>
-                {googleMapsUrl ? (
+                {openStreetMapDirectionsUrl ? (
                   <a
-                    href={googleMapsUrl}
+                    href={openStreetMapDirectionsUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-2 font-bold text-[#0d44e8] hover:bg-blue-100"
+                    className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 font-bold text-emerald-800 hover:bg-emerald-100"
                   >
                     <Navigation className="h-3.5 w-3.5" />
-                    Ouvrir l’itinéraire dans Google Maps
+                    Ouvrir dans OpenStreetMap
                     <ExternalLink className="h-3 w-3" />
                   </a>
                 ) : order.customer.deliveryMode === 'retrait' ? (
                   <div className="mt-2 text-[11px] text-slate-500">Retrait au dépôt Gloryday Pharma.</div>
                 ) : null}
                 <div className="text-[10px] text-slate-400 mt-1">
-                  Google Maps ouvre l’itinéraire vers l’établissement. La position du coursier n’est pas suivie en direct.
+                  La carte OpenFreeMap affiche la position GPS reçue et l’itinéraire routier estimé.
                 </div>
                 {order.deliveryProof && (
-                  <div className="mt-2 rounded-lg bg-emerald-50 p-2 text-[11px] text-emerald-900">
-                    Réception enregistrée : <strong>{order.deliveryProof.receivedBy}</strong>
-                    {order.deliveryProof.receiptReference ? ` · Bon signé : ${order.deliveryProof.receiptReference}` : ''}
+                  <div className="mt-2 space-y-2 rounded-lg bg-emerald-50 p-2 text-[11px] text-emerald-950">
+                    <div>
+                      Réception enregistrée : <strong>{order.deliveryProof.receivedBy}</strong>
+                      {order.deliveryProof.receiptReference ? ` · Bon : ${order.deliveryProof.receiptReference}` : ''}
+                      <span className="block mt-0.5 text-[10px] text-emerald-800">{new Date(order.deliveryProof.timestamp).toLocaleString('fr-FR', { timeZone: 'Africa/Libreville', dateStyle: 'medium', timeStyle: 'short' })}</span>
+                      {order.deliveryProof.signatureUrl && !safeProofImageSource(order.deliveryProof.signatureUrl) && <span className="block mt-1 text-slate-700">Émargement : {order.deliveryProof.signatureUrl}</span>}
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {[
+                        { label: 'Photo de réception', source: safeProofImageSource(order.deliveryProof.photoUrl) },
+                        { label: 'Signature', source: safeProofImageSource(order.deliveryProof.signatureUrl) },
+                      ].filter((proof): proof is { label: string; source: string } => Boolean(proof.source)).map((proof) => (
+                        <a key={proof.label} href={proof.source} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-lg border border-emerald-200 bg-white">
+                          <img src={proof.source} alt={proof.label} loading="lazy" referrerPolicy="no-referrer" className="h-28 w-full object-contain p-2" />
+                          <span className="block border-t border-emerald-100 px-2 py-1 text-center text-[10px] font-bold">{proof.label}</span>
+                        </a>
+                      ))}
+                    </div>
                   </div>
                 )}
                 <div className="mt-1 pt-1 border-t border-slate-100 flex items-center gap-1.5 flex-wrap">

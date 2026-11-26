@@ -130,6 +130,9 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                             </span>
                           )}
                         </div>
+                        {item.productReference && (
+                          <span className="mt-0.5 block font-mono text-[10px] text-slate-500">Réf. produit : {item.productReference}</span>
+                        )}
                         {item.variant && item.variant !== 'Standard' && (
                           <span className="text-[11px] text-slate-500">{item.variant}</span>
                         )}

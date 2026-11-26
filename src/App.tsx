@@ -40,6 +40,7 @@ import { getStoredDrafts, replaceStoredDrafts, deleteDraft } from './utils/draft
 import { CATEGORIES, CONSUMABLE_SUBCATEGORIES, MEDICAL_SPECIALTIES } from './data/initialProducts';
 import { getProductSpecialty } from './utils/specialties';
 import { setActiveVolumeDiscountSettings } from './utils/volumeDiscount';
+import { isProductPromoted } from './utils/productPromotions';
 import { userHasPermission } from './permissions';
 
 // Components
@@ -622,6 +623,10 @@ export default function App() {
       delete publicProduct.alertThreshold;
       delete publicProduct.lowStockAlertThreshold;
       delete publicProduct.hasPhysicalStock;
+      delete publicProduct.stockCountStatus;
+      delete publicProduct.inventoryStockEntries;
+      delete publicProduct.packagingNeedsReview;
+      delete publicProduct.supplier;
       return publicProduct;
     }));
     localStorage.removeItem('gloryday_current_user');
@@ -1024,11 +1029,7 @@ export default function App() {
 
   // Total promo products count
   const promoProductsCount = useMemo(() => {
-    return products.filter(p => 
-      p.isPromotion || 
-      (p.discountPercentage && p.discountPercentage > 0) || 
-      p.variants.some(v => (v.discountPercentage && v.discountPercentage > 0) || (v.originalPrice && v.originalPrice > v.price))
-    ).length;
+    return products.filter(isProductPromoted).length;
   }, [products]);
 
   // Filtered Products
@@ -1051,11 +1052,7 @@ export default function App() {
       result = result.filter(p => selectedIds.has(p.id));
     }
     if (onlyPromotions || priceRange === 'promotions') {
-      result = result.filter(p => 
-        p.isPromotion || 
-        (p.discountPercentage && p.discountPercentage > 0) || 
-        p.variants.some(v => (v.discountPercentage && v.discountPercentage > 0) || (v.originalPrice && v.originalPrice > v.price))
-      );
+      result = result.filter(isProductPromoted);
     }
     if (priceRange === 'under10k') {
       result = result.filter(p => p.variants.some(v => v.price > 0 && v.price < 10000));
@@ -1744,8 +1741,10 @@ export default function App() {
         <OrderFinanceModal
           order={activeFinanceOrder}
           currentUser={currentUser}
-          canViewInvoices={userHasPermission(currentUser, 'orders_finance_view') || userHasPermission(currentUser, 'orders_finance_manage')}
+          products={products}
+          canViewInvoices={userHasPermission(currentUser, 'orders_finance_view') || userHasPermission(currentUser, 'orders_finance_manage') || userHasPermission(currentUser, 'orders_invoice_correct')}
           canManageInvoices={userHasPermission(currentUser, 'orders_finance_manage')}
+          canManageInvoiceCorrections={userHasPermission(currentUser, 'orders_invoice_correct') || userHasPermission(currentUser, 'orders_finance_manage')}
           canViewPayments={[
             'orders_finance_view', 'payments_manage', 'receivables_view',
             'receivables_payments_manage',
@@ -1755,6 +1754,10 @@ export default function App() {
           canManageLogistics={userHasPermission(currentUser, 'logistics_manage')}
           onClose={() => setActiveFinanceOrder(null)}
           onUpdateOrder={handleAdminUpdateFinance}
+          onOrderUpdated={(updatedOrder) => {
+            setOrders(previous => previous.map(order => order.id === updatedOrder.id ? updatedOrder : order));
+            setActiveFinanceOrder(current => current?.id === updatedOrder.id ? updatedOrder : current);
+          }}
         />
       )}
 

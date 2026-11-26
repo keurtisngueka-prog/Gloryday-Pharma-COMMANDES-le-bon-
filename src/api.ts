@@ -16,6 +16,7 @@ import {
   DeliveryStage,
   CourierInfo,
   DeliveryProof,
+  InvoiceLineItem,
   DeliveryLocationPoint,
   Courier,
   CourierTrackingInfo,
@@ -331,6 +332,7 @@ export const api = {
 
   async register(registrationData: {
     phone: string;
+    email?: string;
     companyPhone?: string;
     invoiceName?: string;
     directorName?: string;
@@ -339,6 +341,10 @@ export const api = {
     facilityType?: string;
     facilityTypeOther?: string;
     password: string;
+    city?: string;
+    neighborhoodId?: string;
+    neighborhoodName?: string;
+    deliveryInstructions?: string;
     deliveryAddress?: string;
     coordinates?: { lat: number; lng: number };
     avatarUrl?: string;
@@ -352,7 +358,7 @@ export const api = {
 
   async updateClientProfile(profileData: Partial<Pick<User,
     'facilityName' | 'invoiceName' | 'directorName' | 'companyPhone' | 'contactName' | 'secondaryPhone' | 'facilityType' | 'facilityTypeOther' |
-    'neighborhoodId' | 'deliveryInstructions'
+    'city' | 'neighborhoodId' | 'neighborhoodName' | 'deliveryInstructions'
   >> & { avatarUrl?: string | null }): Promise<{ user: User }> {
     return request<{ user: User }>('/api/auth/profile', {
       method: 'PATCH',
@@ -395,6 +401,10 @@ export const api = {
     directorName?: string;
     contactName?: string;
     facilityType?: string;
+    city?: string;
+    neighborhoodId?: string;
+    neighborhoodName?: string;
+    deliveryInstructions?: string;
     deliveryAddress?: string;
     coordinates?: { lat: number; lng: number };
   }): Promise<{ user: User }> {
@@ -655,6 +665,18 @@ export const api = {
     return request<Order>(`/api/orders/${encodeURIComponent(orderId)}/finance`, {
       method: 'PATCH',
       body: JSON.stringify(patch)
+    });
+  },
+
+  async correctInvoice(orderId: string, correction: {
+    correctionId: string;
+    invoiceId: string;
+    reason: string;
+    lineItems: InvoiceLineItem[];
+  }): Promise<Order> {
+    return request<Order>(`/api/orders/${encodeURIComponent(orderId)}/finance`, {
+      method: 'PATCH',
+      body: JSON.stringify({ invoiceCorrection: correction })
     });
   },
 

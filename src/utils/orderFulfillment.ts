@@ -32,12 +32,14 @@ export function getInvoiceReadyLineItems(order: Order): InvoiceLineItem[] {
   const billedByIndex = new Map<number, number>();
 
   for (const invoice of order.invoices || []) {
-    if (invoice.type !== 'facture') continue;
     if (invoice.lineItems?.length) {
       for (const line of invoice.lineItems) {
-        billedByIndex.set(line.itemIndex, (billedByIndex.get(line.itemIndex) || 0) + Math.max(0, Math.trunc(Number(line.quantity) || 0)));
+        const direction = invoice.type === 'facture' ? 1 : -1;
+        billedByIndex.set(line.itemIndex, Math.max(0,
+          (billedByIndex.get(line.itemIndex) || 0) + direction * Math.max(0, Math.trunc(Number(line.quantity) || 0))
+        ));
       }
-    } else if (trackedDeliveries) {
+    } else if (invoice.type === 'facture' && trackedDeliveries) {
       // Older invoices have no line snapshot. Conservatively treat the original order as already billed.
       order.items.forEach((item, itemIndex) => billedByIndex.set(itemIndex, Math.max(0, Math.trunc(Number(item.quantity) || 0))));
     }
@@ -90,8 +92,11 @@ export function getInvoiceReadyTotal(order: Order): number {
 }
 
 export function getOrderBillingTotal(order: Pick<Order, 'estimatedTotal'> & Partial<Pick<Order, 'invoices' | 'deliveryFulfillments'>>): number {
-  if (!(order.deliveryFulfillments || []).length) return Math.max(0, Math.trunc(Number(order.estimatedTotal) || 0));
-  return Math.max(0, (order.invoices || []).reduce(
+  const invoices = order.invoices || [];
+  if (!(order.deliveryFulfillments || []).length && !invoices.some((invoice) => invoice.type === 'facture')) {
+    return Math.max(0, Math.trunc(Number(order.estimatedTotal) || 0));
+  }
+  return Math.max(0, invoices.reduce(
     (sum, invoice) => sum + (invoice.type === 'facture' ? 1 : -1) * Math.max(0, Math.trunc(Number(invoice.totalTTC) || 0)),
     0,
   ));
