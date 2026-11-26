@@ -19,6 +19,13 @@ interface CommercialQuotesModuleProps {
   onRefreshQuotes: () => void;
 }
 
+const createEmptyQuoteLine = () => ({
+  productId: '',
+  variantIndex: 0,
+  quantity: 1,
+  discountPercent: 0,
+});
+
 export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
   quotes,
   assignedClients,
@@ -29,7 +36,7 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState('');
   const [selectedItems, setSelectedItems] = useState<{ productId: string; variantIndex: number; quantity: number; discountPercent: number }[]>([
-    { productId: products[0]?.id || '', variantIndex: 0, quantity: 1, discountPercent: 0 }
+    createEmptyQuoteLine()
   ]);
   const [productFilter, setProductFilter] = useState('');
   const [discountType, setDiscountType] = useState<'percent' | 'amount'>('percent');
@@ -39,10 +46,11 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const matchingProducts = products.filter((product) =>
+  const productQuery = productFilter.trim().toLocaleLowerCase('fr');
+  const matchingProducts = productQuery.length < 2 ? [] : products.filter((product) =>
     `${product.name} ${product.reference || ''} ${product.category} ${product.subcategory || ''}`
       .toLocaleLowerCase('fr')
-      .includes(productFilter.trim().toLocaleLowerCase('fr'))
+      .includes(productQuery)
   );
 
   const updateSelectedItem = (index: number, changes: Partial<(typeof selectedItems)[number]>) => {
@@ -51,7 +59,19 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
 
   const handleAddItem = () => {
     if (products.length === 0) return;
-    setSelectedItems(prev => [...prev, { productId: products[0]?.id || '', variantIndex: 0, quantity: 1, discountPercent: 0 }]);
+    setSelectedItems(prev => [...prev, createEmptyQuoteLine()]);
+  };
+
+  const openCreateModal = () => {
+    setSelectedClientId('');
+    setSelectedItems([createEmptyQuoteLine()]);
+    setProductFilter('');
+    setDiscountType('percent');
+    setDiscountValue(0);
+    setValidDays(15);
+    setNotes('');
+    setError(null);
+    setIsCreateModalOpen(true);
   };
 
   const handleRemoveItem = (idx: number) => {
@@ -112,8 +132,10 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
       setSubmitting(true);
       setError(null);
       const itemsPayload = selectedItems.map(item => {
-        const prod = products.find(p => p.id === item.productId) || products[0];
+        const prod = products.find(p => p.id === item.productId);
+        if (!prod) throw new Error('Choisissez un produit sur chaque ligne du devis.');
         const v = prod.variants[item.variantIndex] || prod.variants[0];
+        if (!v) throw new Error('Choisissez un conditionnement pour chaque produit.');
         return {
           productId: prod.id,
           productReference: prod.reference,
@@ -195,12 +217,7 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
         </div>
         <button
           type="button"
-          onClick={() => {
-            if (assignedClients.length > 0) {
-              setSelectedClientId(assignedClients[0].id);
-            }
-            setIsCreateModalOpen(true);
-          }}
+          onClick={openCreateModal}
           className="h-10 px-4 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shrink-0"
         >
           <Plus className="w-4 h-4" />
@@ -336,6 +353,9 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
                     className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs"
                   />
                 </label>
+                <p className="mb-2 text-[10px] text-slate-500">
+                  {productQuery.length < 2 ? 'Saisissez au moins 2 caractères pour afficher les produits à choisir.' : `${matchingProducts.length} produit(s) correspondant(s)`}
+                </p>
                 <div className="space-y-2">
                   {selectedItems.map((item, idx) => {
                     const selectedProduct = products.find((candidate) => candidate.id === item.productId);
@@ -347,9 +367,12 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
                       <select
                         value={item.productId}
                         onChange={(e) => updateSelectedItem(idx, { productId: e.target.value, variantIndex: 0, discountPercent: 0 })}
+                        disabled={productQuery.length < 2 && !item.productId}
+                        aria-label={`Produit ligne ${idx + 1}`}
                         className="min-w-0 rounded-lg border border-slate-300 bg-white p-2 text-xs"
                       >
-                        <option value="">Choisir un produit</option>
+                        <option value="">{productQuery.length < 2 ? 'Filtrer les produits d’abord' : 'Choisir un produit'}</option>
+                        {productQuery.length >= 2 && matchingProducts.length === 0 && <option value="" disabled>Aucun résultat</option>}
                         {(() => {
                           const selectedProduct = products.find((candidate) => candidate.id === item.productId);
                           const options = matchingProducts.some((candidate) => candidate.id === item.productId) || !selectedProduct
