@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { CommercialQuote, Product, User } from '../types';
 import { api } from '../api';
+import { formatProductNameWithVariant } from '../utils/productDisplay';
 
 interface CommercialQuotesModuleProps {
   quotes: CommercialQuote[];
@@ -186,7 +187,7 @@ export const CommercialQuotesModule: React.FC<CommercialQuotesModuleProps> = ({
       '*Détail des articles :*'
     ];
     quote.items.forEach((it, i) => {
-      lines.push(`${i + 1}. ${it.quantity}x ${it.productName} (${it.variant}) = ${it.isQuote ? 'Sur devis' : `${it.total.toLocaleString('fr-FR')} FCFA${it.savings ? ` · remise article ${it.savings.toLocaleString('fr-FR')} FCFA` : ''}`}`);
+      lines.push(`${i + 1}. ${it.quantity}x ${formatProductNameWithVariant(it.productName, it.variant)} = ${it.isQuote ? 'Sur devis' : `${it.total.toLocaleString('fr-FR')} FCFA${it.savings ? ` · remise article ${it.savings.toLocaleString('fr-FR')} FCFA` : ''}`}`);
     });
     lines.push('');
     lines.push(`💰 Sous-total : ${quote.subtotal.toLocaleString('fr-FR')} FCFA`);

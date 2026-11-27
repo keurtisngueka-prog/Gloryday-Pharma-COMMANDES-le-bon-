@@ -6,6 +6,7 @@ import {
   generateInternalPurchaseOrderPdf,
   triggerPdfBlobDownload
 } from '../utils/pdfGenerator';
+import { formatProductNameWithVariant } from '../utils/productDisplay';
 
 interface OrderPdfDocumentModalProps {
   order: Order;
@@ -275,12 +276,9 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
                       return (
                         <tr key={idx} className={idx % 2 === 1 ? 'bg-slate-50/70' : 'bg-white'}>
                           <td className="py-2.5 px-3">
-                            <div className="font-bold text-slate-900">{item.productName}</div>
+                            <div className="font-bold text-slate-900">{formatProductNameWithVariant(item.productName, item.variant)}</div>
                             {item.productReference && (
                               <div className="mt-0.5 font-mono text-[10px] text-slate-500">Réf. produit : {item.productReference}</div>
-                            )}
-                            {item.variant && item.variant !== 'Standard' && (
-                              <div className="text-[11px] text-slate-500">{item.variant}</div>
                             )}
                           </td>
                           <td className="py-2.5 px-3 text-center font-bold text-slate-900 tabular-nums">

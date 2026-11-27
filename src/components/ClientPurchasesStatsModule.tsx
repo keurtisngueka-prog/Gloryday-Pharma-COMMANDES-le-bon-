@@ -13,6 +13,7 @@ import {
   FileText
 } from 'lucide-react';
 import { Order, Product } from '../types';
+import { formatProductNameWithVariant } from '../utils/productDisplay';
 
 interface ClientPurchasesStatsModuleProps {
   orders: Order[];
@@ -562,7 +563,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
                             className="text-[10px] font-medium bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md flex items-center gap-1"
                           >
                             <Package className="w-2.5 h-2.5 text-slate-400" />
-                            {p.name} ({p.quantity} u. · {p.revenue.toLocaleString('fr-FR')} F)
+                            {formatProductNameWithVariant(p.name, p.variant)} ({p.quantity} u. · {p.revenue.toLocaleString('fr-FR')} F)
                           </span>
                         ))}
                         {client.allPurchasedProducts.length > 3 && (
@@ -858,8 +859,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
                       <table className="w-full text-left border-collapse text-xs">
                         <thead>
                           <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-500">
-                            <th className="py-2.5 px-3">Article Médical</th>
-                            <th className="py-2.5 px-3">Variante</th>
+                            <th className="py-2.5 px-3">Article et conditionnement</th>
                             <th className="py-2.5 px-3 text-right">Qté Totale</th>
                             <th className="py-2.5 px-3 text-right">Nb Commandes</th>
                             <th className="py-2.5 px-3 text-right">Montant Cumulé</th>
@@ -869,8 +869,7 @@ export const ClientPurchasesStatsModule: React.FC<ClientPurchasesStatsModuleProp
                         <tbody className="divide-y divide-slate-100">
                           {selectedClientDetail.allPurchasedProducts.map((prod: any, idx: number) => (
                             <tr key={idx} className="hover:bg-slate-50">
-                              <td className="py-2.5 px-3 font-bold text-slate-900">{prod.name}</td>
-                              <td className="py-2.5 px-3 text-slate-600">{prod.variant}</td>
+                              <td className="py-2.5 px-3 font-bold text-slate-900">{formatProductNameWithVariant(prod.name, prod.variant)}</td>
                               <td className="py-2.5 px-3 text-right font-mono tabular-nums font-extrabold text-[#0d44e8]">{prod.quantity}</td>
                               <td className="py-2.5 px-3 text-right font-mono tabular-nums text-slate-600">{prod.ordersCount}</td>
                               <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-slate-900">

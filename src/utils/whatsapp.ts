@@ -1,4 +1,5 @@
 import { Order, Pack } from '../types';
+import { formatProductNameWithVariant } from './productDisplay';
 
 export const WHATSAPP_PRIMARY = '24177003004';
 export const WHATSAPP_SECONDARY = '24166240399';
@@ -41,15 +42,15 @@ export function formatOrderWhatsAppMessage(order: Order, pdfLink?: string): stri
   lines.push('📦 *DÉTAIL DES ARTICLES :*');
   let totalSavings = 0;
   (Array.isArray(order.items) ? order.items : []).forEach((item, index) => {
-    const variantStr = item.variant && item.variant !== 'Standard' ? ` (${item.variant})` : '';
+    const productLabel = formatProductNameWithVariant(item.productName, item.variant);
     if (item.savings && item.savings > 0) {
       totalSavings += item.savings;
     }
     if (item.isQuote) {
-      lines.push(`${index + 1}. ${item.quantity}x ${item.productName}${variantStr} → *SUR DEVIS*`);
+      lines.push(`${index + 1}. ${item.quantity}x ${productLabel} → *SUR DEVIS*`);
     } else {
       const discountTag = item.discountPercent ? ` (-${item.discountPercent}% vol.)` : '';
-      lines.push(`${index + 1}. ${item.quantity}x ${item.productName}${variantStr}${discountTag} : ${item.total.toLocaleString('fr-FR')} FCFA`);
+      lines.push(`${index + 1}. ${item.quantity}x ${productLabel}${discountTag} : ${item.total.toLocaleString('fr-FR')} FCFA`);
     }
   });
   lines.push('');

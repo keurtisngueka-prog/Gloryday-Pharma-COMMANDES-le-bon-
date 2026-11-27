@@ -17,6 +17,7 @@ import {
   X
 } from 'lucide-react';
 import { Order, OrderStatus } from '../types';
+import { formatProductNameWithVariant } from '../utils/productDisplay';
 import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
 
 interface ClientPurchaseHistoryViewProps {
@@ -739,8 +740,7 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
                     <table className="w-full text-left border-collapse text-xs">
                       <thead>
                         <tr className="border-b border-slate-200/70 text-[10px] font-bold uppercase text-slate-500">
-                          <th className="py-2 px-3">Article médical commandé</th>
-                          <th className="py-2 px-3">Conditionnement</th>
+                          <th className="py-2 px-3">Article et conditionnement</th>
                           <th className="py-2 px-3 text-right">Quantité</th>
                           <th className="py-2 px-3 text-right">Prix Unitaire</th>
                           <th className="py-2 px-3 text-right">Total Ligne</th>
@@ -750,10 +750,7 @@ export const ClientPurchaseHistoryView: React.FC<ClientPurchaseHistoryViewProps>
                         {ord.items.map((item, idx) => (
                           <tr key={idx} className="text-slate-700">
                             <td className="py-2 px-3 font-bold text-slate-900">
-                              {item.productName}
-                            </td>
-                            <td className="py-2 px-3 text-slate-600">
-                              {item.variant || 'Standard'}
+                              {formatProductNameWithVariant(item.productName, item.variant)}
                             </td>
                             <td className="py-2 px-3 text-right font-mono font-bold tabular-nums">
                               {item.quantity}

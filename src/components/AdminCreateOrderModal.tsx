@@ -6,6 +6,7 @@ import { NeighborhoodPicker } from './NeighborhoodPicker';
 import { downloadInvoiceProjectPdf } from '../utils/pdfGenerator';
 import { calculateInvoiceTaxAmounts } from '../utils/invoiceTax';
 import { createShortInvoiceNumber } from '../utils/orderFinance';
+import { formatProductNameWithVariant } from '../utils/productDisplay';
 
 interface AdminCreateOrderModalProps {
   clients: any[];
@@ -121,7 +122,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
     setSelectedProductId('');
     setSelectedVariant('');
     setQuantity('1');
-    setAddedLineMessage(`${product.name} · ${variant.label} ajouté à la commande.`);
+    setAddedLineMessage(`${formatProductNameWithVariant(product.name, variant.label)} ajouté à la commande.`);
   };
 
   const createInvoice = async (order: Order) => {
@@ -291,7 +292,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
                   const lineGross = (Number(line.price) || 0) * line.quantity;
                   const lineDiscount = Math.round(lineGross * (Number(line.discountPercent) || 0) / 100);
                   return <div key={line.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 text-xs sm:grid-cols-[minmax(0,1fr)_104px_auto_auto]">
-                    <div className="min-w-0"><p className="truncate font-bold text-slate-800">{line.productName} · {line.variant}</p><p className="text-slate-500">{line.productReference ? `${line.productReference} · ` : ''}{line.quantity} × {line.isQuote ? 'Sur devis' : formatMoney(line.price)}</p></div>
+                    <div className="min-w-0"><p className="truncate font-bold text-slate-800">{formatProductNameWithVariant(line.productName, line.variant)}</p><p className="text-slate-500">{line.productReference ? `${line.productReference} · ` : ''}{line.quantity} × {line.isQuote ? 'Sur devis' : formatMoney(line.price)}</p></div>
                     {canOfferDiscount && !line.isQuote && <label className="text-[10px] font-bold text-slate-600">Remise %<input aria-label={`Remise pour ${line.productName}`} type="number" min={0} max={100} step={1} value={line.discountPercent || 0} onChange={event => { const value = event.target.value === '' ? 0 : Number(event.target.value); setLines(previous => previous.map(item => item.key === line.key ? { ...item, discountPercent: Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0)) } : item)); }} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-center text-xs" /></label>}
                     <div className="text-right"><strong className="whitespace-nowrap">{line.isQuote ? 'Sur devis' : formatMoney(lineGross - lineDiscount)}</strong>{lineDiscount > 0 && <p className="text-[10px] font-semibold text-emerald-700">−{formatMoney(lineDiscount)}</p>}</div>
                     <button type="button" onClick={() => setLines(previous => previous.filter(item => item.key !== line.key))} className="rounded-lg p-1 text-rose-700 hover:bg-rose-50" aria-label={`Retirer ${line.productName}`}><Trash2 className="h-4 w-4" /></button>

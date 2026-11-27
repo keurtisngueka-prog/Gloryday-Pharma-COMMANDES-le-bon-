@@ -21,6 +21,7 @@ import { getOrderBillingTotal } from '../utils/orderFulfillment';
 import { normalizeCourierPhone } from '../utils/courierDirectory';
 import { logAuditEvent } from '../utils/auditLogger';
 import { downloadDeliveryNotePdf, downloadInvoiceProjectPdf } from '../utils/pdfGenerator';
+import { formatProductNameWithVariant } from '../utils/productDisplay';
 import { api } from '../api';
 import { getInvoiceReadyLineItems, getInvoiceReadyTotal, getOrderDeliveredQuantity, getOrderRemainingQuantity } from '../utils/orderFulfillment';
 import { calculateInvoiceTaxAmounts } from '../utils/invoiceTax';
@@ -737,7 +738,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
           {activeTab === 'invoices' && canViewInvoices && (
             <div className="space-y-3">
               <div className="space-y-1">
-                <span className="font-bold text-slate-700 text-[11px]">Documents de commande :</span>
+                <span className="font-bold text-slate-700 text-[11px]">Historique des factures et avoirs :</span>
                 <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[10px] text-amber-900">
                   Une correction annule l’ancienne facture par un avoir et crée une nouvelle facture. L’historique reste visible; les quantités livrées et le stock ne changent pas.
                 </p>
@@ -745,7 +746,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                   <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-[11px] text-blue-950">
                     <strong>Facturable à ce jour : {invoiceReadyTotal.toLocaleString('fr-FR')} FCFA.</strong>
                     <span className="block">Ce total ne comprend que les quantités réellement remises et pas encore facturées. Le reliquat apparaîtra sur une facture après sa livraison.</span>
-                    {invoiceReadyLines.length > 0 && <span className="mt-1 block">{invoiceReadyLines.map((line) => `${line.quantity} × ${line.productName}`).join(' · ')}</span>}
+                    {invoiceReadyLines.length > 0 && <span className="mt-1 block">{invoiceReadyLines.map((line) => `${line.quantity} × ${formatProductNameWithVariant(line.productName, line.variant)}`).join(' · ')}</span>}
                   </div>
                 )}
                 {(!order.invoices || order.invoices.length === 0) ? (
@@ -1030,8 +1031,8 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
                   return (
                     <div key={`${item.productId}-${item.variant}-${itemIndex}`} className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_115px_150px] sm:items-center">
                       <div>
-                        <strong className="block text-sm text-slate-900">{item.productName}</strong>
-                        <span className="text-xs text-slate-500">{item.variant} · commandé {item.quantity} · déjà remis {delivered} · reste {remaining}</span>
+                        <strong className="block text-sm text-slate-900">{formatProductNameWithVariant(item.productName, item.variant)}</strong>
+                        <span className="text-xs text-slate-500">Commandé {item.quantity} · déjà remis {delivered} · reste {remaining}</span>
                         {item.isQuote || Number(item.price) <= 0 ? (
                           <span className="mt-0.5 block text-[11px] font-semibold text-amber-700">À chiffrer avant remise</span>
                         ) : item.isDeferredStock ? (

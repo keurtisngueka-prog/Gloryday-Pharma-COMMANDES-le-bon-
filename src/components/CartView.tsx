@@ -19,6 +19,7 @@ import {
   Smartphone
 } from 'lucide-react';
 import { CartItem, Coordinates, CustomerInfo, Order, User } from '../types';
+import { formatProductNameWithVariant } from '../utils/productDisplay';
 import { PhoneNumberInput } from './PhoneNumberInput';
 import { FREE_DELIVERY_THRESHOLD_FCFA, getOrderRemainingBalance } from '../utils/orderFinance';
 import { calculateCartVolumeSummary, calculateItemVolumePrice } from '../utils/volumeDiscount';
@@ -379,13 +380,8 @@ export const CartView: React.FC<CartViewProps> = ({
                       )}
                     </div>
                     <h4 className="font-bold text-slate-900 text-xs sm:text-sm truncate mt-0.5">
-                      {item.productName}
+                      {formatProductNameWithVariant(item.productName, item.variant)}
                     </h4>
-                    {item.variant && item.variant !== 'Standard' && (
-                      <p className="text-[11px] text-slate-500 truncate">
-                        {item.variant}
-                      </p>
-                    )}
                     <div className="mt-1 text-xs">
                       {item.isQuote ? (
                         <span className="text-[11px] font-bold text-amber-700">Tarif sur devis</span>

@@ -24,6 +24,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { CartItem, CustomerInfo, OrderDraft, User } from '../types';
+import { formatProductNameWithVariant } from '../utils/productDisplay';
 import { 
   getStoredDrafts, 
   saveDraft, 
@@ -520,8 +521,7 @@ export const DraftsManagerModal: React.FC<DraftsManagerModalProps> = ({
                           <table className="w-full text-left text-xs">
                             <thead className="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200">
                               <tr>
-                                <th className="p-2.5">Article</th>
-                                <th className="p-2.5">Variante</th>
+                                <th className="p-2.5">Article et conditionnement</th>
                                 <th className="p-2.5 text-center">Qté</th>
                                 <th className="p-2.5 text-right">Prix</th>
                               </tr>
@@ -529,8 +529,7 @@ export const DraftsManagerModal: React.FC<DraftsManagerModalProps> = ({
                             <tbody className="divide-y divide-slate-100">
                               {draft.items.map((it, idx) => (
                                 <tr key={`${it.productId}-${idx}`} className="hover:bg-slate-50/80">
-                                  <td className="p-2.5 font-medium text-slate-900">{it.productName}</td>
-                                  <td className="p-2.5 text-slate-500 text-[11px]">{it.variant}</td>
+                                  <td className="p-2.5 font-medium text-slate-900">{formatProductNameWithVariant(it.productName, it.variant)}</td>
                                   <td className="p-2.5 text-center font-bold text-slate-800">{it.quantity}</td>
                                   <td className="p-2.5 text-right font-bold text-slate-900 tabular-nums">
                                     {it.isQuote || it.price === 0 

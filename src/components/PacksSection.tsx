@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, MessageCircle, ShoppingBag, Check, Layers, ChevronRight, X } from 'lucide-react';
 import { Pack, Product } from '../types';
+import { formatProductNameWithVariant } from '../utils/productDisplay';
 import { generateWhatsAppPackUrl } from '../utils/whatsapp';
 
 interface PacksSectionProps {
@@ -128,7 +129,7 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
                     <ul className="space-y-0.5">
                       {pack.items.slice(0, 2).map((item, idx) => (
                         <li key={idx} className="truncate flex items-center justify-between">
-                          <span className="truncate pr-1">• {item.productName}</span>
+                          <span className="truncate pr-1">• {formatProductNameWithVariant(item.productName, item.variant)}</span>
                           <span className="font-semibold text-slate-900 shrink-0">x{item.quantity}</span>
                         </li>
                       ))}
@@ -265,10 +266,7 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
                   {selectedPack.items.map((it, i) => (
                     <div key={i} className="flex items-center justify-between text-xs py-1.5 border-b border-slate-100 last:border-0">
                       <div>
-                        <span className="font-semibold text-slate-900 block">{it.productName}</span>
-                        {it.variant && (
-                          <span className="text-slate-500 text-[11px]">{it.variant}</span>
-                        )}
+                        <span className="font-semibold text-slate-900 block">{formatProductNameWithVariant(it.productName, it.variant)}</span>
                       </div>
                       <span className="px-2 py-0.5 bg-white border border-slate-200 rounded font-bold text-slate-900 shrink-0 ml-2">
                         x {it.quantity}

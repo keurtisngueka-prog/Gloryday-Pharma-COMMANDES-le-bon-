@@ -1,5 +1,6 @@
 import { CartItem, CustomerInfo, OrderDraft } from '../types';
 import { loadBrandLogoDataUrl } from './pdfGenerator';
+import { formatProductNameWithVariant } from './productDisplay';
 
 /**
  * Storage key partitioning for draft orders (offline resilience)
@@ -286,7 +287,7 @@ export const generateDraftWhatsAppUrl = (
 
   draft.items.forEach((it, idx) => {
     const priceStr = it.isQuote || it.price === 0 ? 'Sur Devis' : `${(it.price * it.quantity).toLocaleString('fr-FR')} FCFA`;
-    lines.push(`${idx + 1}. *${it.productName}* [${it.variant}] x${it.quantity} — ${priceStr}`);
+    lines.push(`${idx + 1}. *${formatProductNameWithVariant(it.productName, it.variant)}* x${it.quantity} — ${priceStr}`);
   });
 
   lines.push('');

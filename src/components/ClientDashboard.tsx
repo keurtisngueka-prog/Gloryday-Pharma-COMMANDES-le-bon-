@@ -38,6 +38,7 @@ import {
   getNeighborhoodById 
 } from '../data/librevilleZones';
 import { api } from '../api';
+import { formatProductNameWithVariant } from '../utils/productDisplay';
 import { MobilePaymentModal } from './MobilePaymentModal';
 import { ClientProfileModal } from './ClientProfileModal';
 import { OrderConversationModal } from './OrderConversationModal';
@@ -92,7 +93,7 @@ function summarizeOrderItems(order: Order): string {
     const delivered = getOrderDeliveredQuantity(order, index);
     const remaining = getOrderRemainingQuantity(order, index);
     const progress = (order.deliveryFulfillments || []).length > 0 ? ` · remis ${delivered}/${item.quantity}${remaining ? ` · reste à livrer ${remaining}` : ''}` : '';
-    return `${item.quantity}x ${item.productName}${progress}`;
+    return `${item.quantity}x ${formatProductNameWithVariant(item.productName, item.variant)}${progress}`;
   }).join(', ');
 }
 
@@ -286,6 +287,11 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'payments' | 'invoices'>('calendar');
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [invoiceDownloadError, setInvoiceDownloadError] = useState('');
+  const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
+  const [cancelOrderReason, setCancelOrderReason] = useState('');
+  const [cancelOrderError, setCancelOrderError] = useState('');
+  const [cancelOrderSucceeded, setCancelOrderSucceeded] = useState(false);
+  const [savingCancellation, setSavingCancellation] = useState(false);
 
   const todayKey = useMemo(() => toLocalDateKey(new Date()), []);
   const [selectedDateKey, setSelectedDateKey] = useState<string>(todayKey);
@@ -333,6 +339,28 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     } finally {
       setSavingRemainderOrderId(null);
     }
+  };
+
+  const submitClientCancellation = async () => {
+    if (!cancelOrderId || savingCancellation || cancelOrderSucceeded) return;
+    setSavingCancellation(true);
+    setCancelOrderError('');
+    try {
+      await api.updateOrderStatus(cancelOrderId, 'Annulée', cancelOrderReason.trim() || 'Annulation demandée par le client');
+      setCancelOrderSucceeded(true);
+      void onRefreshOrders().catch(() => {});
+    } catch (error) {
+      setCancelOrderError(error instanceof Error ? error.message : 'La commande n’a pas pu être annulée. Réessayez.');
+    } finally {
+      setSavingCancellation(false);
+    }
+  };
+
+  const closeCancellationDialog = () => {
+    setCancelOrderId(null);
+    setCancelOrderReason('');
+    setCancelOrderError('');
+    setCancelOrderSucceeded(false);
   };
 
   useEffect(() => {
@@ -1394,6 +1422,11 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
 
                           {/* Quick Action Buttons */}
                           <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100">
+                            {order.status === 'À confirmer' && (
+                              <button type="button" onClick={() => { setCancelOrderId(order.id); setCancelOrderReason(''); setCancelOrderError(''); setCancelOrderSucceeded(false); }} className="py-1.5 px-2.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100 text-xs font-bold whitespace-nowrap">
+                                Annuler ma commande
+                              </button>
+                            )}
                             {onTrackDelivery && (
                               <button
                                 type="button"
@@ -1418,7 +1451,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                               className="py-1.5 px-2.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 ml-auto"
                             >
                               <RotateCcw className="w-3.5 h-3.5" />
-                              <span>Recommander</span>
+                                <span>{order.status === 'Annulée' ? 'Modifier cette commande' : 'Recommander'}</span>
                             </button>
                           </div>
                         </div>
@@ -1497,6 +1530,10 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           {/* VIEW MODE 2: CLASSIC ORDERS LIST */}
           {viewMode === 'invoices' ? (
             <div className="dashboard-tab-enter space-y-3 p-4 sm:p-5">
+              <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs text-emerald-950">
+                <History className="mt-0.5 h-4 w-4 shrink-0" />
+                <p><strong>Historique des factures et avoirs.</strong> Une facture corrigée reste affichée avec le document qui la remplace et l’avoir associé.</p>
+              </div>
               {invoiceDownloadError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">{invoiceDownloadError}</p>}
               {filteredInvoiceRecords.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-12 text-center">
@@ -1512,7 +1549,10 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 const replacement = invoice.correctedByInvoiceId
                   ? order.invoices?.find((document) => document.id === invoice.correctedByInvoiceId)
                   : undefined;
-                const lineSummary = (invoice.lineItems || []).slice(0, 2).map((line) => `${line.quantity} × ${line.productName}`).join(' · ');
+                const correctionSource = invoice.correctionOfInvoiceId
+                  ? order.invoices?.find((document) => document.id === invoice.correctionOfInvoiceId)
+                  : undefined;
+                const lineSummary = (invoice.lineItems || []).slice(0, 2).map((line) => `${line.quantity} × ${formatProductNameWithVariant(line.productName, line.variant)}`).join(' · ');
                 return (
                   <article key={invoice.id} className="group flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-emerald-200 hover:shadow-md sm:flex-row sm:items-center sm:justify-between sm:px-5">
                     <div className="flex min-w-0 items-start gap-3">
@@ -1526,8 +1566,10 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                             {invoice.type === 'facture' ? 'Facture' : 'Avoir'}
                           </span>
                           {replacement && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">Remplacée par {replacement.number}</span>}
+                          {correctionSource && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900">Correction liée à {correctionSource.number}</span>}
                         </div>
                         <p className="mt-1 truncate text-xs font-semibold text-slate-700">Commande {invoice.orderReference || order.reference} · {issueDateLabel}</p>
+                        {invoice.correctionReason && <p className="mt-1 line-clamp-1 text-[10px] text-slate-500">Motif de correction : {invoice.correctionReason}</p>}
                         <p className="mt-1 line-clamp-1 text-[11px] text-slate-500">{lineSummary || invoice.clientFacilityName || order.customer.facilityName}</p>
                       </div>
                     </div>
@@ -1741,8 +1783,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                                   <div key={`${order.id}-line-${itemIndex}`} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                       <div className="min-w-0">
-                                        <div className="text-xs font-bold text-slate-900">{item.productName}</div>
-                                        {item.variant && <div className="mt-0.5 text-[10px] text-slate-500">{item.variant}</div>}
+                                        <div className="text-xs font-bold text-slate-900">{formatProductNameWithVariant(item.productName, item.variant)}</div>
                                       </div>
                                       <span className={`rounded-full px-2 py-1 text-[9px] font-extrabold ${remainingQuantity > 0 ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>{deliveryLineStatus}</span>
                                     </div>
@@ -1821,7 +1862,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                           <ul className="mt-1.5 space-y-1">
                             {pendingProductLines.map(({ item, itemIndex, remainingQuantity }) => (
                               <li key={`${order.id}-${item.productId}-${itemIndex}`} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                                <span>{item.productName}{item.variant ? ` · ${item.variant}` : ''}</span>
+                                <span>{formatProductNameWithVariant(item.productName, item.variant)}</span>
                                 <strong className="tabular-nums">{remainingQuantity} restant{remainingQuantity > 1 ? 's' : ''} à livrer</strong>
                               </li>
                             ))}
@@ -1928,6 +1969,11 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
 
                     {/* Actions buttons */}
                     <div className="flex items-center gap-1.5 self-end lg:self-center flex-wrap">
+                      {order.status === 'À confirmer' && (
+                        <button type="button" onClick={() => { setCancelOrderId(order.id); setCancelOrderReason(''); setCancelOrderError(''); setCancelOrderSucceeded(false); }} className="py-1.5 px-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100 font-bold text-xs whitespace-nowrap">
+                          Annuler ma commande
+                        </button>
+                      )}
                       {isMobilePayment && remainingBalance > 0 && (
                         <button
                           type="button"
@@ -2003,7 +2049,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                         title="Recharger ces articles dans le panier"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
-                        <span>Recommander</span>
+                        <span>{order.status === 'Annulée' ? 'Modifier cette commande' : 'Recommander'}</span>
                       </button>
                     </div>
                   </div>
@@ -2044,6 +2090,31 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       )}
       {conversationOrder && currentUser?.role === 'client' && (
         <OrderConversationModal order={conversationOrder} currentUser={currentUser} onClose={() => setConversationOrder(null)} />
+      )}
+      {cancelOrderId && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-950/55 p-4" role="dialog" aria-modal="true" aria-labelledby="client-cancel-order-title">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+            <h2 id="client-cancel-order-title" className="text-base font-black text-slate-900">Annuler cette commande ?</h2>
+            {cancelOrderSucceeded ? (
+              <>
+                <p className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">La commande est annulée. Vous pouvez la reprendre avec « Modifier cette commande » pour corriger les articles avant de la renvoyer.</p>
+                <button type="button" onClick={closeCancellationDialog} className="mt-4 w-full rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800">Fermer</button>
+              </>
+            ) : (
+              <>
+                <p className="mt-2 text-xs leading-relaxed text-slate-600">L’annulation en libre-service est possible tant que l’équipe n’a pas confirmé la commande. Après l’annulation, vous pourrez reprendre son contenu et le modifier dans le panier.</p>
+                <label className="mt-4 block text-xs font-bold text-slate-700">Motif (facultatif)
+                  <textarea value={cancelOrderReason} onChange={(event) => setCancelOrderReason(event.target.value)} maxLength={500} rows={3} className="mt-1.5 w-full rounded-xl border border-slate-300 p-3 text-sm font-normal outline-none focus:border-rose-500" placeholder="Indiquez brièvement la raison de l’annulation" />
+                </label>
+                {cancelOrderError && <p role="alert" className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">{cancelOrderError}</p>}
+                <div className="mt-4 flex gap-2">
+                  <button type="button" onClick={closeCancellationDialog} disabled={savingCancellation} className="flex-1 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Garder la commande</button>
+                  <button type="button" onClick={() => void submitClientCancellation()} disabled={savingCancellation} className="flex-1 rounded-xl bg-rose-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-rose-800 disabled:opacity-50">{savingCancellation ? 'Annulation…' : 'Confirmer l’annulation'}</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

@@ -4,6 +4,7 @@ import { Layers, Plus, Edit, Trash2, CheckCircle2, Eye, EyeOff, Search, ImagePlu
 import { Pack, PackItem, Product, User } from '../types';
 import { logAuditEvent } from '../utils/auditLogger';
 import { api } from '../api';
+import { formatProductNameWithVariant } from '../utils/productDisplay';
 
 async function compressPackPhoto(file: File): Promise<Blob> {
   let bitmap: ImageBitmap;
@@ -388,7 +389,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
                   <div className="mb-3 max-h-32 overflow-y-auto rounded-xl border border-slate-200 bg-white">
                     {matchingProducts.map(product => (
                       <button key={product.id} type="button" onClick={() => addProductToPack(product)} className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-indigo-50">
-                        <span className="min-w-0"><span className="block truncate font-semibold text-slate-800">{product.name}</span><span className="text-[10px] text-slate-500">{product.category} · {product.variants[0]?.label || 'Sans variante'}</span></span>
+                        <span className="min-w-0"><span className="block truncate font-semibold text-slate-800">{formatProductNameWithVariant(product.name, product.variants[0]?.label)}</span><span className="text-[10px] text-slate-500">{product.category}</span></span>
                         <span className="shrink-0 font-mono text-[10px] font-bold text-indigo-700">{(product.variants[0]?.originalPrice ?? product.variants[0]?.price ?? 0).toLocaleString('fr-FR')} FCFA</span>
                       </button>
                     ))}
