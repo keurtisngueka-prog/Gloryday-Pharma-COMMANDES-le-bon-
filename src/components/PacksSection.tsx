@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Sparkles, MessageCircle, ShoppingBag, Check, Layers, ChevronRight, X } from 'lucide-react';
 import { Pack, Product } from '../types';
 import { formatProductNameWithVariant } from '../utils/productDisplay';
+import { getPackPricingSummary } from '../utils/packPricing';
 import { generateWhatsAppPackUrl } from '../utils/whatsapp';
 
 interface PacksSectionProps {
@@ -14,6 +15,7 @@ interface PacksSectionProps {
 
 export const PacksSection: React.FC<PacksSectionProps> = ({
   packs,
+  products,
   onAddPackToCart,
   openPackId,
   onResetOpenPackId
@@ -63,6 +65,10 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
     }, 1500);
   };
 
+  const selectedPackPricing = selectedPack
+    ? getPackPricingSummary(selectedPack, products)
+    : { savings: 0, discountPercent: 0 };
+
   return (
     <section className="mb-8">
       {/* Section Header */}
@@ -81,18 +87,19 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
       <div className="flex sm:grid sm:grid-cols-3 gap-3.5 overflow-x-auto pb-2 sm:pb-0 scrollbar-none snap-x snap-mandatory">
         {packs.map((pack) => {
           const isAdded = addedPacks[pack.id];
+          const pricing = getPackPricingSummary(pack, products);
           return (
             <div
               key={pack.id}
-              className="min-w-[280px] sm:min-w-0 flex-1 snap-start bg-white rounded-2xl border border-slate-200/80 hover:border-slate-300 transition-all flex flex-col justify-between overflow-hidden shadow-2xs hover:shadow-md"
+              className={`min-w-[280px] sm:min-w-0 flex-1 snap-start bg-white rounded-2xl transition-all flex flex-col justify-between overflow-hidden shadow-2xs hover:shadow-md ${pricing.savings > 0 ? 'border-2 border-rose-300 hover:border-rose-400' : 'border border-slate-200/80 hover:border-slate-300'}`}
               style={{
                 boxShadow: 'rgba(22, 22, 24, 0.04) 0px 4px 16px -4px, rgba(22, 22, 24, 0.04) 0px 0px 0px 1px'
               }}
             >
               {/* Media Container */}
-              <div 
+              <div
                 onClick={() => setSelectedPack(pack)}
-                className="relative h-36 overflow-hidden bg-slate-100 cursor-pointer group"
+                className="relative h-48 overflow-hidden bg-slate-100 cursor-pointer group"
               >
                 <img
                   src={pack.image}
@@ -101,22 +108,26 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
                 
-                {/* Clean badge */}
-                <div className="absolute top-2.5 left-2.5 bg-white/95 text-[#161618] font-bold text-[10px] px-2 py-0.5 rounded-md shadow-2xs flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-[#0d44e8]" />
-                  Offre pack
+                <div className={`absolute top-3 left-3 font-black text-[10px] px-2.5 py-1 rounded-full shadow-2xs flex items-center gap-1 ${pricing.savings > 0 ? 'bg-rose-600 text-white' : 'bg-white/95 text-[#267348]'}`}>
+                  <Sparkles className={`w-3 h-3 ${pricing.savings > 0 ? 'text-rose-100' : 'text-[#267348]'}`} />
+                  {pricing.savings > 0 ? 'OFFRE SPÉCIALE' : 'PACK PROMOTIONNEL'}
                 </div>
-
-                <div className="absolute bottom-2.5 left-3 right-3 text-white">
-                  <h3 className="font-bold text-sm leading-tight drop-shadow-xs line-clamp-1">
-                    {pack.title}
-                  </h3>
+                {pricing.discountPercent > 0 && (
+                  <div className="absolute top-3 right-3 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-rose-600 text-white shadow-lg ring-2 ring-white/90">
+                    <span className="text-sm font-black leading-none">−{pricing.discountPercent}%</span>
+                    <span className="mt-1 text-[7px] font-bold tracking-wide">SUR LE PACK</span>
+                  </div>
+                )}
+                <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/35 to-transparent">
                 </div>
               </div>
 
               {/* Body */}
               <div className="p-3.5 flex-1 flex flex-col justify-between">
                 <div>
+                  <h3 className="font-extrabold text-base leading-tight text-[#161618] line-clamp-2 mb-1">
+                    {pack.title}
+                  </h3>
                   <p className="text-[11px] text-[#6a6a6b] line-clamp-2 leading-relaxed mb-2.5">
                     {pack.description}
                   </p>
@@ -142,19 +153,30 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
                   </div>
                 </div>
 
-                {/* Price and CTA */}
+                {/* Promotion price and CTA */}
                 <div>
-                  <div className="flex items-baseline justify-between mb-2.5">
-                    <span className="text-[11px] text-[#6a6a6b]">Total pack</span>
-                    <div className="flex items-baseline gap-0.5">
-                      <span className="text-lg font-black text-[#000000] tabular-nums">
-                        {pack.price.toLocaleString('fr-FR')}
-                      </span>
-                      <span className="text-xs font-bold text-slate-500">FCFA</span>
+                  <div className="mb-3 rounded-xl bg-rose-50/80 border border-rose-100 p-3">
+                    {pricing.listPrice && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-semibold text-slate-500">Valeur des articles séparés</span>
+                        <span className="text-[10px] font-semibold text-slate-500 line-through tabular-nums">{pricing.listPrice.toLocaleString('fr-FR')} FCFA</span>
+                      </div>
+                    )}
+                    <div className="mt-1 flex items-end justify-between gap-2">
+                      <div>
+                        <span className="block text-[10px] font-bold uppercase tracking-wide text-rose-700">Prix spécial du pack</span>
+                        <span className="text-xl font-black text-[#161618] tabular-nums">{pack.price.toLocaleString('fr-FR')}</span>
+                        <span className="ml-1 text-[10px] font-bold text-slate-600">FCFA</span>
+                      </div>
+                      {pricing.savings > 0 && (
+                        <span className="max-w-[105px] rounded-lg bg-rose-600 px-2 py-1.5 text-center text-[9px] font-extrabold leading-tight text-white">
+                          Économie<br />{pricing.savings.toLocaleString('fr-FR')} FCFA
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-[1fr_44px] gap-2">
                     <button
                       type="button"
                       onClick={() => handleAdd(pack)}
@@ -176,8 +198,8 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
                         </>
                       ) : (
                         <>
-                          <ShoppingBag className="w-3.5 h-3.5" />
-                          Ajouter
+                      <ShoppingBag className="w-3.5 h-3.5" />
+                          Ajouter le pack
                         </>
                       )}
                     </button>
@@ -190,7 +212,7 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
                       title="Discuter du pack sur WhatsApp"
                     >
                       <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                      WhatsApp
+                      <span className="sr-only">WhatsApp</span>
                     </a>
                   </div>
 
@@ -227,8 +249,8 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
             {/* Header */}
             <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0">
               <div>
-                <span className="text-[10px] font-bold text-[#0d44e8] uppercase tracking-wider block">
-                  Pack Promotionnel
+                <span className="text-[10px] font-black text-rose-700 uppercase tracking-wider block">
+                  Offre spéciale · pack promotionnel
                 </span>
                 <h3 className="text-base font-bold text-[#161618] leading-tight">
                   {selectedPack.title}
@@ -246,12 +268,13 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
 
             {/* Content */}
             <div className="p-4 sm:p-6 overflow-y-auto space-y-4 flex-1">
-              <div className="h-40 rounded-2xl overflow-hidden bg-slate-100">
+              <div className="relative h-48 rounded-2xl overflow-hidden bg-slate-100 ring-1 ring-rose-100">
                 <img
                   src={selectedPack.image}
                   alt={selectedPack.title}
                   className="w-full h-full object-cover"
                 />
+                {selectedPackPricing.discountPercent > 0 && <span className="absolute right-3 top-3 rounded-full bg-rose-600 px-3 py-1.5 text-xs font-black text-white shadow-lg">−{selectedPackPricing.discountPercent}%</span>}
               </div>
 
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
@@ -276,16 +299,19 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
                 </div>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex items-baseline justify-between">
-                <span className="text-xs font-bold text-slate-700">Tarif pack négocié :</span>
-                <div className="text-right">
-                  <span className="text-xl font-black text-[#000000] tabular-nums">
-                    {selectedPack.price.toLocaleString('fr-FR')}
-                  </span>
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 flex items-end justify-between gap-3">
+                <div>
+                  {selectedPackPricing.listPrice && <span className="block text-[11px] text-slate-500 line-through">Valeur séparée : {selectedPackPricing.listPrice.toLocaleString('fr-FR')} FCFA</span>}
+                  <span className="block text-[10px] font-bold uppercase tracking-wide text-rose-700">Prix spécial du pack</span>
+                  <span className="text-xl font-black text-[#000000] tabular-nums">{selectedPack.price.toLocaleString('fr-FR')}</span>
                   <span className="text-xs font-bold text-slate-500 ml-1">FCFA</span>
                   <span className="text-[10px] text-slate-400 block">Sans TVA</span>
                 </div>
+                {selectedPackPricing.savings > 0 && <span className="rounded-lg bg-rose-600 px-2.5 py-2 text-center text-[10px] font-extrabold text-white">Économisez<br />{selectedPackPricing.savings.toLocaleString('fr-FR')} F</span>}
               </div>
+              {selectedPackPricing.savings > 0 && (
+                <p className="text-[10px] text-rose-700 font-semibold">Cette réduction compare le prix du pack à la valeur normale de ses articles séparés.</p>
+              )}
             </div>
 
             {/* Actions */}

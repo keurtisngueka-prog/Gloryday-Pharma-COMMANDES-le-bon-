@@ -1572,14 +1572,32 @@ export default function App() {
                   <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
                     {filteredProducts.map((prod) => {
                       const cartItem = cartItems.find(it => it.productId === prod.id);
+                      const promoted = !prod.isQuote
+                        && prod.variants.some(variant => variant.price > 0)
+                        && isProductPromoted(prod);
                       return (
-                        <ProductCard
+                        <div
                           key={prod.id}
-                          product={prod}
-                          onAddToCart={handleAddToCart}
-                          isInCart={Boolean(cartItem)}
-                          cartQuantity={cartItem?.quantity || 0}
-                        />
+                          className={promoted
+                            ? 'relative rounded-[20px] border-2 border-rose-300 bg-gradient-to-br from-rose-50/90 via-white to-white p-1.5 pt-7 shadow-[0_8px_24px_rgba(190,18,60,0.12)]'
+                            : undefined}
+                        >
+                          {promoted && (
+                            <span
+                              aria-label="Produit en promotion"
+                              className="absolute left-3 top-1.5 z-10 inline-flex items-center gap-1 rounded-full bg-rose-700 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-white shadow-sm"
+                            >
+                              <Sparkles className="h-3 w-3 text-rose-100" aria-hidden="true" />
+                              Offre sur ce produit
+                            </span>
+                          )}
+                          <ProductCard
+                            product={prod}
+                            onAddToCart={handleAddToCart}
+                            isInCart={Boolean(cartItem)}
+                            cartQuantity={cartItem?.quantity || 0}
+                          />
+                        </div>
                       );
                     })}
                   </div>
