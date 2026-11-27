@@ -951,6 +951,13 @@ export default function App() {
     setOrders(updated);
   };
 
+  const handleAdminVerifyMobilePayment = async (orderId: string, approved: boolean) => {
+    const updatedOrder = await api.verifyOrderMobilePayment(orderId, approved);
+    setOrders(previous => previous.map(order =>
+      order.id === updatedOrder.id ? updatedOrder : order
+    ));
+  };
+
   const handleAdminOrderCreated = (order: Order) => {
     setOrders(previous => [order, ...previous.filter(existing => existing.id !== order.id)]);
     void api.getProducts().then(setProducts).catch(() => {});
@@ -1261,6 +1268,7 @@ export default function App() {
                     currentUser={currentUser}
                     onUpdateStatus={handleAdminUpdateStatus}
                     onUpdatePayment={handleAdminUpdatePayment}
+                    onVerifyMobilePayment={handleAdminVerifyMobilePayment}
                     onOrderCreated={handleAdminOrderCreated}
                     onCreatePack={handleAdminCreatePack}
                     onUpdatePack={handleAdminUpdatePack}

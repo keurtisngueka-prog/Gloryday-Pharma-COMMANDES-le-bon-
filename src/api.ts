@@ -726,6 +726,13 @@ export const api = {
     });
   },
 
+  async verifyOrderMobilePayment(orderId: string, approved: boolean): Promise<Order> {
+    return request<Order>(`/api/orders/${encodeURIComponent(orderId)}/mobile-payment/verification`, {
+      method: 'PATCH',
+      body: JSON.stringify({ approved })
+    });
+  },
+
   async updateOrderExpectedDelivery(orderId: string, expectedDeliveryDate: string, expectedDeliverySlot?: string): Promise<Order> {
     return request<Order>(`/api/orders/${encodeURIComponent(orderId)}/expected-delivery`, {
       method: 'PATCH',

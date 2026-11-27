@@ -376,15 +376,17 @@ export const OrderConfirmationView: React.FC<OrderConfirmationViewProps> = ({
           isOpen={isMobilePaymentOpen}
           order={order}
           onClose={() => setIsMobilePaymentOpen(false)}
-          onPaymentConfirmed={async (transactionId, operator) => {
+          onPaymentConfirmed={async ({ transactionId, operator, amount, paymentType, plannedRemainderDueDate }) => {
             await api.updateOrderMobilePayment(order.id, {
               provider: operator,
               merchantPhone: operator === 'moov_money' ? '066240399' : '077003004',
+              paymentType,
               transactionReference: transactionId,
               senderPhone: order.customer.phone,
               isPrePaid: false,
               status: 'submitted',
-              amount: order.estimatedTotal
+              amount,
+              plannedRemainderDueDate
             });
             setPaymentReferenceSubmitted(transactionId);
           }}

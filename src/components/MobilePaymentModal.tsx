@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   X, 
   Smartphone, 
@@ -13,13 +13,20 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { Order } from '../types';
+import { getOrderRemainingBalance } from '../utils/orderFinance';
 
 interface MobilePaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   order: Order;
   allOrders?: Order[];
-  onPaymentConfirmed?: (transactionId: string, operator: 'airtel_money' | 'moov_money') => Promise<void>;
+  onPaymentConfirmed?: (payment: {
+    transactionId: string;
+    operator: 'airtel_money' | 'moov_money';
+    amount: number;
+    paymentType: 'total' | 'partial';
+    plannedRemainderDueDate?: string;
+  }) => Promise<void>;
 }
 
 export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
@@ -30,6 +37,9 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
   onPaymentConfirmed
 }) => {
   const [operator, setOperator] = useState<'airtel_money' | 'moov_money'>('airtel_money');
+  const [paymentType, setPaymentType] = useState<'total' | 'partial' | null>(null);
+  const [partialAmount, setPartialAmount] = useState('');
+  const [plannedRemainderDueDate, setPlannedRemainderDueDate] = useState('');
   const [transactionRef, setTransactionRef] = useState('');
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
@@ -37,12 +47,37 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    setPaymentType(null);
+    setPartialAmount('');
+    setPlannedRemainderDueDate('');
+    setTransactionRef('');
+    setError(null);
+    setSuccess(false);
+    setCopiedCode(false);
+    setCopiedPhone(false);
+  }, [isOpen, order?.id]);
+
   if (!isOpen || !order) return null;
 
   const airtelNumber = '+241 77 003 004';
   const moovNumber = '+241 66 240 399';
   const activeNumber = operator === 'airtel_money' ? airtelNumber : moovNumber;
   const activeUssd = operator === 'airtel_money' ? '*150#' : '*555#';
+  const remainingBalance = getOrderRemainingBalance(order);
+  const paymentAmount = paymentType === 'total'
+    ? remainingBalance
+    : paymentType === 'partial' ? Math.trunc(Number(partialAmount) || 0) : 0;
+  const dateParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Libreville', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date());
+  const todayDateKey = `${dateParts.find((part) => part.type === 'year')?.value}-${dateParts.find((part) => part.type === 'month')?.value}-${dateParts.find((part) => part.type === 'day')?.value}`;
+  const nextDate = new Date(`${todayDateKey}T00:00:00.000Z`);
+  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+  const minimumRemainderDate = nextDate.toISOString().slice(0, 10);
+  const validPaymentAmount = paymentType !== null && paymentAmount > 0 && paymentAmount <= remainingBalance &&
+    (paymentType === 'total' || (paymentAmount < remainingBalance && Boolean(plannedRemainderDueDate) && plannedRemainderDueDate > todayDateKey));
 
   const handleCopy = (text: string, type: 'code' | 'phone') => {
     navigator.clipboard.writeText(text);
@@ -65,8 +100,18 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
 
   const handleValidatePayment = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!paymentType) {
+      setError('Choisissez d’abord un paiement total ou partiel.');
+      return;
+    }
     if (!transactionRef.trim()) {
       setError('Veuillez renseigner le numéro de transaction ou référence SMS reçu.');
+      return;
+    }
+    if (!validPaymentAmount) {
+      setError(paymentType === 'partial'
+        ? 'Pour un paiement partiel, indiquez un montant inférieur au solde et la date prévue du règlement restant.'
+        : 'Le montant à régler n’est pas valide. Actualisez la commande puis réessayez.');
       return;
     }
 
@@ -79,7 +124,13 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
       setIsSubmitting(true);
       setError(null);
       if (!onPaymentConfirmed) throw new Error('La transmission de la référence de paiement n’est pas disponible.');
-      await onPaymentConfirmed(transactionRef.trim(), operator);
+      await onPaymentConfirmed({
+        transactionId: transactionRef.trim(),
+        operator,
+        amount: paymentAmount,
+        paymentType,
+        ...(paymentType === 'partial' ? { plannedRemainderDueDate } : {})
+      });
       setSuccess(true);
       setTimeout(() => {
         onClose();
@@ -95,7 +146,8 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
   // WhatsApp verification link
   const generateWhatsAppProofUrl = () => {
     const cleanNum = (operator === 'airtel_money' ? '24177003004' : '24166240399');
-    const msg = `Bonjour Gloryday Pharma Gabon,\nJe vous transmets la preuve de paiement Mobile Money pour la commande *${order.reference}* :\n- Montant : *${order.estimatedTotal.toLocaleString('fr-FR')} FCFA*\n- Opérateur : *${operator === 'airtel_money' ? 'Airtel Money' : 'Moov Money'}*\n- Réf Transaction : *${transactionRef || 'En attente'}*\n- Établissement : *${order.customer.facilityName}*\nMerci de valider l'encaissement et de lancer la livraison.`;
+    const paymentPeriod = paymentType === 'partial' ? `\n- Solde prévu le : *${plannedRemainderDueDate}*` : '';
+    const msg = `Bonjour Gloryday Pharma Gabon,\nJe transmets le justificatif de paiement ${paymentType === 'partial' ? 'partiel' : 'total'} pour la commande *${order.reference}* :\n- Montant versé : *${paymentAmount.toLocaleString('fr-FR')} FCFA*${paymentPeriod}\n- Opérateur : *${operator === 'airtel_money' ? 'Airtel Money' : 'Moov Money'}*\n- Réf Transaction : *${transactionRef || 'En attente'}*\n- Établissement : *${order.customer.facilityName}*\nMerci de vérifier le versement.`;
     return `https://wa.me/${cleanNum}?text=${encodeURIComponent(msg)}`;
   };
 
@@ -127,18 +179,45 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
 
         {/* Content */}
         <div className="p-5 space-y-4 text-xs">
-          {/* Amount Badge */}
+          {/* Remaining balance */}
           <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
             <span className="text-slate-600 font-bold uppercase text-[10px]">
-              Montant Net à Régler
+              Solde restant de la commande
             </span>
             <div className="text-right">
               <span className="text-lg font-black text-slate-900 tabular-nums">
-                {order.estimatedTotal.toLocaleString('fr-FR')}
+                {remainingBalance.toLocaleString('fr-FR')}
               </span>
               <span className="text-xs font-bold text-[#0d44e8] ml-1">FCFA</span>
             </div>
           </div>
+
+          <section aria-labelledby="payment-type-label" className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3.5">
+            <h3 id="payment-type-label" className="text-[11px] font-black uppercase tracking-wide text-slate-800">Comment souhaitez-vous régler ? <span className="text-rose-700">(obligatoire)</span></h3>
+            <div className="mt-2 grid grid-cols-2 gap-2" role="group" aria-labelledby="payment-type-label">
+              <button type="button" aria-pressed={paymentType === 'total'} onClick={() => { setPaymentType('total'); setError(null); }} className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${paymentType === 'total' ? 'border-emerald-600 bg-white text-emerald-900 ring-2 ring-emerald-100' : 'border-slate-200 bg-white/70 text-slate-700 hover:bg-white'}`}>
+                <span className="block text-xs font-black">Paiement total</span>
+                <span className="mt-0.5 block text-[10px] text-slate-600">{remainingBalance.toLocaleString('fr-FR')} FCFA</span>
+              </button>
+              <button type="button" aria-pressed={paymentType === 'partial'} onClick={() => { setPaymentType('partial'); setError(null); }} className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${paymentType === 'partial' ? 'border-emerald-600 bg-white text-emerald-900 ring-2 ring-emerald-100' : 'border-slate-200 bg-white/70 text-slate-700 hover:bg-white'}`}>
+                <span className="block text-xs font-black">Paiement partiel</span>
+                <span className="mt-0.5 block text-[10px] text-slate-600">Choisir le montant</span>
+              </button>
+            </div>
+            {paymentType === 'partial' ? (
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="text-[11px] font-bold text-slate-700">Montant versé (FCFA)
+                  <input type="number" inputMode="numeric" min="1" max={Math.max(0, remainingBalance - 1)} step="1" required value={partialAmount} onChange={(event) => setPartialAmount(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-bold tabular-nums outline-none focus:border-emerald-600 focus:ring-4 focus:ring-emerald-50" placeholder="Ex. 25 000" />
+                </label>
+                <label className="text-[11px] font-bold text-slate-700">Date prévue pour le solde
+                  <input type="date" min={minimumRemainderDate} required value={plannedRemainderDueDate} onChange={(event) => setPlannedRemainderDueDate(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-600 focus:ring-4 focus:ring-emerald-50" />
+                </label>
+                <p className="text-[10px] leading-relaxed text-slate-600 sm:col-span-2">Gloryday vérifiera le versement et la date proposée avant de mettre à jour le solde dû.</p>
+              </div>
+            ) : (
+              <p className="mt-2 rounded-xl bg-white px-3 py-2 text-[11px] leading-relaxed text-slate-700">{paymentType === 'total' ? 'Le montant à envoyer est le solde restant affiché ci-dessus.' : 'Choisissez le type de paiement pour afficher le montant à envoyer.'}</p>
+            )}
+          </section>
 
           {/* Operator Selector (Airtel Money vs Moov Money) */}
           <div>
@@ -201,7 +280,7 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
               </div>
               <div className="flex items-start gap-2">
                 <span className="w-4 h-4 rounded-full bg-slate-200 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
-                <span>Saisissez <strong>{order.estimatedTotal.toLocaleString('fr-FR')} FCFA</strong>, vérifiez le nom du bénéficiaire et confirmez dans le menu opérateur.</span>
+                <span>{paymentType ? <>Saisissez <strong>{paymentAmount.toLocaleString('fr-FR')} FCFA</strong>, vérifiez le nom du bénéficiaire et confirmez dans le menu opérateur.</> : 'Choisissez d’abord le paiement total ou partiel pour connaître le montant à envoyer.'}</span>
               </div>
             </div>
             <a
@@ -236,7 +315,7 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
             {success && (
               <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                <span>Référence transmise. Le paiement reste en attente de vérification par Gloryday Pharma.</span>
+              <span>Demande de paiement transmise ({paymentType === 'partial' ? 'partielle' : 'totale'} · {paymentAmount.toLocaleString('fr-FR')} FCFA). Gloryday vérifiera le versement avant d’actualiser le solde.</span>
               </div>
             )}
 
@@ -260,7 +339,7 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
             <div className="flex flex-col sm:flex-row gap-2 pt-1">
               <button
                 type="submit"
-                disabled={isSubmitting || success}
+                disabled={isSubmitting || success || !validPaymentAmount || Boolean(duplicateOrder)}
                 className="flex-1 py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-xs"
               >
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -268,10 +347,12 @@ export const MobilePaymentModal: React.FC<MobilePaymentModalProps> = ({
               </button>
 
               <a
-                href={generateWhatsAppProofUrl()}
+              href={validPaymentAmount ? generateWhatsAppProofUrl() : undefined}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs text-center"
+              aria-disabled={!validPaymentAmount}
+              onClick={(event) => { if (!validPaymentAmount) event.preventDefault(); }}
+              className={`py-2.5 px-4 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-xs text-center ${validPaymentAmount ? 'hover:bg-emerald-700 cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
               >
                 <MessageCircle className="w-4 h-4" />
                 <span>Preuve WhatsApp</span>

@@ -235,12 +235,15 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
   let totalSavings = 0;
   let itemsSubtotal = 0;
   const items = order.items || [];
+  const rowFontSize = items.length > 16 ? 6.2 : items.length > 10 ? 7.2 : 8.5;
+  const rowLineHeight = rowFontSize * 0.38;
+  const minimumRowHeight = items.length > 16 ? 6.2 : items.length > 10 ? 7.2 : 8;
   items.forEach((item, index) => {
     const itemLabel = text(formatProductNameWithVariant(item.productName, item.variant));
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.5);
+    doc.setFontSize(rowFontSize);
     const labelLines = doc.splitTextToSize(itemLabel || 'Article', 76);
-    const rowHeight = Math.max(8, labelLines.length * 4.2 + 3.5);
+    const rowHeight = Math.max(minimumRowHeight, labelLines.length * rowLineHeight + 1.4);
     if (y + rowHeight > pageHeight - 28) {
       doc.addPage();
       y = 20;
@@ -255,9 +258,11 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
     doc.line(margin, y + rowHeight, pageWidth - margin, y + rowHeight);
     doc.setTextColor(ink[0], ink[1], ink[2]);
     doc.setFont('helvetica', 'normal');
-    const valueY = y + Math.min(rowHeight - 1.5, Math.max(5.2, rowHeight / 2 + 1));
+    doc.setFontSize(rowFontSize);
+    const valueY = y + Math.min(rowHeight - 1.2, Math.max(rowFontSize * 0.65, rowHeight / 2 + rowFontSize * 0.25));
     doc.text(text(item.productReference || '—'), margin + 4, valueY);
-    doc.text(labelLines, margin + 28, y + 5.2);
+    const labelTop = y + Math.max(rowLineHeight, (rowHeight - labelLines.length * rowLineHeight) / 2 + rowLineHeight);
+    doc.text(labelLines, margin + 28, labelTop, { lineHeightFactor: 1.0 });
     doc.text(String(item.quantity), 126, valueY, { align: 'center' });
     if (item.isQuote) {
       doc.setTextColor(180, 83, 9);
@@ -563,9 +568,9 @@ export async function generateInvoiceProjectPdf(
   doc.setFont('times', 'normal');
   doc.setFontSize(7.7);
   doc.text('NIF : 250301 T', margin, 42);
-  doc.text('RCCM : GA.LBV-01 2021-A10-00629', margin, 48);
-  doc.text('BP 20350 · Libreville, Gabon', margin, 54);
-  doc.text('+241 66 24 03 99 · +241 77 00 30 04', margin, 60);
+  doc.text('RCCM : GA.LBV-01 2021-A10-00629', margin, 47);
+  doc.text('BP 20350 · Libreville, Gabon', margin, 52);
+  doc.text('+241 66 24 03 99 · +241 77 00 30 04', margin, 57);
   doc.setFontSize(6.9);
 
   const metaX = pageWidth - margin;
@@ -586,7 +591,7 @@ export async function generateInvoiceProjectPdf(
     doc.text(text(`Motif : ${invoice.reason}`), metaX, 53, { align: 'right', maxWidth: 82 });
   }
 
-  const clientTop = 69;
+  const clientTop = 63;
   const facilityType = order.customer.facilityType === 'Autre'
     ? (order.customer.facilityTypeOther || 'Autre établissement')
     : (order.customer.facilityType || 'Établissement');
@@ -597,9 +602,8 @@ export async function generateInvoiceProjectPdf(
   doc.setFont('times', 'bold');
   doc.setFontSize(8.4);
   const facilityNameLines = doc.splitTextToSize(facilityNameWithoutType || facilityName, 64).slice(0, 3);
-  const contactY = clientTop + 13 + Math.max(1, facilityNameLines.length) * 3.5 + 3.5;
-  const directorY = contactY + 6;
-  const clientHeight = Math.max(33, (order.customer.directorName ? directorY : contactY) + 5 - clientTop);
+  const contactY = clientTop + 13 + Math.max(1, facilityNameLines.length) * 3.2 + 2.5;
+  const clientHeight = Math.max(28, contactY + 2 - clientTop);
   doc.setFillColor(pale[0], pale[1], pale[2]);
   doc.setDrawColor(rule[0], rule[1], rule[2]);
   doc.setLineWidth(0.25);
@@ -620,10 +624,6 @@ export async function generateInvoiceProjectPdf(
   doc.setFont('times', 'normal');
   doc.setFontSize(8);
   doc.text(text(`Responsable : ${order.customer.contactName || 'Non renseigné'}`), margin + 4, contactY);
-  if (order.customer.directorName) {
-    doc.setFontSize(7.5);
-    doc.text(text(`Direction : ${order.customer.directorName}`), margin + 4, directorY);
-  }
   const phones = [order.customer.phone, order.customer.secondaryPhone].filter(Boolean).join(' · ');
   doc.text(text(`Tél. : ${phones || 'Non renseigné'}`), margin + 105, clientTop + 13, { maxWidth: contentWidth - 109 });
   doc.text(text(`Adresse : ${printableAddress}`), margin + 105, clientTop + 20, { maxWidth: contentWidth - 109 });
@@ -658,11 +658,6 @@ export async function generateInvoiceProjectPdf(
   const paidAmount = Math.min(invoice.totalTTC, getOrderPaidAmount(order));
   const remainingAmount = Math.min(invoice.totalTTC, getOrderRemainingBalance(order));
   const showPaymentPanel = remainingAmount > 0;
-  const finalContentReserve = 112;
-  const finalContentLimit = pageHeight - finalContentReserve;
-  let y = clientTop + clientHeight + 5;
-  drawTableHeader(y);
-  y += 8;
   const invoiceItems = invoice.lineItems?.length
     ? invoice.lineItems.map((item) => ({
         productId: item.productId,
@@ -676,12 +671,22 @@ export async function generateInvoiceProjectPdf(
         isQuote: item.isQuote || false,
       }))
     : (order.items || []);
+  const deliveryFee = Math.max(0, Math.trunc(Number(invoice.deliveryFee ?? order.deliveryFee ?? order.customer.deliveryFee) || 0));
+  const finalContentReserve = 93;
+  const finalContentLimit = pageHeight - finalContentReserve;
+  let y = clientTop + clientHeight + 5;
+  drawTableHeader(y);
+  y += 8;
+  const rowSpace = Math.max(5.8, (finalContentLimit - y - (deliveryFee > 0 ? 12 : 2)) / Math.max(1, invoiceItems.length));
+  const invoiceRowFontSize = Math.max(5.8, Math.min(8.5, (rowSpace - 1.4) / 0.8));
+  const invoiceRowLineHeight = invoiceRowFontSize * 0.38;
+  const invoiceMinimumRowHeight = Math.min(8.5, Math.max(5.8, rowSpace));
   invoiceItems.forEach((item, index) => {
     const label = text(formatProductNameWithVariant(item.productName || 'Article', item.variant));
     doc.setFont('times', 'normal');
-    doc.setFontSize(9);
+    doc.setFontSize(invoiceRowFontSize);
     const labelLines = doc.splitTextToSize(label, columns[1] - 7);
-    const rowHeight = Math.max(9, labelLines.length * 4 + 2.5);
+    const rowHeight = Math.max(invoiceMinimumRowHeight, labelLines.length * invoiceRowLineHeight + 1.4);
     if (y + rowHeight > finalContentLimit) {
       doc.addPage();
       y = 20;
@@ -697,12 +702,11 @@ export async function generateInvoiceProjectPdf(
     x.forEach((edge) => doc.line(edge, y, edge, y + rowHeight));
     doc.setTextColor(ink[0], ink[1], ink[2]);
     doc.setFont('times', 'normal');
-    doc.setFontSize(8.3);
-    doc.text(text(item.productReference || '—'), referenceX, y + 6.2);
-    doc.setFontSize(9);
-    doc.text(labelLines, designationX, y + 6.2, { lineHeightFactor: 1.1 });
-    const valueY = y + Math.min(rowHeight - 2, Math.max(6.2, rowHeight / 2 + 1.2));
-    doc.setFontSize(8.8);
+    doc.setFontSize(invoiceRowFontSize);
+    const valueY = y + Math.min(rowHeight - 1.1, Math.max(invoiceRowFontSize * 0.62, rowHeight / 2 + invoiceRowFontSize * 0.22));
+    const labelTop = y + Math.max(invoiceRowLineHeight, (rowHeight - labelLines.length * invoiceRowLineHeight) / 2 + invoiceRowLineHeight);
+    doc.text(text(item.productReference || '—'), referenceX, valueY);
+    doc.text(labelLines, designationX, labelTop, { lineHeightFactor: 1.0 });
     doc.text(String(item.quantity), quantityX, valueY, { align: 'center' });
     if (item.isQuote) {
       doc.setTextColor(brandGreen[0], brandGreen[1], brandGreen[2]);
@@ -719,7 +723,6 @@ export async function generateInvoiceProjectPdf(
     y += rowHeight;
   });
 
-  const deliveryFee = Math.max(0, Math.trunc(Number(invoice.deliveryFee ?? order.deliveryFee ?? order.customer.deliveryFee) || 0));
   if (deliveryFee > 0) {
     const rowHeight = 10;
     if (y + rowHeight > finalContentLimit) {
@@ -761,7 +764,7 @@ export async function generateInvoiceProjectPdf(
   const summaryY = tableBottom + 7;
   const panelGap = 8;
   const panelWidth = (contentWidth - panelGap) / 2;
-  const paymentHeight = 48;
+  const paymentHeight = 41;
   if (showPaymentPanel) {
     doc.setFillColor(pale[0], pale[1], pale[2]);
     doc.setDrawColor(rule[0], rule[1], rule[2]);
@@ -773,20 +776,20 @@ export async function generateInvoiceProjectPdf(
     doc.setFont('times', 'normal');
     doc.setFontSize(7.4);
     doc.setTextColor(ink[0], ink[1], ink[2]);
-    doc.text(text(`Mode : ${paymentLabels[paymentMethod] || 'À convenir'}`), paymentX + 4, summaryY + 13, { maxWidth: panelWidth - 8 });
-    doc.text(text(`Situation : ${paymentStatus}`), paymentX + 4, summaryY + 20, { maxWidth: panelWidth - 8 });
-    if (paidAmount > 0) doc.text(text(`Déjà réglé : ${formatPdfAmount(paidAmount)} F CFA`), paymentX + 4, summaryY + 27);
+    doc.text(text(`Mode : ${paymentLabels[paymentMethod] || 'À convenir'}`), paymentX + 4, summaryY + 12, { maxWidth: panelWidth - 8 });
+    doc.text(text(`Situation : ${paymentStatus}`), paymentX + 4, summaryY + 18, { maxWidth: panelWidth - 8 });
+    if (paidAmount > 0) doc.text(text(`Déjà réglé : ${formatPdfAmount(paidAmount)} F CFA`), paymentX + 4, summaryY + 24);
     doc.setFont('times', 'bold');
-    doc.text(text(`Solde à régler : ${formatPdfAmount(remainingAmount)} F CFA`), paymentX + 4, summaryY + 34);
+    doc.text(text(`Solde à régler : ${formatPdfAmount(remainingAmount)} F CFA`), paymentX + 4, summaryY + 30);
     if (dueDate) {
       doc.setFont('times', 'normal');
-      doc.text(text(`Échéance : ${dueDate}`), paymentX + 4, summaryY + 41);
+      doc.text(text(`Échéance : ${dueDate}`), paymentX + 4, summaryY + 36);
     }
   }
 
   const totalsX = showPaymentPanel ? paymentX + panelWidth + panelGap : paymentX;
   const totalsWidth = showPaymentPanel ? panelWidth : contentWidth;
-  const totalsHeight = showPaymentPanel ? paymentHeight : 44;
+  const totalsHeight = showPaymentPanel ? paymentHeight : 41;
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(rule[0], rule[1], rule[2]);
   doc.rect(totalsX, summaryY, totalsWidth, totalsHeight, 'FD');
@@ -803,16 +806,16 @@ export async function generateInvoiceProjectPdf(
   };
   doc.setFontSize(7.7);
   doc.setTextColor(ink[0], ink[1], ink[2]);
-  totalRow('Total HT', invoice.totalHT, summaryY + 14);
-  totalRow(`TVA (${Math.round(invoice.tvaRate * 100)}%)${invoice.tvaRate === 0 ? ' · non appliquée' : ''}`, invoice.tvaAmount, summaryY + 21);
-  totalRow(`CSS (${Math.round((invoice.cssRate || 0) * 100)}%)`, invoice.cssAmount || 0, summaryY + 28);
+  totalRow('Total HT', invoice.totalHT, summaryY + 13);
+  totalRow(`TVA (${Math.round(invoice.tvaRate * 100)}%)${invoice.tvaRate === 0 ? ' · non appliquée' : ''}`, invoice.tvaAmount, summaryY + 19);
+  totalRow(`CSS (${Math.round((invoice.cssRate || 0) * 100)}%)`, invoice.cssAmount || 0, summaryY + 25);
   doc.setDrawColor(rule[0], rule[1], rule[2]);
-  doc.line(totalsX + 4, summaryY + 32, totalsX + totalsWidth - 4, summaryY + 32);
+  doc.line(totalsX + 4, summaryY + 29, totalsX + totalsWidth - 4, summaryY + 29);
   doc.setTextColor(brandGreen[0], brandGreen[1], brandGreen[2]);
   doc.setFontSize(9.5);
-  totalRow('Total TTC', invoice.totalTTC, summaryY + 40, true);
+  totalRow('Total TTC', invoice.totalTTC, summaryY + 36, true);
 
-  const signatureTop = Math.min(summaryY + totalsHeight + 10, pageHeight - 43);
+  const signatureTop = Math.min(summaryY + totalsHeight + 6, pageHeight - 43);
   const signatureGap = 8;
   const signatureWidth = (contentWidth - signatureGap) / 2;
   const stampX = margin + signatureWidth + signatureGap;

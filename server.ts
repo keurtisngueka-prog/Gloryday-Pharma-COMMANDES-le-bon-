@@ -179,6 +179,32 @@ function normalizeClientPhone(value: string): string {
   return normalizePhone(value).replace(/\D/g, '');
 }
 
+function isFutureLibrevilleDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T12:00:00+01:00`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) return false;
+  const todayParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Libreville',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const today = `${todayParts.find((part) => part.type === 'year')?.value}-${todayParts.find((part) => part.type === 'month')?.value}-${todayParts.find((part) => part.type === 'day')?.value}`;
+  return value > today;
+}
+
+function nextProductReference(products: Product[], excludedProductId?: string): string {
+  const references = new Set(products
+    .filter((product) => product.id !== excludedProductId)
+    .map((product) => product.reference?.trim().toLocaleLowerCase('fr'))
+    .filter((reference): reference is string => Boolean(reference)));
+  for (let sequence = 1; sequence <= 999_999; sequence++) {
+    const candidate = `GP ${String(sequence).padStart(3, '0')}`;
+    if (!references.has(candidate.toLocaleLowerCase('fr'))) return candidate;
+  }
+  throw new Error('Impossible de générer une référence produit disponible.');
+}
+
 function ensureProductReferences(products: Product[]): void {
   const references = new Set(products
     .map((product) => product.reference?.trim().toLocaleLowerCase('fr'))
@@ -583,6 +609,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
   // Vercel is the trusted reverse proxy in production; use its forwarded client IP for rate limiting.
   app.set('trust proxy', process.env.VERCEL ? 1 : false);
   let store = loadStore();
+  ensureProductReferences(store.products);
   const persistence = createSupabaseStorePersistence();
   if (persistence) {
     try {
@@ -900,10 +927,10 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       ].some(permission => hasPerm(permission as StaffPermission));
       else if (route.endsWith('/discount')) allowed = role !== 'client' && ['GET', 'PATCH'].includes(method);
       else if (route.endsWith('/payment')) allowed = hasPerm('payments_manage') || hasPerm('receivables_payments_manage');
-      else if (route.endsWith('/mobile-payment')) allowed = role === 'client' || hasPerm('payments_manage');
+      else if (route.includes('/mobile-payment')) allowed = role === 'client' || hasPerm('payments_manage');
       else if (route.endsWith('/expected-delivery')) allowed = role === 'client' || hasPerm('logistics_manage');
       else if (route.endsWith('/status')) allowed = role === 'client' || hasPerm('orders_confirm') || hasPerm('orders_cancel');
-      else if (method === 'GET') allowed = role === 'client' || hasPerm('orders_view') || hasPerm('orders_create_for_client') || hasPerm('orders_confirm') || hasPerm('orders_cancel') || hasPerm('orders_finance_view') || hasPerm('orders_finance_manage') || hasPerm('payments_manage') || hasPerm('logistics_view') || hasPerm('logistics_manage') || hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('receivables_reminders_manage') || hasPerm('finance_view');
+      else if (method === 'GET') allowed = role === 'client' || hasPerm('orders_view') || hasPerm('orders_create_for_client') || hasPerm('orders_confirm') || hasPerm('orders_cancel') || hasPerm('orders_finance_view') || hasPerm('orders_finance_manage') || hasPerm('orders_invoice_correct') || hasPerm('payments_manage') || hasPerm('logistics_view') || hasPerm('logistics_manage') || hasPerm('receivables_view') || hasPerm('receivables_payments_manage') || hasPerm('receivables_reminders_manage') || hasPerm('finance_view');
       else if (method === 'POST') allowed = role === 'client' || hasPerm('orders_create_for_client');
     } else if (route === '/events') {
       allowed = method === 'GET';
@@ -1297,7 +1324,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     // New inventory is always recorded through the receipt workflow so it
     // receives an operator, timestamp, reason, lot and expiry trace.
     const initialStock = 0;
-    const productReference = typeof productData.reference === 'string' ? productData.reference.trim().slice(0, 40) : '';
+    const productReference = typeof productData.reference === 'string' && productData.reference.trim()
+      ? productData.reference.trim().slice(0, 40)
+      : nextProductReference(store.products);
     if (productReference && store.products.some((product) => product.reference?.toLocaleLowerCase('fr') === productReference.toLocaleLowerCase('fr'))) {
       res.status(409).json({ error: 'Cette référence catalogue est déjà utilisée.' });
       return;
@@ -5803,7 +5832,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       let replacementNumber = '';
       let numberAttempts = 0;
       do {
-        const token = randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase();
+        const token = BigInt(`0x${randomUUID().replace(/-/g, '')}`).toString(36).slice(0, 8).toUpperCase();
         creditNumber = `AV-${documentYear}-${token}`;
         replacementNumber = `FAC-${documentYear}-${token}`;
         numberAttempts += 1;
@@ -5965,8 +5994,8 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         return;
       }
       const numberMatchesType = type === 'facture'
-        ? /^(?:FAC-\d{4}-[A-Z0-9-]+|FAC-\d{2}-[A-Z0-9]{12})$/.test(number)
-        : /^(?:AVOIR-\d{4}-[A-Z0-9-]+|AV-\d{2}-[A-Z0-9]{12})$/.test(number);
+        ? /^(?:FAC-\d{4}-[A-Z0-9-]+|FAC-\d{2}-(?:[A-Z0-9]{8}|[A-Z0-9]{12}))$/.test(number)
+        : /^(?:AVOIR-\d{4}-[A-Z0-9-]+|AV-\d{2}-(?:[A-Z0-9]{8}|[A-Z0-9]{12}))$/.test(number);
       if (!type || !numberMatchesType || invoiceNumbers.has(number) ||
           !/^\d{4}-\d{2}-\d{2}$/.test(issueDate) || !Number.isFinite(Date.parse(issueDate)) ||
           !Number.isFinite(requestedTvaRate) || requestedTvaRate !== INVOICE_TVA_RATE || (type === 'avoir' && !reason)) {
@@ -6568,25 +6597,63 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(403).json({ error: 'Cette commande ne vous appartient pas.' });
       return;
     }
+    const order = store.orders[idx];
+    if (order.status === 'Annulée' || getOrderRemainingBalance(order) <= 0) {
+      res.status(409).json({ error: 'Cette commande ne présente aucun solde à payer.' });
+      return;
+    }
+    if (order.mobilePayment?.status === 'submitted') {
+      res.status(409).json({ error: 'Votre justificatif est déjà en cours de vérification.' });
+      return;
+    }
     const transactionReference = String(mobilePayment?.transactionReference || '').trim();
     if (!transactionReference) {
       res.status(400).json({ error: 'La référence de transaction est obligatoire.' });
       return;
     }
+    const remainingBalance = getOrderRemainingBalance(order);
+    const paymentType = mobilePayment?.paymentType;
+    const amount = Number(mobilePayment?.amount);
+    if ((paymentType !== 'total' && paymentType !== 'partial') || !Number.isSafeInteger(amount) || amount <= 0 || amount > remainingBalance) {
+      res.status(400).json({ error: 'Choisissez un paiement total ou partiel et indiquez un montant valide.' });
+      return;
+    }
+    if (paymentType === 'total' && amount !== remainingBalance) {
+      res.status(400).json({ error: 'Le paiement total doit correspondre au solde restant de la commande.' });
+      return;
+    }
+    if (paymentType === 'partial' && amount >= remainingBalance) {
+      res.status(400).json({ error: 'Un paiement partiel doit être inférieur au solde restant.' });
+      return;
+    }
+    const plannedRemainderDueDate = String(mobilePayment?.plannedRemainderDueDate || '').trim();
+    if (paymentType === 'partial' && !isFutureLibrevilleDate(plannedRemainderDueDate)) {
+      res.status(400).json({ error: 'Indiquez une date valide pour régler le solde restant.' });
+      return;
+    }
     if (transactionReference && store.orders.some((order, orderIndex) =>
-      orderIndex !== idx && order.mobilePayment?.transactionReference?.toLowerCase() === transactionReference.toLowerCase()
+      orderIndex !== idx && (
+        order.mobilePayment?.transactionReference?.toLowerCase() === transactionReference.toLowerCase() ||
+        order.installments?.some((installment) => installment.transactionReference?.toLowerCase() === transactionReference.toLowerCase())
+      )
     )) {
       res.status(409).json({ error: 'Cette référence de transaction est déjà associée à une autre commande.' });
+      return;
+    }
+    if (order.installments?.some((installment) => installment.transactionReference?.toLowerCase() === transactionReference.toLowerCase())) {
+      res.status(409).json({ error: 'Cette référence figure déjà dans l’historique des paiements de cette commande.' });
       return;
     }
     const submittedPayment = mobilePayment ? {
       provider: mobilePayment.provider === 'moov_money' ? 'moov_money' as const : 'airtel_money' as const,
       merchantPhone: String(mobilePayment.merchantPhone || '').slice(0, 40),
+      paymentType: paymentType as 'total' | 'partial',
       transactionReference: transactionReference.slice(0, 100),
       senderPhone: String(mobilePayment.senderPhone || '').slice(0, 40),
       isPrePaid: false,
       status: 'submitted' as const,
-      amount: store.orders[idx].estimatedTotal
+      amount,
+      ...(paymentType === 'partial' ? { plannedRemainderDueDate } : {})
     } : undefined;
     store.orders[idx].mobilePayment = submittedPayment;
     store.orders[idx].customer.mobilePayment = submittedPayment;
@@ -6596,7 +6663,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       type: 'payment_updated',
       orderId: store.orders[idx].id,
       orderReference: store.orders[idx].reference,
-      message: `Référence Mobile Money ${transactionReference.slice(0, 100)} reçue pour la commande ${store.orders[idx].reference}; vérifiez le paiement.`,
+      message: `Versement ${paymentType === 'partial' ? 'partiel' : 'total'} de ${amount.toLocaleString('fr-FR')} FCFA reçu pour ${store.orders[idx].reference}; vérifiez la référence${paymentType === 'partial' ? ` et la date proposée (${plannedRemainderDueDate})` : ''}.`,
       targetRole: 'Super-Admin',
       read: false
     });
@@ -6607,7 +6674,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         type: 'payment_updated',
         orderId: store.orders[idx].id,
         orderReference: store.orders[idx].reference,
-        message: `Votre référence de paiement pour la commande ${store.orders[idx].reference} a été transmise pour vérification.`,
+        message: `Votre demande de paiement ${paymentType === 'partial' ? 'partiel' : 'total'} de ${amount.toLocaleString('fr-FR')} FCFA pour la commande ${store.orders[idx].reference} est en attente de vérification${paymentType === 'partial' ? `; date proposée pour le solde : ${plannedRemainderDueDate}` : ''}.`,
         targetRole: 'client',
         userId: store.orders[idx].userId,
         read: false
@@ -6619,6 +6686,115 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       scheduleBackgroundTask(sendPushForNotification(customerMobilePaymentNotification), `notification de preuve de paiement ${store.orders[idx].reference}`);
     }
     res.json(store.orders[idx]);
+  }));
+
+  app.patch('/api/orders/:id/mobile-payment/verification', asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const user = (req as AuthenticatedRequest).authenticatedUser!;
+    if (user.role === 'client' || (user.role !== 'Super-Admin' && !user.permissions?.includes('payments_manage'))) {
+      res.status(403).json({ error: 'Le droit de gestion des paiements est requis pour valider ce versement.' });
+      return;
+    }
+    const idx = store.orders.findIndex((order) => order.id === id || order.reference === id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Commande introuvable.' });
+      return;
+    }
+    const order = store.orders[idx];
+    const payment = order.mobilePayment;
+    if (!payment || payment.status !== 'submitted' || !payment.transactionReference) {
+      res.status(409).json({ error: 'Aucun versement mobile en attente de vérification pour cette commande.' });
+      return;
+    }
+
+    const approved = req.body?.approved === true;
+    const now = new Date().toISOString();
+    if (!approved) {
+      payment.status = 'failed';
+      payment.operatorNotes = String(req.body?.reason || 'Référence non confirmée par Gloryday Pharma.').trim().slice(0, 300);
+    } else {
+      const remainingBalance = getOrderRemainingBalance(order);
+      const amount = Number(payment.amount);
+      if (!Number.isSafeInteger(amount) || amount <= 0 || amount > remainingBalance) {
+        res.status(409).json({ error: 'Le solde a changé depuis la demande. Actualisez la commande avant de valider ce versement.' });
+        return;
+      }
+      const paymentType = payment.paymentType || (amount === remainingBalance ? 'total' : 'partial');
+      if ((paymentType === 'total' && amount !== remainingBalance) || (paymentType === 'partial' && amount >= remainingBalance)) {
+        res.status(409).json({ error: 'Le montant ne correspond plus au type de paiement demandé.' });
+        return;
+      }
+      if (paymentType === 'partial' && !isFutureLibrevilleDate(payment.plannedRemainderDueDate || '')) {
+        res.status(409).json({ error: 'La date proposée pour le solde est invalide. Demandez au client de retransmettre sa demande.' });
+        return;
+      }
+      if ((order.installments || []).some((installment) => installment.transactionReference?.toLowerCase() === payment.transactionReference!.toLowerCase()) ||
+          store.orders.some((candidate, candidateIndex) => candidateIndex !== idx && (
+            candidate.mobilePayment?.transactionReference?.toLowerCase() === payment.transactionReference!.toLowerCase() ||
+            candidate.installments?.some((installment) => installment.transactionReference?.toLowerCase() === payment.transactionReference!.toLowerCase())
+          ))) {
+        res.status(409).json({ error: 'Cette référence a déjà été enregistrée dans un paiement.' });
+        return;
+      }
+      const validatorName = user.contactName || user.facilityName || user.phone || user.role;
+      const confirmedPaymentsBefore = (order.installments || []).reduce(
+        (sum, installment) => sum + (installment.status === 'valide' ? Math.max(0, Math.trunc(Number(installment.amount) || 0)) : 0),
+        0,
+      );
+      const previouslyPaid = getOrderPaidAmount(order);
+      const carriedPaidAmount = Math.max(0, previouslyPaid - confirmedPaymentsBefore);
+      if (carriedPaidAmount > 0) {
+        order.legacyPaidAmount = Math.max(Number(order.legacyPaidAmount) || 0, carriedPaidAmount);
+      }
+      order.installments = [...(order.installments || []), {
+        id: `inst-${randomUUID()}`,
+        type: paymentType === 'total' ? 'solde' : 'acompte',
+        amount,
+        paymentMethod: payment.provider,
+        transactionReference: payment.transactionReference,
+        status: 'valide',
+        paidAt: now,
+        validatedBy: validatorName,
+      }];
+      order.amountPaid = getOrderPaidAmount(order);
+      order.isPaid = getOrderRemainingBalance(order) <= 0;
+      order.collectionDueDate = order.isPaid ? undefined : payment.plannedRemainderDueDate || order.collectionDueDate;
+      payment.status = 'verified';
+      payment.validatedAt = now;
+      payment.operatorNotes = undefined;
+    }
+    order.customer.mobilePayment = payment;
+    appendStaffLog(user, {
+      category: 'orders',
+      severity: approved ? 'info' : 'warning',
+      actionLabel: approved ? 'Validation versement Mobile Money' : 'Refus versement Mobile Money',
+      targetType: 'order',
+      targetId: order.id,
+      targetLabel: `${order.reference} · ${order.customer.facilityName}`,
+      details: approved
+        ? `${payment.amount?.toLocaleString('fr-FR')} FCFA confirmés; solde restant ${getOrderRemainingBalance(order).toLocaleString('fr-FR')} FCFA.`
+        : `Versement déclaré ${payment.amount?.toLocaleString('fr-FR')} FCFA refusé; référence ${payment.transactionReference}.`,
+      newValue: approved ? payment.status : 'failed',
+    });
+    const clientNotification = order.userId ? {
+      id: `notif-${randomUUID()}`,
+      timestamp: now,
+      type: 'payment_updated' as const,
+      orderId: order.id,
+      orderReference: order.reference,
+      message: approved
+        ? order.isPaid
+          ? `Votre paiement total de ${payment.amount?.toLocaleString('fr-FR')} FCFA pour ${order.reference} est confirmé.`
+          : `Votre versement de ${payment.amount?.toLocaleString('fr-FR')} FCFA pour ${order.reference} est confirmé. Solde restant : ${getOrderRemainingBalance(order).toLocaleString('fr-FR')} FCFA${order.collectionDueDate ? ` · échéance proposée acceptée : ${order.collectionDueDate}` : ''}.`
+        : `Le versement déclaré pour ${order.reference} n’a pas pu être confirmé. Vérifiez la référence puis transmettez un nouveau justificatif.`,
+      targetRole: 'client' as const,
+      userId: order.userId,
+      read: false,
+    } : null;
+    if (clientNotification) store.notifications.unshift(clientNotification);
+    await saveStore(store, persistence);
+    if (clientNotification) scheduleBackgroundTask(sendPushForNotification(clientNotification), `validation du paiement ${order.reference}`);
+    res.json(order);
   }));
 
   app.patch('/api/orders/:id/expected-delivery', asyncHandler(async (req, res) => {

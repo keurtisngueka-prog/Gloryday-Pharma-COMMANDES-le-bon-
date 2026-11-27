@@ -741,9 +741,9 @@ export const DeliveryTrackingModal: React.FC<DeliveryTrackingModalProps> = ({
                       <div className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-slate-500">{order.customer.deliveryAddress || deliveryZone}</div>
                       {hasConfirmedOrderGps ? (
                         <div className="mt-2 rounded-xl bg-emerald-50 px-3 py-2 ring-1 ring-emerald-100">
-                          <div className="text-[9px] font-black uppercase tracking-wider text-emerald-800">GPS exact relevé à la commande</div>
+                          <div className="text-[9px] font-black uppercase tracking-wider text-emerald-800">Point GPS du téléphone à la commande</div>
                           <div className="mt-1 font-mono text-[11px] font-extrabold tabular-nums text-slate-900">{mapDestinationCoords.lat.toFixed(6)}, {mapDestinationCoords.lng.toFixed(6)}</div>
-                          <div className="mt-0.5 text-[10px] font-semibold text-slate-600">{Number.isFinite(coordinates!.accuracy) ? `Précision au relevé ±${Math.round(coordinates!.accuracy!)} m` : 'Position exacte confirmée'}</div>
+                          <div className="mt-0.5 text-[10px] font-semibold text-slate-600">{Number.isFinite(coordinates!.accuracy) ? `Précision indiquée par le téléphone ±${Math.round(coordinates!.accuracy!)} m` : 'Précision non fournie; vérifiez l’adresse de livraison.'}</div>
                         </div>
                       ) : (
                         <div className="mt-2 rounded-xl bg-blue-50 px-3 py-2 ring-1 ring-blue-100">

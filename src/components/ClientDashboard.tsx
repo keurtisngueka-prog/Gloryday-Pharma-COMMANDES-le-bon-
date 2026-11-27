@@ -6,6 +6,7 @@ import {
   Clock, 
   RotateCcw, 
   RefreshCw,
+  Pencil,
   FileText, 
   FileDown,
   MessageCircle, 
@@ -271,6 +272,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
 }) => {
   const [selectedPaymentOrder, setSelectedPaymentOrder] = useState<Order | null>(null);
   const [conversationOrder, setConversationOrder] = useState<Order | null>(null);
+  const [conversationIntent, setConversationIntent] = useState<'message' | 'modification'>('message');
   const [selectedActiveDeliveryId, setSelectedActiveDeliveryId] = useState('');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [remainderChoiceOrderId, setRemainderChoiceOrderId] = useState<string | null>(null);
@@ -361,6 +363,11 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     setCancelOrderReason('');
     setCancelOrderError('');
     setCancelOrderSucceeded(false);
+  };
+
+  const openOrderConversation = (order: Order, intent: 'message' | 'modification' = 'message') => {
+    setConversationIntent(intent);
+    setConversationOrder(order);
   };
 
   useEffect(() => {
@@ -1466,6 +1473,17 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
 
                           {/* Quick Action Buttons */}
                           <div className="flex items-center gap-2.5 flex-wrap pt-2 border-t border-slate-100">
+                            {order.status !== 'Annulée' && order.status !== 'Livrée' && (
+                              <button
+                                type="button"
+                                onClick={() => openOrderConversation(order, 'modification')}
+                                className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 whitespace-nowrap"
+                                title="Écrire à l’équipe pour demander une modification de cette commande"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                                Demander une modification
+                              </button>
+                            )}
                             {order.status === 'À confirmer' && (
                               <button type="button" onClick={() => { setCancelOrderId(order.id); setCancelOrderReason(''); setCancelOrderError(''); setCancelOrderSucceeded(false); }} className="py-1.5 px-2.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100 text-xs font-bold whitespace-nowrap">
                                 Annuler ma commande
@@ -2002,7 +2020,8 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                             {mp?.transactionReference && (
                               <div className="rounded-lg bg-amber-50 px-2.5 py-2 text-amber-900">
                                 <p className="font-bold">Justificatif {mp.provider === 'airtel_money' ? 'Airtel Money' : 'Moov Money'} · {mp.status === 'verified' ? 'référence vérifiée' : mp.status === 'failed' ? 'référence refusée' : 'en attente de vérification'}</p>
-                                <p className="mt-0.5">Référence : <span className="font-mono">{mp.transactionReference}</span>{mp.amount ? ` · Montant déclaré : ${mp.amount.toLocaleString('fr-FR')} FCFA` : ''}</p>
+                                <p className="mt-0.5">Référence : <span className="font-mono">{mp.transactionReference}</span>{mp.amount ? ` · ${mp.paymentType === 'partial' ? 'Versement partiel' : 'Versement total'} : ${mp.amount.toLocaleString('fr-FR')} FCFA` : ''}</p>
+                                {mp.paymentType === 'partial' && mp.plannedRemainderDueDate && <p className="mt-0.5">Date proposée pour le solde : {formatCollectionDueDate(mp.plannedRemainderDueDate)}</p>}
                                 <p className="mt-0.5">{mp.status === 'verified' ? 'Référence validée par Gloryday Pharma ; le montant confirmé figure dans le résumé de la commande.' : mp.status === 'failed' ? 'Référence refusée ; le montant n’est pas compté comme encaissé.' : 'Référence non encore validée ; le montant n’est pas compté comme encaissé.'}</p>
                               </div>
                             )}
@@ -2013,6 +2032,17 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
 
                     {/* Actions buttons */}
                     <div className="flex items-center gap-3 self-end lg:self-center flex-wrap">
+                      {order.status !== 'Annulée' && order.status !== 'Livrée' && (
+                        <button
+                          type="button"
+                          onClick={() => openOrderConversation(order, 'modification')}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 whitespace-nowrap"
+                          title="Écrire à l’équipe pour demander une modification de cette commande"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          <span>Demander une modification</span>
+                        </button>
+                      )}
                       {order.status === 'À confirmer' && (
                         <button type="button" onClick={() => { setCancelOrderId(order.id); setCancelOrderReason(''); setCancelOrderError(''); setCancelOrderSucceeded(false); }} className="py-1.5 px-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100 font-bold text-xs whitespace-nowrap">
                           Annuler ma commande
@@ -2022,15 +2052,16 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                         <button
                           type="button"
                           onClick={() => setSelectedPaymentOrder(order)}
+                          disabled={mp?.status === 'submitted'}
                           className={`py-1.5 px-3 rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer border shadow-2xs transition-colors whitespace-nowrap shrink-0 ${
                             mp?.status === 'verified'
                               ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
                               : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
                           }`}
-                          title={mp?.status === 'verified' ? 'Référence de paiement vérifiée. Le solde restant est affiché séparément.' : mp?.transactionReference ? 'Référence transmise, en attente de vérification.' : 'Transmettre une référence de paiement pour vérification.'}
+                          title={mp?.status === 'submitted' ? 'La demande est en cours de vérification.' : mp?.status === 'verified' ? 'Versement vérifié. Vous pouvez payer le solde restant.' : mp?.transactionReference ? 'Référence refusée : corrigez le justificatif.' : 'Transmettre une référence de paiement pour vérification.'}
                         >
                           <ShieldCheck className={`w-3.5 h-3.5 ${mp?.status === 'verified' ? 'text-emerald-600' : 'text-amber-600'}`} />
-                          <span>{mp?.status === 'verified' ? 'Référence vérifiée' : mp?.status === 'failed' ? 'Corriger le justificatif' : mp?.transactionReference ? 'Référence à vérifier' : 'Transmettre un justificatif'}</span>
+                          <span>{mp?.status === 'verified' ? 'Versement vérifié · payer le solde' : mp?.status === 'submitted' ? 'Versement en vérification' : mp?.status === 'failed' ? 'Corriger le justificatif' : 'Transmettre un justificatif'}</span>
                         </button>
                       )}
 
@@ -2046,7 +2077,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                         </button>
                       )}
 
-                      <button type="button" onClick={() => setConversationOrder(order)} className="py-1.5 px-3 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-bold text-xs flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 ml-2 sm:ml-3 sm:border-l-2 sm:border-l-indigo-200 sm:pl-4" title="Conversation privée avec l’équipe au sujet de cette commande; vous pourrez lire la réponse ici">
+                      <button type="button" onClick={() => openOrderConversation(order)} className="py-1.5 px-3 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-bold text-xs flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 ml-2 sm:ml-3 sm:border-l-2 sm:border-l-indigo-200 sm:pl-4" title="Conversation privée avec l’équipe au sujet de cette commande; vous pourrez lire la réponse ici">
                         <MessageCircle className="w-3.5 h-3.5" /><span>Échange sur la commande</span>
                       </button>
 
@@ -2114,15 +2145,17 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           onClose={() => setSelectedPaymentOrder(null)}
           order={selectedPaymentOrder}
           allOrders={orders}
-          onPaymentConfirmed={async (transactionId, operator) => {
+          onPaymentConfirmed={async ({ transactionId, operator, amount, paymentType, plannedRemainderDueDate }) => {
             await handleSaveMobilePayment({
               provider: operator,
               merchantPhone: operator === 'moov_money' ? '066240399' : '077003004',
+              paymentType,
               transactionReference: transactionId,
               senderPhone: selectedPaymentOrder.customer.phone,
               isPrePaid: false,
               status: 'submitted',
-              amount: selectedPaymentOrder.estimatedTotal
+              amount,
+              plannedRemainderDueDate
             });
           }}
         />
@@ -2135,7 +2168,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         />
       )}
       {conversationOrder && currentUser?.role === 'client' && (
-        <OrderConversationModal order={conversationOrder} currentUser={currentUser} onClose={() => setConversationOrder(null)} />
+        <OrderConversationModal order={conversationOrder} currentUser={currentUser} intent={conversationIntent} onClose={() => setConversationOrder(null)} />
       )}
       {cancelOrderId && (
         <div className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-950/55 p-4" role="dialog" aria-modal="true" aria-labelledby="client-cancel-order-title">

@@ -447,7 +447,11 @@ export function deductStockForOrder(
 
     // Déduction FEFO sur les lots existants pour ce produit
     const prodBatches = batches.filter(b => b.productId === prod.id && b.quantity > 0)
-      .sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime());
+      .sort((a, b) => {
+        const expiryA = a.expiryDate ? Date.parse(a.expiryDate) : Number.POSITIVE_INFINITY;
+        const expiryB = b.expiryDate ? Date.parse(b.expiryDate) : Number.POSITIVE_INFINITY;
+        return expiryA - expiryB;
+      });
 
     let needed = item.quantity;
     for (const b of prodBatches) {

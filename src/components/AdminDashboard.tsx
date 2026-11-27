@@ -88,6 +88,7 @@ interface AdminDashboardProps {
   notifications?: AppNotification[];
   onUpdateStatus: (orderId: string, status: OrderStatus, reason?: string) => Promise<void>;
   onUpdatePayment: (orderId: string, isPaid: boolean) => Promise<void>;
+  onVerifyMobilePayment: (orderId: string, approved: boolean) => Promise<void>;
   onCreatePack: (pack: Omit<Pack, 'id'>) => Promise<void>;
   onUpdatePack: (id: string, pack: Partial<Pack>) => Promise<void>;
   onDeletePack: (id: string) => Promise<void>;
@@ -113,6 +114,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   notifications = [],
   onUpdateStatus,
   onUpdatePayment,
+  onVerifyMobilePayment,
   onCreatePack,
   onUpdatePack,
   onDeletePack,
@@ -139,8 +141,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const canManageFinance = hasPerm('orders_finance_manage');
   const canManageOrderDiscount = role !== 'client';
   const canManagePayments = hasPerm('payments_manage') || hasPerm('receivables_payments_manage');
+  const canVerifyMobilePayments = hasPerm('payments_manage');
+  const reviewMobilePayment = async (order: Order, approved: boolean) => {
+    const payment = order.mobilePayment;
+    if (!payment) return;
+    const amountLabel = `${Number(payment.amount || 0).toLocaleString('fr-FR')} FCFA`;
+    const decision = approved
+      ? `Confirmer le versement de ${amountLabel} pour ${order.reference} et l’ajouter à l’historique des paiements ?`
+      : `Refuser la référence de paiement de ${order.reference} ? Le client pourra transmettre un nouveau justificatif.`;
+    if (!window.confirm(decision)) return;
+    try {
+      await onVerifyMobilePayment(order.id, approved);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'La vérification du versement a échoué. Actualisez et réessayez.');
+    }
+  };
   const canOpenOrderFinanceModal = onOpenFinanceModal && (
-    hasPerm('orders_finance_view') || canManageFinance || hasPerm('payments_manage') ||
+    hasPerm('orders_finance_view') || hasPerm('orders_invoice_correct') || canManageFinance || hasPerm('payments_manage') ||
     hasPerm('receivables_view') || hasPerm('receivables_payments_manage') ||
     hasPerm('receivables_reminders_manage') || hasPerm('logistics_manage')
   );
@@ -1209,6 +1226,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         ) : (
                           <span className="text-[10px] text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
                             ⏳ En attente Réf SMS
+                          </span>
+                        )}
+                        {order.mobilePayment?.amount !== undefined && (
+                          <span className="text-[10px] font-bold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+                            {order.mobilePayment.paymentType === 'partial' ? 'Partiel' : 'Total'} · {order.mobilePayment.amount.toLocaleString('fr-FR')} FCFA
+                          </span>
+                        )}
+                        {order.mobilePayment?.paymentType === 'partial' && order.mobilePayment.plannedRemainderDueDate && (
+                          <span className="text-[10px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                            Solde proposé : {formatCollectionDueDate(order.mobilePayment.plannedRemainderDueDate)}
+                          </span>
+                        )}
+                        {order.mobilePayment?.status === 'submitted' && canVerifyMobilePayments && (
+                          <span className="inline-flex items-center gap-1">
+                            <button type="button" onClick={() => void reviewMobilePayment(order, false)} className="rounded-lg border border-rose-200 bg-white px-2 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-50">Refuser</button>
+                            <button type="button" onClick={() => void reviewMobilePayment(order, true)} className="rounded-lg bg-emerald-700 px-2 py-1 text-[10px] font-bold text-white hover:bg-emerald-800">Confirmer le versement</button>
                           </span>
                         )}
                       </div>

@@ -129,6 +129,7 @@ export interface Coordinates {
 export interface MobilePaymentDetails {
   provider: 'airtel_money' | 'moov_money';
   merchantPhone: string;
+  paymentType?: 'total' | 'partial';
   transactionReference?: string;
   senderPhone?: string;
   isPrePaid?: boolean;
@@ -136,6 +137,7 @@ export interface MobilePaymentDetails {
   screenshotUrl?: string;
   status?: 'pending' | 'submitted' | 'verified' | 'failed';
   amount?: number;
+  plannedRemainderDueDate?: string;
   ussdDialCode?: string;
   operatorNotes?: string;
 }
@@ -391,6 +393,8 @@ export interface Order {
   cancellationReason?: string;
   isPaid: boolean;
   amountPaid?: number;
+  /** Confirmed balance carried forward from older orders before installment history was introduced. */
+  legacyPaidAmount?: number;
   collectionDueDate?: string;
   installments?: PaymentInstallment[];
   invoices?: InvoiceRecord[];

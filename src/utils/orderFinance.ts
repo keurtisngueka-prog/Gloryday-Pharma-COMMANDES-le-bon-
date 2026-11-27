@@ -4,26 +4,31 @@ import { getOrderBillingTotal } from './orderFulfillment.js';
 export function createShortInvoiceNumber(type: 'facture' | 'avoir', date = new Date()): string {
   const prefix = type === 'facture' ? 'FAC' : 'AV';
   const year = String(date.getFullYear()).slice(-2);
-  const token = typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()
-    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.replace(/[^A-Z0-9]/gi, '').slice(-12).toUpperCase();
+  const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const randomValues = new Uint8Array(8);
+  const hasSecureRandom = typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function';
+  if (hasSecureRandom) crypto.getRandomValues(randomValues);
+  const token = hasSecureRandom
+    ? Array.from(randomValues, (value) => alphabet[value % alphabet.length]).join('')
+    : Math.random().toString(36).slice(2, 10).padEnd(8, '0').toUpperCase();
   return `${prefix}-${year}-${token}`;
 }
 
 export const FREE_DELIVERY_THRESHOLD_FCFA = 30_000;
 
 type FinanceOrder = Pick<Order, 'estimatedTotal' | 'isPaid' | 'amountPaid' | 'installments' | 'status'> &
+  Partial<Pick<Order, 'legacyPaidAmount'>> &
   Partial<Pick<Order, 'invoices' | 'deliveryFulfillments'>>;
 
 export function getOrderPaidAmount(order: FinanceOrder): number {
   if (order.status === 'Annulée') return 0;
   const total = getOrderBillingTotal(order);
-  if (order.installments?.length) {
-    const confirmed = order.installments.reduce(
+  if (order.installments?.length || Number(order.legacyPaidAmount) > 0) {
+    const confirmed = (order.installments || []).reduce(
       (sum, installment) => sum + (installment.status === 'valide' ? Math.max(0, Math.trunc(Number(installment.amount) || 0)) : 0),
       0,
     );
-    return confirmed;
+    return confirmed + Math.max(0, Math.trunc(Number(order.legacyPaidAmount) || 0));
   }
   if (order.isPaid && (!Number.isFinite(Number(order.amountPaid)) || Number(order.amountPaid) <= 0)) {
     return Math.max(total, Math.max(0, Math.trunc(Number(order.estimatedTotal) || 0)));

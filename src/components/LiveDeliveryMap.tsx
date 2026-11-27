@@ -97,6 +97,7 @@ export function LiveDeliveryMap({ points, destination, destinationLabel }: LiveD
       coordinates: points.slice(-400).map((point) => [point.longitude, point.latitude]),
     },
   }), [points]);
+  const destinationIsApproximate = destination?.source === 'neighborhood';
 
   useEffect(() => {
     const mapContainer = containerRef.current;
@@ -303,17 +304,18 @@ export function LiveDeliveryMap({ points, destination, destinationLabel }: LiveD
           <span className={`h-2.5 w-2.5 rounded-full ${latest ? 'animate-pulse bg-emerald-500' : 'bg-amber-400'}`} />
           {latest ? 'Position GPS du coursier' : 'GPS coursier en attente'}
         </span>
-        {destination && <span className="rounded-full border border-white/80 bg-white/95 px-3 py-2 text-[10px] font-extrabold text-slate-900 shadow-md backdrop-blur">Destination client</span>}
+        {destination && <span className={`rounded-full border border-white/80 px-3 py-2 text-[10px] font-extrabold shadow-md backdrop-blur ${destinationIsApproximate ? 'bg-amber-50/95 text-amber-900' : 'bg-emerald-50/95 text-emerald-900'}`}>{destinationIsApproximate ? 'Quartier indicatif' : 'GPS du client'}</span>}
       </div>
       <div className="absolute bottom-3 left-3 z-10 max-w-[78%] rounded-2xl border border-white/80 bg-white/95 px-3 py-2.5 text-[10px] font-semibold leading-relaxed text-slate-700 shadow-lg backdrop-blur">
         {routeState === 'loading' && 'Calcul du trajet routier…'}
-        {routeState === 'ready' && routeSummary && <><strong className="text-emerald-900">Trajet par les rues</strong> · {(routeSummary.distance / 1000).toFixed(1)} km · {Math.max(1, Math.round(routeSummary.duration / 60))} min estimées · OSRM</>}
+        {routeState === 'ready' && routeSummary && <><strong className="text-emerald-900">{destinationIsApproximate ? 'Trajet indicatif vers le quartier' : 'Trajet vers le point GPS relevé'}</strong> · {(routeSummary.distance / 1000).toFixed(1)} km · {Math.max(1, Math.round(routeSummary.duration / 60))} min estimées · OSRM</>}
         {routeState === 'unavailable' && 'Trajet routier indisponible pour le moment. Les positions GPS réelles restent affichées.'}
         {routeState === 'idle' && latest && !destination && 'Position GPS réelle du coursier.'}
-        {routeState === 'idle' && !latest && destination && `Destination GPS${destinationLabel ? ` · ${destinationLabel}` : ''} · en attente du coursier`}
+        {routeState === 'idle' && !latest && destination && `${destinationIsApproximate ? 'Quartier indicatif' : 'Point GPS relevé'}${destinationLabel ? ` · ${destinationLabel}` : ''} · en attente du coursier`}
         {latest && <span className="mt-0.5 block text-[9px] text-slate-500">Dernière position {new Date(latest.recordedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}{typeof latest.accuracy === 'number' ? ` · précision ±${Math.round(latest.accuracy)} m` : ''} · estimation sans trafic en direct</span>}
         <span className="mt-0.5 block text-[9px] text-slate-500">Fond : OpenFreeMap · données OpenStreetMap</span>
-        {destination?.source === 'neighborhood' && <span className="block text-[9px] font-semibold text-amber-800">Destination indicative du quartier : active le GPS client pour la porte exacte.</span>}
+        {destinationIsApproximate && <span className="block text-[9px] font-semibold text-amber-800">Le repère correspond au quartier, pas à l’entrée exacte. Le GPS du téléphone peut préciser l’adresse.</span>}
+        {destination?.source === 'checkout' && <span className="block text-[9px] font-semibold text-emerald-800">Point GPS relevé sur le téléphone à la commande; vérifiez qu’il se trouvait bien à l’adresse de livraison.</span>}
       </div>
       <button type="button" onClick={recenter} aria-label="Recentrer la carte sur le coursier et la destination" className="absolute bottom-3 right-3 z-10 flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white/95 text-lg font-black text-emerald-800 shadow-lg transition hover:bg-emerald-50">⌖</button>
     </div>
