@@ -16,7 +16,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import { Order, User, Courier, PaymentInstallment, InvoiceRecord, InvoiceLineItem, Product } from '../types';
-import { formatCollectionDueDate, getOrderCreditBalance, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
+import { createShortInvoiceNumber, formatCollectionDueDate, getOrderCreditBalance, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
 import { getOrderBillingTotal } from '../utils/orderFulfillment';
 import { normalizeCourierPhone } from '../utils/courierDirectory';
 import { logAuditEvent } from '../utils/auditLogger';
@@ -256,12 +256,7 @@ export const OrderFinanceModal: React.FC<OrderFinanceModalProps> = ({
     invoiceSubmitLockRef.current = true;
     try {
     const isFacture = invoiceType === 'facture';
-    const documentYear = new Date().getFullYear();
-    const orderCode = order.reference.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-    const sequence = String((order.invoices || []).length + 1).padStart(2, '0');
-    const num = isFacture
-      ? `FAC-${documentYear}-${orderCode}-${sequence}`
-      : `AVOIR-${documentYear}-${orderCode}-${sequence}`;
+    const num = createShortInvoiceNumber(invoiceType);
 
     const deliveryTrackingActive = (order.deliveryFulfillments || []).length > 0;
     const baseAmount = isFacture

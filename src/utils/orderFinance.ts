@@ -1,6 +1,15 @@
 import type { Order } from '../types';
 import { getOrderBillingTotal } from './orderFulfillment.js';
 
+export function createShortInvoiceNumber(type: 'facture' | 'avoir', date = new Date()): string {
+  const prefix = type === 'facture' ? 'FAC' : 'AV';
+  const year = String(date.getFullYear()).slice(-2);
+  const token = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.replace(/[^A-Z0-9]/gi, '').slice(-12).toUpperCase();
+  return `${prefix}-${year}-${token}`;
+}
+
 export const FREE_DELIVERY_THRESHOLD_FCFA = 30_000;
 
 type FinanceOrder = Pick<Order, 'estimatedTotal' | 'isPaid' | 'amountPaid' | 'installments' | 'status'> &

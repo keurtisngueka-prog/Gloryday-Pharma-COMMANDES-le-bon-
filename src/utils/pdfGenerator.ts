@@ -16,6 +16,24 @@ export const normalizePdfText = (value: unknown): string =>
     .replace(/œ/g, 'oe')
     .replace(/Œ/g, 'OE');
 
+function formatConcisePdfAddress(addressValue: unknown, cityValue: unknown): string {
+  const city = String(cityValue || '').trim();
+  const addressParts = String(addressValue || '').split(/[·,;|]+/).map((part) => part.trim()).filter(Boolean);
+  const usefulParts = addressParts.filter((part) => {
+    const normalized = part.toLocaleLowerCase('fr');
+    return normalized !== 'gabon'
+      && normalized !== city.toLocaleLowerCase('fr')
+      && !/^zone\s*\d+/i.test(part)
+      && !/^\d+\s*(?:er|e|ème)\s+arrondissement/i.test(part)
+      && !/^rep[eè]re\s*:?/i.test(part);
+  });
+  const conciseAddress = usefulParts.join(', ');
+  if (city && conciseAddress && !conciseAddress.toLocaleLowerCase('fr').includes(city.toLocaleLowerCase('fr'))) {
+    return `${conciseAddress}, ${city}`;
+  }
+  return conciseAddress || city || 'Non renseignée';
+}
+
 function readBlobAsDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -86,7 +104,9 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
   const logoDataUrl = await loadBrandLogoDataUrl();
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const blue = [13, 68, 232];
+  const green = [34, 112, 70];
+  const rule = [195, 216, 202];
+  const pale = [242, 249, 244];
   const ink = [22, 22, 24];
   const muted = [106, 106, 107];
   const margin = 14;
@@ -109,7 +129,7 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
   const orderDate = Number.isNaN(createdAt.getTime()) ? 'Date non précisée' : text(createdAt.toLocaleDateString('fr-FR'));
 
   const drawHeader = () => {
-    doc.setFillColor(blue[0], blue[1], blue[2]);
+    doc.setFillColor(green[0], green[1], green[2]);
     doc.rect(0, 0, pageWidth, 28, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
@@ -167,11 +187,11 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
     : order.customer.secondaryPhone ? proformaSecondaryPhoneY : proformaPhoneY;
   const clientBoxBottom = Math.max(91, leftClientBottom, notesLines.length ? notesY + notesLines.length * 4 : paymentY + 5) + 4;
 
-  doc.setFillColor(241, 245, 249);
+  doc.setFillColor(pale[0], pale[1], pale[2]);
   doc.roundedRect(margin, clientBoxTop, contentWidth, clientBoxBottom - clientBoxTop, 2, 2, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9.5);
-  doc.setTextColor(blue[0], blue[1], blue[2]);
+  doc.setTextColor(green[0], green[1], green[2]);
   doc.text('CLIENT / DESTINATAIRE', leftColumnX, 68);
   doc.setFontSize(9);
   doc.setTextColor(ink[0], ink[1], ink[2]);
@@ -190,7 +210,7 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
   if (notesLines.length) doc.text(notesLines, rightColumnX, notesY);
 
   const drawTableHeader = (top: number) => {
-    doc.setFillColor(blue[0], blue[1], blue[2]);
+    doc.setFillColor(green[0], green[1], green[2]);
     doc.rect(margin, top, contentWidth, 8, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
@@ -274,7 +294,7 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
 
   const totalsBoxX = pageWidth - margin - 92;
   const totalsBoxWidth = 92;
-  doc.setFillColor(241, 245, 249);
+  doc.setFillColor(pale[0], pale[1], pale[2]);
   doc.roundedRect(totalsBoxX, y, totalsBoxWidth, boxHeight, 2, 2, 'F');
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'normal');
@@ -300,7 +320,7 @@ export async function generateOrderPdf(order: Order): Promise<{ blob: Blob; data
   totalY += 7;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
-  doc.setTextColor(blue[0], blue[1], blue[2]);
+  doc.setTextColor(green[0], green[1], green[2]);
   doc.text(text('TOTAL ESTIMÉ'), totalsBoxX + 4, totalY);
   doc.text(`${formatPdfAmount(orderTotal)} FCFA`, pageWidth - margin - 4, totalY, { align: 'right' });
 
@@ -518,6 +538,7 @@ export async function generateInvoiceProjectPdf(
   const rule = [195, 216, 202];
   const pale = [242, 249, 244];
   const text = (value: unknown) => normalizePdfText(value);
+  const printableAddress = formatConcisePdfAddress(order.customer.deliveryAddress, order.customer.city);
   const title = invoice.type === 'facture' ? 'FACTURE' : 'AVOIR';
   const paymentLabels: Record<string, string> = {
     especes: 'Espèces', airtel_money: 'Airtel Money', moov_money: 'Moov Money',
@@ -608,7 +629,7 @@ export async function generateInvoiceProjectPdf(
   }
   const phones = [order.customer.phone, order.customer.secondaryPhone].filter(Boolean).join(' · ');
   doc.text(text(`Tél. : ${phones || 'Non renseigné'}`), margin + 105, clientTop + 13, { maxWidth: contentWidth - 109 });
-  doc.text(text(`Adresse : ${order.customer.deliveryAddress || 'Non renseignée'}`), margin + 105, clientTop + 20, { maxWidth: contentWidth - 109 });
+  doc.text(text(`Adresse : ${printableAddress}`), margin + 105, clientTop + 20, { maxWidth: contentWidth - 109 });
 
   const columns = [23, 70, 13, 26, 20, 30];
   const x = [margin];
@@ -637,7 +658,10 @@ export async function generateInvoiceProjectPdf(
   };
 
   const includeStamp = invoice.includeStamp === true;
-  const finalContentReserve = includeStamp ? 108 : 76;
+  const paidAmount = Math.min(invoice.totalTTC, getOrderPaidAmount(order));
+  const remainingAmount = Math.min(invoice.totalTTC, getOrderRemainingBalance(order));
+  const showPaymentPanel = remainingAmount > 0;
+  const finalContentReserve = 112;
   const finalContentLimit = pageHeight - finalContentReserve;
   let y = clientTop + clientHeight + 5;
   drawTableHeader(y);
@@ -732,46 +756,41 @@ export async function generateInvoiceProjectPdf(
   x.forEach((edge) => doc.line(edge, itemRowsEnd, edge, tableBottom));
   doc.line(margin, tableBottom, pageWidth - margin, tableBottom);
 
-  const paidAmount = Math.min(invoice.totalTTC, getOrderPaidAmount(order));
-  const remainingAmount = Math.min(invoice.totalTTC, getOrderRemainingBalance(order));
   const paymentMethod = order.customer.paymentMethod || '';
-  const paymentStatus = remainingAmount <= 0
-    ? 'Soldé'
-    : paymentMethod === 'en_compte'
-      ? (paidAmount > 0 ? 'En compte · acompte reçu' : 'En compte')
-      : paidAmount > 0
-        ? 'Avance reçue · solde dû'
-        : 'À régler';
-  const dueDate = order.collectionDueDate
-    ? order.collectionDueDate.split('-').reverse().join('/')
-    : paymentMethod === 'en_compte' ? 'À fixer' : 'Immédiate';
-  const paidLabel = remainingAmount <= 0 ? 'Montant réglé' : 'Avance reçue';
+  const paymentStatus = paymentMethod === 'en_compte'
+    ? (paidAmount > 0 ? 'Paiement en compte · acompte reçu' : 'Paiement en compte')
+    : paidAmount > 0 ? 'Acompte reçu · solde dû' : 'À régler';
+  const dueDate = order.collectionDueDate ? order.collectionDueDate.split('-').reverse().join('/') : '';
 
   const paymentX = margin;
   const summaryY = tableBottom + 7;
   const panelGap = 8;
   const panelWidth = (contentWidth - panelGap) / 2;
   const paymentHeight = 48;
-  doc.setFillColor(pale[0], pale[1], pale[2]);
-  doc.setDrawColor(rule[0], rule[1], rule[2]);
-  doc.rect(paymentX, summaryY, panelWidth, paymentHeight, 'FD');
-  doc.setFont('times', 'bold');
-  doc.setFontSize(8.2);
-  doc.setTextColor(stampBlue[0], stampBlue[1], stampBlue[2]);
-  doc.text('PAIEMENT', paymentX + 4, summaryY + 6);
-  doc.setFont('times', 'normal');
-  doc.setFontSize(7.4);
-  doc.setTextColor(ink[0], ink[1], ink[2]);
-  doc.text(text(`Mode : ${paymentLabels[paymentMethod] || 'À convenir'}`), paymentX + 4, summaryY + 13, { maxWidth: panelWidth - 8 });
-  doc.text(text(`Situation : ${paymentStatus}`), paymentX + 4, summaryY + 20, { maxWidth: panelWidth - 8 });
-  doc.text(text(`${paidLabel} : ${formatPdfAmount(paidAmount)} F CFA`), paymentX + 4, summaryY + 27);
-  doc.setFont('times', 'bold');
-  doc.text(text(`Solde à régler : ${formatPdfAmount(remainingAmount)} F CFA`), paymentX + 4, summaryY + 34);
-  doc.setFont('times', 'normal');
-  doc.text(text(`Échéance : ${dueDate}`), paymentX + 4, summaryY + 40);
+  if (showPaymentPanel) {
+    doc.setFillColor(pale[0], pale[1], pale[2]);
+    doc.setDrawColor(rule[0], rule[1], rule[2]);
+    doc.rect(paymentX, summaryY, panelWidth, paymentHeight, 'FD');
+    doc.setFont('times', 'bold');
+    doc.setFontSize(8.2);
+    doc.setTextColor(stampBlue[0], stampBlue[1], stampBlue[2]);
+    doc.text('PAIEMENT À COMPLÉTER', paymentX + 4, summaryY + 6);
+    doc.setFont('times', 'normal');
+    doc.setFontSize(7.4);
+    doc.setTextColor(ink[0], ink[1], ink[2]);
+    doc.text(text(`Mode : ${paymentLabels[paymentMethod] || 'À convenir'}`), paymentX + 4, summaryY + 13, { maxWidth: panelWidth - 8 });
+    doc.text(text(`Situation : ${paymentStatus}`), paymentX + 4, summaryY + 20, { maxWidth: panelWidth - 8 });
+    if (paidAmount > 0) doc.text(text(`Déjà réglé : ${formatPdfAmount(paidAmount)} F CFA`), paymentX + 4, summaryY + 27);
+    doc.setFont('times', 'bold');
+    doc.text(text(`Solde à régler : ${formatPdfAmount(remainingAmount)} F CFA`), paymentX + 4, summaryY + 34);
+    if (dueDate) {
+      doc.setFont('times', 'normal');
+      doc.text(text(`Échéance : ${dueDate}`), paymentX + 4, summaryY + 41);
+    }
+  }
 
-  const totalsX = paymentX + panelWidth + panelGap;
-  const totalsWidth = panelWidth;
+  const totalsX = showPaymentPanel ? paymentX + panelWidth + panelGap : paymentX;
+  const totalsWidth = showPaymentPanel ? panelWidth : contentWidth;
   const totalsHeight = paymentHeight;
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(rule[0], rule[1], rule[2]);
@@ -798,26 +817,44 @@ export async function generateInvoiceProjectPdf(
   doc.setFontSize(9.5);
   totalRow('Total TTC', invoice.totalTTC, summaryY + 40, true);
 
-  // Keep the stamp in its own lower-left area, without an extra container around it.
-  if (includeStamp) {
-  const stampWidth = 78;
-  const stampHeight = 24;
-  const stampX = margin;
-  const stampY = Math.min(summaryY + paymentHeight + 10, pageHeight - stampHeight - 19);
-  doc.setDrawColor(stampBlue[0], stampBlue[1], stampBlue[2]);
-  doc.setLineWidth(0.75);
-  doc.rect(stampX, stampY, stampWidth, stampHeight, 'S');
+  const signatureTop = Math.min(summaryY + paymentHeight + 10, pageHeight - 43);
+  const signatureGap = 8;
+  const signatureWidth = (contentWidth - signatureGap) / 2;
+  const stampX = margin + signatureWidth + signatureGap;
+  doc.setDrawColor(rule[0], rule[1], rule[2]);
   doc.setLineWidth(0.35);
-  doc.rect(stampX + 1.2, stampY + 1.2, stampWidth - 2.4, stampHeight - 2.4, 'S');
-  doc.setTextColor(stampBlue[0], stampBlue[1], stampBlue[2]);
+  doc.rect(margin, signatureTop, signatureWidth, 24, 'S');
+  doc.rect(stampX, signatureTop, signatureWidth, 24, 'S');
+  doc.setTextColor(muted[0], muted[1], muted[2]);
   doc.setFont('times', 'bold');
-  doc.setFontSize(9.2);
-  doc.text('GLORYDAY PHARMA', stampX + stampWidth / 2, stampY + 8, { align: 'center' });
+  doc.setFontSize(7.2);
+  doc.text('SIGNATURE DU CLIENT', margin + 4, signatureTop + 5.5);
   doc.setFont('times', 'normal');
-  doc.setFontSize(6.1);
-  doc.text(text('Consommables, r\u00e9actifs, \u00e9quipements m\u00e9dicaux'), stampX + stampWidth / 2, stampY + 14.5, { align: 'center' });
-  doc.setFontSize(6.4);
-  doc.text('+241 77 00 30 04 / +241 66 24 03 99', stampX + stampWidth / 2, stampY + 20, { align: 'center' });
+  doc.setFontSize(6.8);
+  doc.text('Nom, date et signature', margin + 4, signatureTop + 21);
+  if (includeStamp) {
+    doc.setDrawColor(stampBlue[0], stampBlue[1], stampBlue[2]);
+    doc.setLineWidth(0.75);
+    doc.rect(stampX + 2, signatureTop + 2, signatureWidth - 4, 20, 'S');
+    doc.setLineWidth(0.35);
+    doc.rect(stampX + 3.2, signatureTop + 3.2, signatureWidth - 6.4, 17.6, 'S');
+    doc.setTextColor(stampBlue[0], stampBlue[1], stampBlue[2]);
+    doc.setFont('times', 'bold');
+    doc.setFontSize(8.5);
+    doc.text('GLORYDAY PHARMA', stampX + signatureWidth / 2, signatureTop + 9, { align: 'center' });
+    doc.setFont('times', 'normal');
+    doc.setFontSize(5.8);
+    doc.text(text('Consommables, réactifs, équipements médicaux'), stampX + signatureWidth / 2, signatureTop + 14, { align: 'center' });
+    doc.setFontSize(6);
+    doc.text('+241 77 00 30 04 / +241 66 24 03 99', stampX + signatureWidth / 2, signatureTop + 19, { align: 'center' });
+  } else {
+    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.setFont('times', 'bold');
+    doc.setFontSize(7.2);
+    doc.text('CACHET DE L’ENTREPRISE', stampX + 4, signatureTop + 5.5);
+    doc.setFont('times', 'normal');
+    doc.setFontSize(6.8);
+    doc.text('À apposer si nécessaire', stampX + 4, signatureTop + 21);
   }
   const pageCount = doc.getNumberOfPages();
   for (let page = 1; page <= pageCount; page += 1) {
@@ -849,7 +886,9 @@ export async function downloadDeliveryNotePdf(order: Order): Promise<void> {
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;
   const contentWidth = pageWidth - margin * 2;
-  const blue = [13, 68, 232];
+  const green = [34, 112, 70];
+  const rule = [195, 216, 202];
+  const pale = [242, 249, 244];
   const ink = [22, 22, 24];
   const muted = [100, 116, 139];
   const text = (value: unknown) => normalizePdfText(value);
@@ -860,7 +899,7 @@ export async function downloadDeliveryNotePdf(order: Order): Promise<void> {
 
   const drawHeader = (newPage = false) => {
     if (newPage) doc.addPage();
-    doc.setFillColor(blue[0], blue[1], blue[2]);
+    doc.setFillColor(green[0], green[1], green[2]);
     doc.rect(0, 0, pageWidth, 29, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
@@ -890,9 +929,9 @@ export async function downloadDeliveryNotePdf(order: Order): Promise<void> {
   };
 
   drawHeader();
-  doc.setFillColor(241, 245, 249);
+  doc.setFillColor(pale[0], pale[1], pale[2]);
   doc.roundedRect(margin, 50, contentWidth, 29, 2, 2, 'F');
-  doc.setTextColor(blue[0], blue[1], blue[2]);
+  doc.setTextColor(green[0], green[1], green[2]);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.text('DESTINATAIRE', margin + 4, 57);
@@ -903,20 +942,33 @@ export async function downloadDeliveryNotePdf(order: Order): Promise<void> {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.text(text(`${order.customer.contactName || 'Contact'} · ${order.customer.phone}`), margin + 4, 70);
-  doc.text(text(order.customer.deliveryAddress || 'Adresse à confirmer'), pageWidth / 2 + 4, 64, { maxWidth: pageWidth / 2 - margin - 8 });
+  const conciseDeliveryAddress = formatConcisePdfAddress(order.customer.deliveryAddress, order.customer.city);
+  const printableDeliveryAddress = conciseDeliveryAddress === 'Non renseignée' ? 'Adresse à confirmer' : conciseDeliveryAddress;
+  doc.text(text(printableDeliveryAddress), pageWidth / 2 + 4, 64, { maxWidth: pageWidth / 2 - margin - 8 });
   doc.text(text(order.customer.deliveryMode === 'retrait' ? 'Retrait au dépôt' : `Livraison · ${order.courier?.name || 'Coursier à affecter'}`), pageWidth / 2 + 4, 70);
 
+  const columns = [25, 67, 18, 20, 17, 35];
+  const x = [margin];
+  columns.forEach((width) => x.push(x[x.length - 1] + width));
+  const referenceX = x[0] + 2.5;
+  const designationX = x[1] + 2.5;
+  const quantityX = x[2] + columns[2] / 2;
+  const deliveredX = x[3] + columns[3] / 2;
+  const remainingX = x[4] + columns[4] / 2;
   const drawTableHeader = (top: number) => {
-    doc.setFillColor(blue[0], blue[1], blue[2]);
+    doc.setFillColor(green[0], green[1], green[2]);
     doc.rect(margin, top, contentWidth, 8, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
-    doc.text('Article / conditionnement', margin + 3, top + 5.5);
-    doc.text('Commandée', 104, top + 5.5, { align: 'center' });
-    doc.text('Remise cumulée', 137, top + 5.5, { align: 'center' });
-    doc.text('Reste', 164, top + 5.5, { align: 'center' });
+    doc.text('Référence', referenceX, top + 5.5);
+    doc.text('Désignation / conditionnement', designationX, top + 5.5);
+    doc.text('Qté', quantityX, top + 5.5, { align: 'center' });
+    doc.text('Déjà remise', deliveredX, top + 5.5, { align: 'center' });
+    doc.text('Reste', remainingX, top + 5.5, { align: 'center' });
     doc.text('Lot / remarque', pageWidth - margin - 3, top + 5.5, { align: 'right' });
+    doc.setDrawColor(255, 255, 255);
+    x.forEach((edge) => doc.line(edge, top, edge, top + 8));
   };
 
   let y = 87;
@@ -926,7 +978,7 @@ export async function downloadDeliveryNotePdf(order: Order): Promise<void> {
     const label = item.variant && item.variant !== 'Standard'
       ? `${text(item.productName)} (${text(item.variant)})`
       : text(item.productName);
-    const lines = doc.splitTextToSize(label || 'Article', 91);
+    const lines = doc.splitTextToSize(label || 'Article', columns[1] - 6);
     const rowHeight = Math.max(9, lines.length * 4.2 + 3);
     if (y + rowHeight > pageHeight - 47) {
       drawHeader(true);
@@ -935,23 +987,28 @@ export async function downloadDeliveryNotePdf(order: Order): Promise<void> {
       y += 8;
     }
     if (index % 2 === 0) {
-      doc.setFillColor(248, 250, 252);
+      doc.setFillColor(pale[0], pale[1], pale[2]);
       doc.rect(margin, y, contentWidth, rowHeight, 'F');
     }
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(ink[0], ink[1], ink[2]);
-    doc.text(lines, margin + 3, y + 4.5);
+    doc.text(lines, designationX, y + 4.5);
     const deliveredQuantity = (order.deliveryFulfillments || []).reduce((sum, fulfillment) => sum + fulfillment.lines
       .filter((line) => line.itemIndex === index)
       .reduce((lineSum, line) => lineSum + line.quantity, 0), 0);
     const remainingQuantity = Math.max(0, (Number(item.quantity) || 0) - deliveredQuantity);
-    doc.text(String(Math.max(0, Number(item.quantity) || 0)), 104, y + 5, { align: 'center' });
-    doc.text(String(deliveredQuantity), 137, y + 5, { align: 'center' });
-    doc.text(String(remainingQuantity), 164, y + 5, { align: 'center' });
+    doc.setFontSize(8);
+    doc.setTextColor(green[0], green[1], green[2]);
+    doc.text(text(item.productReference || '—'), referenceX, y + 5);
+    doc.setTextColor(ink[0], ink[1], ink[2]);
+    doc.text(String(Math.max(0, Number(item.quantity) || 0)), quantityX, y + 5, { align: 'center' });
+    doc.text(String(deliveredQuantity), deliveredX, y + 5, { align: 'center' });
+    doc.text(String(remainingQuantity), remainingX, y + 5, { align: 'center' });
     doc.setDrawColor(148, 163, 184);
-    doc.line(180, y + rowHeight - 2, 194, y + rowHeight - 2);
-    doc.setDrawColor(226, 232, 240);
+    doc.line(x[5] + 2, y + rowHeight - 2, x[6] - 2, y + rowHeight - 2);
+    doc.setDrawColor(rule[0], rule[1], rule[2]);
+    x.forEach((edge) => doc.line(edge, y, edge, y + rowHeight));
     doc.line(margin, y + rowHeight, pageWidth - margin, y + rowHeight);
     y += rowHeight;
   });
@@ -1001,7 +1058,7 @@ export async function downloadDeliveryNotePdf(order: Order): Promise<void> {
   const pageCount = doc.getNumberOfPages();
   for (let page = 1; page <= pageCount; page += 1) {
     doc.setPage(page);
-    doc.setDrawColor(226, 232, 240);
+    doc.setDrawColor(rule[0], rule[1], rule[2]);
     doc.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);

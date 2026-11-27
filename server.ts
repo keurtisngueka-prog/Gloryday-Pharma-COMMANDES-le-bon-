@@ -5715,20 +5715,18 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         res.status(409).json({ error: 'La limite de documents de cette commande est atteinte.' });
         return;
       }
-      const orderCode = order.reference.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-      const documentYear = new Date().getFullYear();
+      const documentYear = String(new Date().getFullYear()).slice(-2);
       const invoiceNumbers = new Set(persistedInvoiceNumbers || store.orders.flatMap((saved) => (saved.invoices || []).map((invoice) => invoice.number)));
-      let sequence = currentInvoices.length + 1;
       let creditNumber = '';
       let replacementNumber = '';
-      while (sequence < 10000) {
-        const suffix = String(sequence).padStart(2, '0');
-        creditNumber = `AVOIR-${documentYear}-${orderCode}-${suffix}`;
-        replacementNumber = `FAC-${documentYear}-${orderCode}-${suffix}`;
-        if (!invoiceNumbers.has(creditNumber) && !invoiceNumbers.has(replacementNumber)) break;
-        sequence += 1;
-      }
-      if (sequence >= 10000) {
+      let numberAttempts = 0;
+      do {
+        const token = randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase();
+        creditNumber = `AV-${documentYear}-${token}`;
+        replacementNumber = `FAC-${documentYear}-${token}`;
+        numberAttempts += 1;
+      } while ((invoiceNumbers.has(creditNumber) || invoiceNumbers.has(replacementNumber)) && numberAttempts < 10);
+      if (invoiceNumbers.has(creditNumber) || invoiceNumbers.has(replacementNumber)) {
         res.status(409).json({ error: 'Aucun numéro de facture disponible pour enregistrer cette correction.' });
         return;
       }
@@ -5884,7 +5882,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         res.status(400).json({ error: 'Le choix du cachet sur le document est invalide.' });
         return;
       }
-      const numberMatchesType = type === 'facture' ? /^FAC-\d{4}-[A-Z0-9-]+$/.test(number) : /^AVOIR-\d{4}-[A-Z0-9-]+$/.test(number);
+      const numberMatchesType = type === 'facture'
+        ? /^(?:FAC-\d{4}-[A-Z0-9-]+|FAC-\d{2}-[A-Z0-9]{12})$/.test(number)
+        : /^(?:AVOIR-\d{4}-[A-Z0-9-]+|AV-\d{2}-[A-Z0-9]{12})$/.test(number);
       if (!type || !numberMatchesType || invoiceNumbers.has(number) ||
           !/^\d{4}-\d{2}-\d{2}$/.test(issueDate) || !Number.isFinite(Date.parse(issueDate)) ||
           !Number.isFinite(requestedTvaRate) || requestedTvaRate !== INVOICE_TVA_RATE || (type === 'avoir' && !reason)) {

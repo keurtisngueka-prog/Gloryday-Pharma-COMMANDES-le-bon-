@@ -70,9 +70,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
   const [packSaveError, setPackSaveError] = useState('');
   const savingPackRef = useRef(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
-  const [items, setItems] = useState<PackItem[]>([
-    { productId: products[0]?.id, productName: products[0]?.name || 'Gants d\'examen', quantity: 10 }
-  ]);
+  const [items, setItems] = useState<PackItem[]>([]);
 
   const productForPackItem = (item: Pick<PackItem, 'productId' | 'productName'>) =>
     products.find(product => item.productId && product.id === item.productId)
@@ -80,7 +78,8 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
 
   const matchingProducts = useMemo(() => {
     const query = productSearch.trim().toLocaleLowerCase('fr');
-    return products.filter(product => !query || [product.name, product.category, ...product.variants.map(variant => variant.label)]
+    if (!query) return [];
+    return products.filter(product => [product.name, product.category, ...product.variants.map(variant => variant.label)]
       .some(value => String(value || '').toLocaleLowerCase('fr').includes(query))).slice(0, 8);
   }, [products, productSearch]);
   const packCatalogValue = useMemo(() => items.reduce((total, item) => {
@@ -103,6 +102,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
       if (existingIndex >= 0) return current.map((item, index) => index === existingIndex ? { ...item, quantity: item.quantity + 1 } : item);
       return [...current, { productId: product.id, productName: product.name, variant, quantity: 1 }];
     });
+    setProductSearch('');
   };
 
   const handlePhotoSelected = async (file?: File) => {
@@ -134,7 +134,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
     setProductSearch('');
     setPhotoError('');
     setPackSaveError('');
-    setItems([{ productName: products[0]?.name || 'Kit médical', quantity: 5 }]);
+    setItems([]);
     setIsModalOpen(true);
   };
 
@@ -149,7 +149,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
     setPackSaveError('');
     setItems(pack.items.length > 0
       ? pack.items.map(item => ({ ...item, productId: item.productId || products.find(product => product.name === item.productName)?.id }))
-      : [{ productId: products[0]?.id, productName: products[0]?.name || 'Dispositif', quantity: 1 }]);
+      : []);
     setIsModalOpen(true);
   };
 
@@ -394,6 +394,7 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
                     ))}
                   </div>
                 )}
+                {items.length === 0 && <p className="mb-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-xs text-slate-600">Aucun article ajouté. Recherchez un produit ci-dessus, puis sélectionnez-le pour composer le pack.</p>}
                 {items.map((it, idx) => (
                   <div key={`${it.productName}-${it.variant || ''}-${idx}`} className="mb-1.5 flex flex-wrap items-center gap-2">
                     <select
@@ -440,13 +441,6 @@ export const AdminPacksModule: React.FC<AdminPacksModuleProps> = ({
                     )}
                   </div>
                 ))}
-                <button
-                  type="button"
-                  onClick={() => products[0] && addProductToPack(products[0])}
-                  className="text-indigo-600 hover:text-indigo-700 font-semibold text-[11px] mt-1 cursor-pointer"
-                >
-                  + Ajouter le premier produit du catalogue
-                </button>
               </div>
 
               <div className="rounded-xl border border-indigo-100 bg-indigo-50/70 p-3">

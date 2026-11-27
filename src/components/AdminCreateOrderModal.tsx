@@ -5,6 +5,7 @@ import { api } from '../api';
 import { NeighborhoodPicker } from './NeighborhoodPicker';
 import { downloadInvoiceProjectPdf } from '../utils/pdfGenerator';
 import { calculateInvoiceTaxAmounts } from '../utils/invoiceTax';
+import { createShortInvoiceNumber } from '../utils/orderFinance';
 
 interface AdminCreateOrderModalProps {
   clients: any[];
@@ -130,7 +131,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
       orderId: order.id,
       orderReference: order.reference,
       type: 'facture',
-      number: `FAC-${new Date().getFullYear()}-${order.reference.replace(/[^A-Za-z0-9]/g, '').toUpperCase()}-01`,
+      number: createShortInvoiceNumber('facture'),
       issueDate: todayInLibreville(),
       clientFacilityName: order.customer.invoiceName || order.customer.facilityName,
       tvaRate: taxAmounts.tvaRate,

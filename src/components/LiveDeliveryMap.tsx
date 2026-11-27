@@ -84,6 +84,7 @@ export function LiveDeliveryMap({ points, destination, destinationLabel }: LiveD
   const routeControllerRef = useRef<AbortController | null>(null);
   const lastRouteRequestRef = useRef<{ start: Coordinates; destination: Coordinates; at: number } | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [mapError, setMapError] = useState('');
   const [routeLine, setRouteLine] = useState<GeoJsonLine>(EMPTY_LINE);
   const [routeSummary, setRouteSummary] = useState<{ distance: number; duration: number } | null>(null);
   const [routeState, setRouteState] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
@@ -98,9 +99,16 @@ export function LiveDeliveryMap({ points, destination, destinationLabel }: LiveD
   }), [points]);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    const mapContainer = containerRef.current;
+    if (!mapContainer) return;
     let disposed = false;
+    let styleReady = false;
     let instance: MapInstance | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    const loadTimeout = window.setTimeout(() => {
+      if (!disposed && !styleReady) setMapError('Le fond de carte ne répond pas. Vérifie la connexion puis ouvre la carte externe.');
+    }, 15_000);
+    setMapError('');
 
     void import('maplibre-gl').then(({ Map, Marker, NavigationControl, AttributionControl, setWorkerUrl }) => {
       if (disposed || !containerRef.current) return;
@@ -111,7 +119,7 @@ export function LiveDeliveryMap({ points, destination, destinationLabel }: LiveD
           ? [destination.lng, destination.lat]
           : LIBREVILLE_CENTER;
       instance = new Map({
-        container: containerRef.current,
+        container: mapContainer,
         style: OPENFREEMAP_STYLE,
         center,
         zoom: 12,
@@ -122,6 +130,17 @@ export function LiveDeliveryMap({ points, destination, destinationLabel }: LiveD
         cooperativeGestures: true,
       });
       mapRef.current = instance;
+      if (typeof ResizeObserver !== 'undefined') {
+        resizeObserver = new ResizeObserver(() => {
+          if (!disposed && instance) window.requestAnimationFrame(() => instance?.resize());
+        });
+        resizeObserver.observe(mapContainer);
+      }
+      instance.on('error', (event) => {
+        if (!disposed && !styleReady && event.error) {
+          setMapError('Le fond de carte n’a pas pu être chargé. Vérifie la connexion puis ouvre la carte externe.');
+        }
+      });
       instance.addControl(new NavigationControl({ showCompass: false }), 'top-right');
       instance.addControl(new AttributionControl({ compact: true, customAttribution: '© OpenFreeMap' }), 'bottom-right');
       instance.on('dragstart', () => { userMovedMapRef.current = true; });
@@ -133,6 +152,9 @@ export function LiveDeliveryMap({ points, destination, destinationLabel }: LiveD
 
       instance.on('load', () => {
         if (disposed || !instance) return;
+        styleReady = true;
+        window.clearTimeout(loadTimeout);
+        setMapError('');
         instance.addSource('delivery-route', { type: 'geojson', data: EMPTY_LINE as never });
         instance.addSource('courier-trail', { type: 'geojson', data: EMPTY_LINE as never });
         instance.addLayer({
@@ -157,12 +179,17 @@ export function LiveDeliveryMap({ points, destination, destinationLabel }: LiveD
           paint: { 'line-color': '#1d4ed8', 'line-width': 4, 'line-opacity': 0.78, 'line-dasharray': [1.5, 1] },
         });
         setMapLoaded(true);
+        window.requestAnimationFrame(() => instance?.resize());
         fitToLatest(instance, latest, destination);
       });
-    }).catch(() => setRouteState('unavailable'));
+    }).catch(() => {
+      if (!disposed) setMapError('La carte n’a pas pu démarrer. Vérifie la connexion puis ouvre la carte externe.');
+    });
 
     return () => {
       disposed = true;
+      window.clearTimeout(loadTimeout);
+      resizeObserver?.disconnect();
       setMapLoaded(false);
       routeControllerRef.current?.abort();
       routeControllerRef.current = null;
@@ -265,7 +292,12 @@ export function LiveDeliveryMap({ points, destination, destinationLabel }: LiveD
   return (
     <div className="relative h-[320px] overflow-hidden rounded-[24px] border border-slate-200 bg-[#e9eef0] shadow-sm sm:h-[400px]" aria-label="Carte vectorielle et trajet réel du coursier">
       <div ref={containerRef} className="absolute inset-0" />
-      {!mapLoaded && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100/90 text-xs font-semibold text-slate-600">Chargement de la carte…</div>}
+      {!mapLoaded && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100/95 p-5 text-center text-xs font-semibold text-slate-600">
+        <div className="max-w-sm">
+          {mapError || 'Chargement de la carte…'}
+          {mapError && destination && <a href={`https://www.openstreetmap.org/?mlat=${destination.lat}&mlon=${destination.lng}#map=16/${destination.lat}/${destination.lng}`} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex rounded-lg bg-emerald-800 px-3 py-2 text-xs font-bold text-white">Ouvrir dans OpenStreetMap</a>}
+        </div>
+      </div>}
       <div className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2">
         <span className="flex items-center gap-2 rounded-full border border-white/80 bg-white/95 px-3 py-2 text-[10px] font-extrabold text-slate-900 shadow-md backdrop-blur">
           <span className={`h-2.5 w-2.5 rounded-full ${latest ? 'animate-pulse bg-emerald-500' : 'bg-amber-400'}`} />

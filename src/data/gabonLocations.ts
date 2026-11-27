@@ -6,8 +6,10 @@ export interface GabonLocality {
   neighborhoods?: string[];
 }
 
-// The list starts with the provincial capitals and adds the main communes and
-// departmental towns used in the national administrative directory.
+// Neighborhood lists for the larger communes are compiled from Gabonese
+// Ministry of Interior electoral constituency documents (2023). Smaller
+// communes keep a manual fallback because no complete public neighborhood
+// directory was available for them.
 export const GABON_LOCALITIES: GabonLocality[] = [
   { name: 'Libreville', province: 'Estuaire' },
   { name: 'Akanda', province: 'Estuaire' },
@@ -17,8 +19,8 @@ export const GABON_LOCALITIES: GabonLocality[] = [
   { name: 'Cocobeach', province: 'Estuaire', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Ndzomoé', province: 'Estuaire', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Franceville', province: 'Haut-Ogooué', neighborhoods: ['Ngoungoulou', 'Lékèye', 'Bapili', 'Ngobounda', 'Yockot', 'Grand-Village', 'Corniche I', 'Corniche II', 'Djaka', 'Ongali', 'Engala', 'Ombele Mvouna', 'Angoubou', 'Allélé', 'Ondzeyi', 'Ondzieni', 'Epimbi', 'Dialogue', 'Ayassi', 'Ongouegne', 'La Paix', 'Montagne-Sainte', 'Ondimba', 'Ondouama', 'Mangoungou', 'Menaye', 'Carrière', 'Matébélé I', 'Matébélé II', 'Bakou', 'Pickas', 'Mimboumba', 'Kessala', 'Léconi', 'Akou', 'Mbaya', 'Djoueri', 'Makana', 'Mingara', 'Maboukou', 'Maba', 'Yéné', 'Djakana', 'Autre quartier'] },
-  { name: 'Moanda', province: 'Haut-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
-  { name: 'Mounana', province: 'Haut-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
+  { name: 'Moanda', province: 'Haut-Ogooué', neighborhoods: ['Mont-Moanda', 'Alliance', 'Miosso Téléphérique I', 'Miosso Téléphérique II', 'Moukagnissi', 'Douanes', 'Montagne-Sainte', 'Belle Vue I', 'Belle Vue II', 'Belle Vue III', 'Moanda Tséghé', 'Moukaba', 'Cité OCTRA', 'Moanda Plaine', 'Lékolo', 'Léyima', 'Onkoula', 'Centre Commercial', 'Cités COMILOG', 'Autre quartier'] },
+  { name: 'Mounana', province: 'Haut-Ogooué', neighborhoods: ['Massango 1', 'Cité Cadre', 'Cité Ambie', 'Centre-ville', 'Ngangolo', 'Onkoua', 'Village Mounana', 'Autre quartier'] },
   { name: 'Léconi', province: 'Haut-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Okondja', province: 'Haut-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Akiéni', province: 'Haut-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
@@ -31,7 +33,7 @@ export const GABON_LOCALITIES: GabonLocality[] = [
   { name: 'Ndjolé', province: 'Moyen-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Makouké', province: 'Moyen-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Bifoun', province: 'Moyen-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
-  { name: 'Mouila', province: 'Ngounié', neighborhoods: ['Tsouka', 'Divindet', 'Dourouni 1', 'Dourouni 2', 'Minembe', 'Motoboko', 'Moukoundza', 'Mandjiassango', 'Diouronda', 'Moukoumouna', 'Bouala', 'Ngoyina', 'Moutzanoupinza', 'Dikongo', 'Didjanou', 'Baleka', 'Bavanga', 'Pambou', 'Mangui', 'Autre quartier'] },
+  { name: 'Mouila', province: 'Ngounié', neighborhoods: ['Tsouka', 'Divindet', 'Dourouni 1', 'Dourouni 2', 'Minembe', 'Motoboko', 'Moukoundza', 'Mandjiassango', 'Diouronda', 'Moukoumouna-Bouala', 'Ngoyina', 'Moutsanou-Pinza', 'Dikongo', 'Didjanou', 'Baleka', 'Bavanga', 'Pambou', 'Mangui', 'Autre quartier'] },
   { name: 'Fougamou', province: 'Ngounié', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Ndendé', province: 'Ngounié', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Lébamba', province: 'Ngounié', neighborhoods: ['Centre-ville', 'Autre quartier'] },
@@ -44,18 +46,18 @@ export const GABON_LOCALITIES: GabonLocality[] = [
   { name: 'Moabi', province: 'Nyanga', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Ndindi', province: 'Nyanga', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Mabanda', province: 'Nyanga', neighborhoods: ['Centre-ville', 'Autre quartier'] },
-  { name: 'Makokou', province: 'Ogooué-Ivindo', neighborhoods: ['Mbolo-Edock', 'Mbolo 3', 'Mbolo 2', 'Mbolo 1', 'Ebandangoye 2', 'Ebandangoye 1', 'Zoatab 2', 'Epassendjé 1', 'Epassendjé 2', 'Pont Liboumba', 'Bienvenue', 'Mbeza', 'Iyoko Ngota', 'Edoung Avion', 'Central 2', 'Nzing-Meyong', 'Central 1', 'Essik', 'Allarmintang', 'Nzeng-Ayong', 'Ekowong', 'Haoussa', 'Andock', 'Zouma', 'Ngouabi', 'Mbouala', 'Envouang', 'Loa-Loa', 'Mayiga', 'Autre quartier'] },
-  { name: 'Mékambo', province: 'Ogooué-Ivindo', neighborhoods: ['Centre-ville', 'Autre quartier'] },
+  { name: 'Makokou', province: 'Ogooué-Ivindo', neighborhoods: ['Mbolo-Edock', 'Mbolo 3', 'Mbolo 2', 'Etangangove 2', 'Mbolo 1', 'Zoatab 2', 'Epassendjé 1', 'Pont Liboumba', 'Bienvenue', 'Ebandangoye 1', 'Epassendjé 2', 'Mbeza', 'Iyoko Ngota', 'Central 2', 'Nzing-Meyong', 'Central 1', 'Essik', 'Allarmintang', 'Nzeng-Ayong', 'Ekowong', 'Haoussa', 'Andock', 'Zouma', 'Ngouabi', 'Mbouala', 'Envouang', 'Loa-Loa', 'Mayiga', 'Edoung Avion', 'Autre quartier'] },
+  { name: 'Mékambo', province: 'Ogooué-Ivindo', neighborhoods: ['Centre-ville', 'Djibo', 'Mbelakembé', 'Corniche 1', 'Corniche 2', 'Mayéka', 'Edock', 'Vie chère', 'Vie dure', 'Paris Bouyon', 'Mbembézalé', 'Batouala', 'Autre quartier'] },
   { name: 'Booué', province: 'Ogooué-Ivindo', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Ovan', province: 'Ogooué-Ivindo', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Koulamoutou', province: 'Ogooué-Lolo', neighborhoods: ['Mayang', 'Bataillon', 'Soka', 'Poungou-poungou', 'Moussesse', 'Pembembe', 'Koungou', 'Moukouagna', 'Dakar', 'Bakélé', 'Mikoumou', 'Libongui', 'Litsébé', 'Jardin-four', 'Grand-village', 'Mibaka', 'Bikouala', 'Mayéla', 'Makadium', 'Mabimbi', 'Konadembé', 'Bambomo', 'Bouvendo', 'Mikalo', 'Mandji', 'Nzéla', 'Babambo', 'Autre quartier'] },
   { name: 'Lastoursville', province: 'Ogooué-Lolo', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Pana', province: 'Ogooué-Lolo', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Iboundji', province: 'Ogooué-Lolo', neighborhoods: ['Centre-ville', 'Autre quartier'] },
-  { name: 'Port-Gentil', province: 'Ogooué-Maritime', neighborhoods: ['Centre-ville', 'Château', 'Balise', 'Grand-Village', 'Matiti', 'Sindara', 'Salsa', 'Rombintchozo', 'Orovati', 'Azokri', 'Lalala', 'Quaben', 'Autre quartier'] },
+  { name: 'Port-Gentil', province: 'Ogooué-Maritime', neighborhoods: ['Douanes', 'SBOM', 'CFG', 'OPRAG', 'Zone industrielle du Port', 'Club Hippique', 'SOGARA', 'Derrière-Abela', 'Abela', 'Derrière le Lycée d’État', 'Carrefour Léon-Mba', 'Route ancienne base Dragages', 'Nouvelle Balise 1', 'Carrefour Ngadi', 'Carrefour Miniprix', 'Océan 1', 'Bac Aviation 1', 'Aéroport', 'Asecna', 'Route du Cap Lopez', 'Commissariat central', 'Carrefour Tobia', 'Grand Village 1', 'Carrefour Château-d’eau', 'École Abbé-Yoya', 'Plaine 1', 'Cité SEEG', 'Nouvelle Balise 2', 'Balise 1', 'Balise 2', 'Balise 3', 'Océan 2', 'Bac Aviation 2', 'Carrefour Azokri', 'Boule-Noire', 'Salsa 1', 'Matiti 1', 'Rombintchozo', 'Orovati', 'Sindara', 'Prison Centrale', 'Cimetière Lazaret', 'Carrefour SEEG', 'Grand Village 2', 'Cité Shell', 'Océan 3', 'Mosquée 1', 'Mosquée 2', 'Hassan', 'Transfo', 'Printemps', '3 Métisses', 'Pas à pas', 'Omboué central', 'Exodus', '25 logements', 'Banco', 'Île Mandji', 'Base logistique Elf-Gabon', 'Matanda', 'Iguiri', 'Agripog 2', 'Ntchengué', 'Camp Namina', 'Roger Buttin', 'Cité Akosso', 'Boule-Noire 2', 'Matiti 2', 'Matiti 3', 'Plaine 2', 'Autre quartier'] },
   { name: 'Gamba', province: 'Ogooué-Maritime', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Omboué', province: 'Ogooué-Maritime', neighborhoods: ['Centre-ville', 'Autre quartier'] },
-  { name: 'Oyem', province: 'Woleu-Ntem', neighborhoods: ['Akoakam', 'Angone', 'Centre-ville', 'Autre quartier'] },
+  { name: 'Oyem', province: 'Woleu-Ntem', neighborhoods: ['Akok-Barrage-Ndzomassi', 'Akoakam 1', 'Akoakam 2', 'Akoakam Haoussa', 'Angone 1', 'Angone 2', 'Andome', 'Endome', 'Elone-Abenelang', 'Mekom Nkodje', 'Methui', 'Mont-Miyélé', 'Minka Nfoua', 'Bouloungou', 'Autre quartier'] },
   { name: 'Bitam', province: 'Woleu-Ntem', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Mitzic', province: 'Woleu-Ntem', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Minvoul', province: 'Woleu-Ntem', neighborhoods: ['Centre-ville', 'Autre quartier'] },
