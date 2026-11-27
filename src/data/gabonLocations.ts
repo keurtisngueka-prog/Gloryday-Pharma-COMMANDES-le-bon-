@@ -1,4 +1,4 @@
-import { buildNeighborhoodDeliveryAddress, getNeighborhoodAdministrativeArea } from './librevilleZones';
+import { buildNeighborhoodDeliveryAddress, getNeighborhoodAdministrativeArea } from './librevilleZones.js';
 
 export interface GabonLocality {
   name: string;
