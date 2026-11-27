@@ -179,6 +179,23 @@ function normalizeClientPhone(value: string): string {
   return normalizePhone(value).replace(/\D/g, '');
 }
 
+function ensureProductReferences(products: Product[]): void {
+  const references = new Set(products
+    .map((product) => product.reference?.trim().toLocaleLowerCase('fr'))
+    .filter((reference): reference is string => Boolean(reference)));
+  for (const product of products) {
+    if (product.reference?.trim()) continue;
+    let sequence = 1;
+    let candidate = `GP ${String(sequence).padStart(3, '0')}`;
+    while (references.has(candidate.toLocaleLowerCase('fr'))) {
+      sequence++;
+      candidate = `GP ${String(sequence).padStart(3, '0')}`;
+    }
+    product.reference = candidate;
+    references.add(candidate.toLocaleLowerCase('fr'));
+  }
+}
+
 function upsertCourierDirectory(store: ServerStore, info: CourierInfo): CourierInfo {
   const phoneKey = info.phone.replace(/\D/g, '');
   const existing = (store.couriers || []).find(courier =>
