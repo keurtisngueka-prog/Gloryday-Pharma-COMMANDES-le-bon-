@@ -64,9 +64,16 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (onLogoClick) {
       onLogoClick();
     } else {
-      setActiveTab(role === 'Super-Admin' ? 'admin' : 'catalog');
+      navigateToTab(role === 'Super-Admin' ? 'admin' : 'catalog');
     }
 
+    window.requestAnimationFrame(() => {
+      document.scrollingElement?.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  };
+
+  const navigateToTab = (tab: string) => {
+    setActiveTab(tab);
     window.requestAnimationFrame(() => {
       document.scrollingElement?.scrollTo({ top: 0, behavior: 'smooth' });
     });
@@ -170,7 +177,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <nav className="hidden md:flex items-center gap-1 lg:gap-2">
             <button
               type="button"
-              onClick={() => setActiveTab('catalog')}
+              onClick={() => navigateToTab('catalog')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
                 activeTab === 'catalog'
                   ? 'bg-slate-100 text-[#000000] font-bold'
@@ -183,7 +190,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <button
               type="button"
-              onClick={() => setActiveTab('bulk-order')}
+              onClick={() => navigateToTab('bulk-order')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
                 activeTab === 'bulk-order'
                   ? 'bg-blue-50 text-[#0d44e8] font-bold border border-blue-200'
@@ -199,7 +206,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <button
               type="button"
-              onClick={() => setActiveTab('packs')}
+              onClick={() => navigateToTab('packs')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
                 activeTab === 'packs'
                   ? 'bg-slate-100 text-[#000000] font-bold'
@@ -212,7 +219,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <button
               type="button"
-              onClick={() => setActiveTab('dashboard')}
+              onClick={() => navigateToTab('dashboard')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
                 activeTab === 'dashboard'
                   ? 'bg-slate-100 text-[#000000] font-bold'
@@ -220,13 +227,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <FileText className="w-4 h-4" />
-              <span>Mes Commandes</span>
+                <span>{role === 'client' ? 'Mon espace' : 'Mes Commandes'}</span>
             </button>
 
             {role === 'Super-Admin' && (
               <button
                 type="button"
-                onClick={() => setActiveTab('admin')}
+                onClick={() => navigateToTab('admin')}
                 className="px-2.5 py-1 rounded-md bg-[#0f0f12] text-white text-[11px] font-bold flex items-center gap-1 shadow-xs ml-1 hover:bg-slate-800 transition-colors cursor-pointer"
                 title="Panneau de bord Super-Admin"
               >
@@ -238,7 +245,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             {role === 'Commercial' && (
               <button
                 type="button"
-                onClick={() => setActiveTab('commercial-quotes')}
+                onClick={() => navigateToTab('commercial-quotes')}
                 className="px-2.5 py-1 rounded-md bg-purple-900 text-white text-[11px] font-bold flex items-center gap-1 shadow-xs ml-1 hover:bg-purple-800 transition-colors cursor-pointer"
                 title="Espace Commercial"
               >
@@ -253,7 +260,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Desktop Cart Button with Subtle Bounce & Pulse */}
             <button
               type="button"
-              onClick={() => setActiveTab('cart')}
+              onClick={() => navigateToTab('cart')}
               className={`hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all duration-300 cursor-pointer ${
                 isCartBumping ? 'scale-105 shadow-md ring-2 ring-[#0d44e8] bg-blue-50' : ''
               } ${
@@ -295,9 +302,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="flex items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => setActiveTab('dashboard')}
+                  onClick={onToggleSidebar}
                   className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl overflow-hidden border border-slate-200 hover:border-[#0d44e8] hover:ring-2 hover:ring-blue-100 transition-all flex items-center justify-center cursor-pointer bg-slate-100"
-                  title={`${currentUser.facilityName} - Ouvrir Tableau de Bord`}
+                  title={role === 'client' ? 'Ouvrir Mon espace et accéder au profil' : 'Ouvrir le menu de mon espace équipe'}
                 >
                   {currentUser.avatarUrl ? (
                     <img src={currentUser.avatarUrl} alt={currentUser.facilityName} className="w-full h-full object-cover" />
@@ -341,7 +348,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
             <button
               type="button"
-              onClick={() => setActiveTab('admin')}
+              onClick={() => navigateToTab('admin')}
               className="px-2.5 py-1 rounded-md bg-purple-600 hover:bg-purple-500 text-white font-bold text-[11px] transition-colors cursor-pointer shrink-0 ml-2 shadow-xs"
             >
               Tableau de Bord Admin →

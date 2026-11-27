@@ -1,0 +1,101 @@
+html[data-gloryday-theme='dark'] {
+  color-scheme: dark;
+}
+
+html[data-gloryday-theme='dark'] body {
+  background: #0c1511;
+  color: #e6eee9;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app {
+  background-color: #0c1511 !important;
+  color: #e6eee9 !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app .bg-white,
+html[data-gloryday-theme='dark'] .gloryday-app .bg-white\/95,
+html[data-gloryday-theme='dark'] .gloryday-app .bg-white\/90 {
+  background-color: #14211a !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app .bg-slate-50,
+html[data-gloryday-theme='dark'] .gloryday-app .bg-slate-50\/70,
+html[data-gloryday-theme='dark'] .gloryday-app .bg-slate-100,
+html[data-gloryday-theme='dark'] .gloryday-app .bg-slate-200 {
+  background-color: #1a2a21 !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app .text-slate-950,
+html[data-gloryday-theme='dark'] .gloryday-app .text-slate-900,
+html[data-gloryday-theme='dark'] .gloryday-app .text-slate-800,
+html[data-gloryday-theme='dark'] .gloryday-app .text-slate-700 {
+  color: #e6eee9 !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app .text-slate-600,
+html[data-gloryday-theme='dark'] .gloryday-app .text-slate-500,
+html[data-gloryday-theme='dark'] .gloryday-app .text-slate-400 {
+  color: #aebdb3 !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app .border-slate-50,
+html[data-gloryday-theme='dark'] .gloryday-app .border-slate-100,
+html[data-gloryday-theme='dark'] .gloryday-app .border-slate-200,
+html[data-gloryday-theme='dark'] .gloryday-app .border-slate-300 {
+  border-color: #2b3d32 !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app input,
+html[data-gloryday-theme='dark'] .gloryday-app textarea,
+html[data-gloryday-theme='dark'] .gloryday-app select {
+  background-color: #101b15;
+  border-color: #34483b;
+  color: #e6eee9;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app input::placeholder,
+html[data-gloryday-theme='dark'] .gloryday-app textarea::placeholder {
+  color: #91a398;
+}
+
+.gloryday-brand-intro {
+  animation: gloryday-intro-fade 720ms ease-out both;
+  background-image: radial-gradient(ellipse at 50% 55%, #eff7f1 0%, #ffffff 62%);
+}
+
+.gloryday-brand-intro-content {
+  animation: gloryday-intro-rise 720ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.gloryday-brand-intro-logo {
+  animation: gloryday-logo-reveal 720ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes gloryday-intro-fade {
+  0% { opacity: 1; }
+  76% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes gloryday-intro-rise {
+  0% { opacity: 0; transform: translateY(12px); }
+  35% { opacity: 1; transform: translateY(0); }
+  78% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-5px); }
+}
+
+@keyframes gloryday-logo-reveal {
+  0% { opacity: 0; transform: scale(0.78); }
+  38% { opacity: 1; transform: scale(1.04); }
+  55% { transform: scale(1); }
+  82% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gloryday-brand-intro,
+  .gloryday-brand-intro-content,
+  .gloryday-brand-intro-logo {
+    animation-duration: 1ms;
+  }
+}

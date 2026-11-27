@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layers, Sparkles, ShoppingBag, FileText, Menu } from 'lucide-react';
+import { Layers, Sparkles, ShoppingBag, FileText, Menu, CircleUserRound } from 'lucide-react';
 
 interface MobileBottomNavProps {
   activeTab: string;
   setActiveTab: (tab: any) => void;
   cartCount: number;
   onOpenSidebar: () => void;
+  isClientSpace?: boolean;
+  onSelectClientSpace?: () => void;
+  unreadNotificationCount?: number;
   draftsCount?: number;
 }
 
@@ -14,6 +17,9 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   setActiveTab,
   cartCount,
   onOpenSidebar,
+  isClientSpace = false,
+  onSelectClientSpace,
+  unreadNotificationCount = 0,
   draftsCount
 }) => {
   const [isBumping, setIsBumping] = useState(false);
@@ -34,21 +40,21 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-[0_-4px_20px_rgba(22,22,24,0.06)]"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
-      <div className="grid grid-cols-5 items-center h-16 max-w-md mx-auto px-1">
+      <div className={`grid ${isClientSpace ? 'grid-cols-4' : 'grid-cols-5'} items-center h-16 max-w-md mx-auto px-1`}>
         {/* Tab 1: Catalogue */}
         <button
           type="button"
           onClick={() => setActiveTab('catalog')}
           className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${
             activeTab === 'catalog'
-              ? 'text-[#0d44e8] font-bold'
+              ? (isClientSpace ? 'text-[#176645] font-bold' : 'text-[#0d44e8] font-bold')
               : 'text-slate-500 hover:text-slate-900 font-medium'
           }`}
         >
           <div className="relative">
             <Layers className="w-5 h-5 stroke-[2.2]" />
             {activeTab === 'catalog' && (
-              <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#0d44e8]"></span>
+              <span className={`absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${isClientSpace ? 'bg-[#176645]' : 'bg-[#0d44e8]'}`}></span>
             )}
           </div>
           <span className="text-[10px] tracking-tight mt-1 leading-none">
@@ -62,14 +68,14 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           onClick={() => setActiveTab('packs')}
           className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${
             activeTab === 'packs'
-              ? 'text-[#0d44e8] font-bold'
+              ? (isClientSpace ? 'text-[#176645] font-bold' : 'text-[#0d44e8] font-bold')
               : 'text-slate-500 hover:text-slate-900 font-medium'
           }`}
         >
           <div className="relative">
             <Sparkles className="w-5 h-5 stroke-[2.2]" />
             {activeTab === 'packs' && (
-              <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#0d44e8]"></span>
+              <span className={`absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${isClientSpace ? 'bg-[#176645]' : 'bg-[#0d44e8]'}`}></span>
             )}
           </div>
           <span className="text-[10px] tracking-tight mt-1 leading-none">
@@ -85,7 +91,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
             isBumping ? 'scale-110' : ''
           } ${
             activeTab === 'cart'
-              ? 'text-[#0d44e8] font-bold'
+              ? (isClientSpace ? 'text-[#176645] font-bold' : 'text-[#0d44e8] font-bold')
               : 'text-slate-500 hover:text-slate-900 font-medium'
           }`}
         >
@@ -103,7 +109,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               </span>
             )}
             {activeTab === 'cart' && (
-              <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#0d44e8]"></span>
+              <span className={`absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${isClientSpace ? 'bg-[#176645]' : 'bg-[#0d44e8]'}`}></span>
             )}
           </div>
           <span className="text-[10px] tracking-tight mt-1 leading-none">
@@ -111,43 +117,63 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           </span>
         </button>
 
-        {/* Tab 4: Commandes */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('dashboard')}
-          className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${
-            activeTab === 'dashboard'
-              ? 'text-[#0d44e8] font-bold'
-              : 'text-slate-500 hover:text-slate-900 font-medium'
-          }`}
-        >
-          <div className="relative">
-            <FileText className="w-5 h-5 stroke-[2.2]" />
-            {activeTab === 'dashboard' && (
-              <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#0d44e8]"></span>
-            )}
-          </div>
-          <span className="text-[10px] tracking-tight mt-1 leading-none">
-            Commandes
-          </span>
-        </button>
+        {isClientSpace ? (
+          <button
+            type="button"
+            onClick={() => onSelectClientSpace ? onSelectClientSpace() : setActiveTab('dashboard')}
+            aria-current={activeTab === 'dashboard' ? 'page' : undefined}
+            className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${
+              activeTab === 'dashboard'
+                ? 'text-[#176645] font-bold'
+                : 'text-slate-500 hover:text-slate-900 font-medium'
+            }`}
+          >
+            <div className="relative">
+              <CircleUserRound className="w-5 h-5 stroke-[2.2]" />
+              {unreadNotificationCount > 0 && <span className="absolute -right-2 -top-1 min-w-4 rounded-full bg-rose-600 px-1 text-center text-[9px] font-black leading-4 text-white">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}
+              {activeTab === 'dashboard' && (
+                <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#176645]"></span>
+              )}
+            </div>
+            <span className="text-[10px] tracking-tight mt-1 leading-none">Mon espace</span>
+          </button>
+        ) : (
+          <>
+            {/* Staff tab 4: Commandes */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('dashboard')}
+              className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${
+                activeTab === 'dashboard'
+                  ? 'text-[#0d44e8] font-bold'
+                  : 'text-slate-500 hover:text-slate-900 font-medium'
+              }`}
+            >
+              <div className="relative">
+                <FileText className="w-5 h-5 stroke-[2.2]" />
+                {activeTab === 'dashboard' && (
+                  <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#0d44e8]"></span>
+                )}
+              </div>
+              <span className="text-[10px] tracking-tight mt-1 leading-none">Commandes</span>
+            </button>
 
-        {/* Tab 5: Menu */}
-        <button
-          type="button"
-          onClick={onOpenSidebar}
-          className="flex flex-col items-center justify-center h-full min-h-[44px] text-slate-500 hover:text-slate-900 font-medium transition-colors cursor-pointer relative"
-        >
-          <div className="relative">
-            <Menu className="w-5 h-5 stroke-[2.2]" />
-            {draftsCount !== undefined && draftsCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-white" title={`${draftsCount} brouillon(s) hors-ligne`}></span>
-            )}
-          </div>
-          <span className="text-[10px] tracking-tight mt-1 leading-none">
-            Menu
-          </span>
-        </button>
+            {/* Staff tab 5: Menu */}
+            <button
+              type="button"
+              onClick={onOpenSidebar}
+              className="flex flex-col items-center justify-center h-full min-h-[44px] text-slate-500 hover:text-slate-900 font-medium transition-colors cursor-pointer relative"
+            >
+              <div className="relative">
+                <Menu className="w-5 h-5 stroke-[2.2]" />
+                {draftsCount !== undefined && draftsCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-white" title={`${draftsCount} brouillon(s) hors-ligne`}></span>
+                )}
+              </div>
+              <span className="text-[10px] tracking-tight mt-1 leading-none">Menu</span>
+            </button>
+          </>
+        )}
       </div>
     </nav>
   );

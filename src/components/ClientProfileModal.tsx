@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Building2, Camera, CheckCircle2, ImagePlus, LoaderCircle, MapPin, Save, X } from 'lucide-react';
+import { Building2, Camera, CheckCircle2, ImagePlus, KeyRound, LoaderCircle, MapPin, Save, X } from 'lucide-react';
 import type { FacilityType, User } from '../types';
 import { api } from '../api';
 import { processAvatarFile } from '../utils/avatarImage';
@@ -35,6 +35,8 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
   const [neighborhoodName, setNeighborhoodName] = useState(user.neighborhoodName || '');
   const [facilityName, setFacilityName] = useState(user.facilityName || '');
   const [contactName, setContactName] = useState(user.contactName || '');
+  const [directorName, setDirectorName] = useState(user.directorName || '');
+  const [companyPhone, setCompanyPhone] = useState(user.companyPhone || '');
   const [secondaryPhone, setSecondaryPhone] = useState(user.secondaryPhone || '');
   const [facilityType, setFacilityType] = useState<FacilityType>(user.facilityType || 'Clinique');
   const [facilityTypeOther, setFacilityTypeOther] = useState(user.facilityTypeOther || '');
@@ -48,6 +50,10 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
   const [avatarChanged, setAvatarChanged] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
@@ -101,6 +107,8 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
       const profileData: Parameters<typeof api.updateClientProfile>[0] = {
         facilityName: facilityName.trim(),
         contactName: contactName.trim(),
+        directorName: directorName.trim(),
+        companyPhone: companyPhone.trim(),
         secondaryPhone: secondaryPhone.trim(),
         facilityType,
         facilityTypeOther: facilityType === 'Autre' ? facilityTypeOther.trim() : '',
@@ -120,6 +128,31 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
       setErrorMessage(error instanceof Error ? error.message : 'Impossible d’enregistrer votre profil. Réessayez.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    if (newPassword.length < 8 || newPassword.length > 85) {
+      setErrorMessage('Le nouveau mot de passe doit contenir entre 8 et 85 caractères.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setErrorMessage('La confirmation ne correspond pas au nouveau mot de passe.');
+      return;
+    }
+    setIsChangingPassword(true);
+    try {
+      await api.changeClientPassword(currentPassword, newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setSuccessMessage('Votre mot de passe a été modifié.');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Le mot de passe n’a pas pu être modifié. Réessayez.');
+    } finally {
+      setIsChangingPassword(false);
     }
   };
 
@@ -179,8 +212,16 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
               <input required maxLength={120} value={facilityName} onChange={(event) => setFacilityName(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
             </label>
             <label className="block">
-              <span className="mb-1.5 block text-xs font-bold text-slate-700">Nom du contact</span>
+              <span className="mb-1.5 block text-xs font-bold text-slate-700">Nom du responsable</span>
               <input maxLength={120} value={contactName} onChange={(event) => setContactName(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-bold text-slate-700">Nom du directeur / de la direction</span>
+              <input maxLength={120} value={directorName} onChange={(event) => setDirectorName(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+            </label>
+            <label className="block sm:col-span-2">
+              <span className="mb-1.5 block text-xs font-bold text-slate-700">Téléphone de l’établissement</span>
+              <input type="tel" inputMode="tel" maxLength={32} value={companyPhone} onChange={(event) => setCompanyPhone(event.target.value)} placeholder="Numéro utilisé par la clinique ou la pharmacie" className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
             </label>
             <label className="block">
               <span className="mb-1.5 block text-xs font-bold text-slate-700">Type d’établissement</span>
@@ -225,6 +266,22 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
               <input type="tel" inputMode="tel" maxLength={32} value={secondaryPhone} onChange={(event) => setSecondaryPhone(event.target.value)} placeholder="Ex. +241 06 12 34 56" className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
               <span className="mt-1 block text-[11px] text-slate-500">L’équipe peut l’utiliser si le numéro principal ne répond pas.</span>
             </label>
+            <section className="sm:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-labelledby="client-password-title">
+              <div className="flex items-center gap-2">
+                <KeyRound className="h-4 w-4 text-emerald-800" />
+                <h3 id="client-password-title" className="text-sm font-extrabold text-slate-900">Changer le mot de passe</h3>
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-slate-600">Confirmez votre mot de passe actuel pour sécuriser la modification.</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="block sm:col-span-2"><span className="mb-1 block text-xs font-bold text-slate-700">Mot de passe actuel</span><input type="password" autoComplete="current-password" minLength={8} maxLength={85} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100" /></label>
+                <label className="block"><span className="mb-1 block text-xs font-bold text-slate-700">Nouveau mot de passe</span><input type="password" autoComplete="new-password" minLength={8} maxLength={85} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100" /></label>
+                <label className="block"><span className="mb-1 block text-xs font-bold text-slate-700">Confirmer le nouveau mot de passe</span><input type="password" autoComplete="new-password" minLength={8} maxLength={85} value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100" /></label>
+              </div>
+              <button type="button" onClick={() => void handleChangePassword()} disabled={isChangingPassword || isSaving || currentPassword.length < 8 || newPassword.length < 8 || confirmNewPassword.length < 8} className="mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-3.5 text-xs font-bold text-emerald-900 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50">
+                {isChangingPassword ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                {isChangingPassword ? 'Modification…' : 'Enregistrer le nouveau mot de passe'}
+              </button>
+            </section>
           </div>
 
           {errorMessage && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm font-medium text-red-800">{errorMessage}</p>}

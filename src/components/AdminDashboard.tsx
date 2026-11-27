@@ -76,7 +76,7 @@ const hasValidOrderCoordinates = (order: Order): boolean => {
 const hasConfirmedOrderGps = (order: Order): boolean =>
   hasValidOrderCoordinates(order) && order.customer.coordinates?.source === 'checkout';
 
-export type AdminSubTab = 'kpi' | 'orders' | 'packs' | 'stock' | 'lots' | 'clients' | 'stats-achats' | 'receivables' | 'finance' | 'messages' | 'logs' | 'audit' | 'settings' | 'staff' | 'export-deploy';
+export type AdminSubTab = 'kpi' | 'orders' | 'packs' | 'stock' | 'lots' | 'movements' | 'clients' | 'stats-achats' | 'receivables' | 'finance' | 'messages' | 'logs' | 'audit' | 'settings' | 'staff' | 'export-deploy';
 
 interface AdminDashboardProps {
   stats: AdminStats | null;
@@ -189,7 +189,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     ...(canViewOrders ? ['orders'] as AdminSubTab[] : []),
     ...(canManagePacks ? ['packs'] as AdminSubTab[] : []),
     ...(isGestionnaire ? ['stock'] as AdminSubTab[] : []),
-    ...(canViewStock ? ['lots'] as AdminSubTab[] : []),
+    ...(canViewStock ? ['lots', 'movements'] as AdminSubTab[] : []),
     ...(canViewReceivables ? ['receivables'] as AdminSubTab[] : []),
     ...(canViewFinance ? ['finance'] as AdminSubTab[] : []),
     ...(canViewClients ? ['clients'] as AdminSubTab[] : []),
@@ -200,6 +200,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   ];
 
   const [activeTab, setActiveTab] = useState<AdminSubTab>(defaultSubTab);
+  const selectAdminTab = (tab: AdminSubTab) => {
+    setActiveTab(tab);
+    window.requestAnimationFrame(() => {
+      document.getElementById('admin-dashboard-main')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
   const [isCreateOrderModalOpen, setIsCreateOrderModalOpen] = useState(false);
   const [discountModalOrder, setDiscountModalOrder] = useState<Order | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -449,7 +455,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, new Map<string, { name: string; count: number }>()).entries()).map(([key, load]) => ({ key, ...load }));
 
   return (
-    <div className="admin-dashboard-enter admin-dashboard-shell max-w-7xl mx-auto pb-24 space-y-5 px-3 sm:px-0">
+    <div className="admin-dashboard-enter admin-dashboard-shell max-w-7xl mx-auto pb-24 px-3 sm:px-0">
       {creditTermsFeedback && (
         <div role="status" aria-live="polite" className="fixed right-4 top-20 z-[70] flex max-w-md items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900 shadow-xl">
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
@@ -524,11 +530,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* 2. SUB-TABS NAVIGATION WITH DYNAMIC BADGES */}
-      <nav aria-label="Sections du tableau de bord" tabIndex={0} className="admin-dashboard-nav flex gap-1.5 overflow-x-auto text-xs font-bold">
+      <div className="admin-dashboard-layout">
+      <nav aria-label="Sections du tableau de bord" tabIndex={0} className="admin-dashboard-nav flex gap-1.5 overflow-x-auto text-xs font-bold lg:flex-col lg:overflow-x-visible">
         {hasPerm('stats_view') && (
           <button
             type="button"
-            onClick={() => setActiveTab('kpi')}
+            onClick={() => selectAdminTab('kpi')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'kpi' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -540,7 +547,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {canViewOrders && (
           <button
             type="button"
-            onClick={() => setActiveTab('orders')}
+            onClick={() => selectAdminTab('orders')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'orders' ? 'bg-[#0d44e8] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -560,7 +567,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {canManagePacks && (
           <button
             type="button"
-            onClick={() => setActiveTab('packs')}
+            onClick={() => selectAdminTab('packs')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'packs' ? 'bg-indigo-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -577,7 +584,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {isGestionnaire && (
           <button
             type="button"
-            onClick={() => setActiveTab('stock')}
+            onClick={() => selectAdminTab('stock')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'stock' ? 'bg-emerald-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -594,7 +601,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {canViewStock && (
           <button
             type="button"
-            onClick={() => setActiveTab('lots')}
+            onClick={() => selectAdminTab('lots')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'lots' ? 'bg-amber-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -610,10 +617,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             )}
           </button>
         )}
+        {canViewStock && (
+          <button
+            type="button"
+            onClick={() => selectAdminTab('movements')}
+            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'movements' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+            <span>Journal des mouvements</span>
+          </button>
+        )}
         {hasPerm('stats_view') && (
           <button
             type="button"
-            onClick={() => setActiveTab('stats-achats')}
+            onClick={() => selectAdminTab('stats-achats')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'stats-achats' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -625,7 +644,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {canManageReceivables && (
           <button
             type="button"
-            onClick={() => setActiveTab('receivables')}
+            onClick={() => selectAdminTab('receivables')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'receivables' ? 'bg-rose-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -637,7 +656,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {canViewFinance && (
           <button
             type="button"
-            onClick={() => setActiveTab('finance')}
+            onClick={() => selectAdminTab('finance')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'finance' ? 'bg-emerald-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -649,7 +668,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {canViewClients && (
           <button
             type="button"
-            onClick={() => setActiveTab('clients')}
+            onClick={() => selectAdminTab('clients')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'clients' ? 'bg-purple-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -661,7 +680,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {hasPerm('messages_view') && (
           <button
             type="button"
-            onClick={() => setActiveTab('messages')}
+            onClick={() => selectAdminTab('messages')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'messages' ? 'bg-indigo-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -673,7 +692,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {canViewAudit && (
           <button
             type="button"
-            onClick={() => setActiveTab('logs')}
+            onClick={() => selectAdminTab('logs')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'logs' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -686,7 +705,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {canViewAudit && (
           <button
             type="button"
-            onClick={() => setActiveTab('audit')}
+            onClick={() => selectAdminTab('audit')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'audit' ? 'bg-indigo-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -698,7 +717,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {isSuperAdmin && (
           <button
             type="button"
-            onClick={() => setActiveTab('staff')}
+            onClick={() => selectAdminTab('staff')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'staff' ? 'bg-purple-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -710,7 +729,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {canManageSettings && (
           <button
             type="button"
-            onClick={() => setActiveTab('settings')}
+            onClick={() => selectAdminTab('settings')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'settings' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -722,7 +741,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {isSuperAdmin && (
           <button
             type="button"
-            onClick={() => setActiveTab('export-deploy')}
+            onClick={() => selectAdminTab('export-deploy')}
             className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'export-deploy' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
@@ -733,6 +752,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )}
       </nav>
 
+      <main id="admin-dashboard-main" className="admin-dashboard-main min-w-0 space-y-5 scroll-mt-32 sm:scroll-mt-36">
       {availableSubTabs.length === 0 && !canManageCampaigns && (
         <div role="status" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           Aucun accès opérationnel n’est attribué à ce compte. Demandez au Super Admin de régler vos droits.
@@ -1138,6 +1158,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       }`}>
                         {order.status}
                       </span>
+
+                      {order.isDemoOrder && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-50 text-violet-800 border border-violet-200">
+                          Démo · sans mouvement de stock
+                        </span>
+                      )}
 
                       {order.hasQuoteItems && (
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
@@ -1724,6 +1750,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           canManageBatches={canManageStockBatches}
         />
       )}
+      {activeTab === 'movements' && canViewStock && (
+        <StockLotsModule
+          products={products}
+          orders={orders}
+          onProductStockChanged={onProductSaved}
+          onToggleProductStock={onToggleProductStock}
+          actorName={currentUser.contactName || currentUser.facilityName}
+          actorRole={role}
+          canToggleStock={canManageStockAvailability}
+          canExportStock={canExportStock}
+          canViewStockCosts={canViewStockCosts}
+          canManageBatches={canManageStockBatches}
+          initialSection="movements"
+        />
+      )}
 
       {/* 6. TAB 4: CLIENT PURCHASES STATS */}
       {activeTab === 'stats-achats' && hasPerm('stats_view') && (
@@ -2162,6 +2203,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-          </div>
+      </main>
+      </div>
+    </div>
   );
 };

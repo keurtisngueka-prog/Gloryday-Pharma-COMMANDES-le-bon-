@@ -382,6 +382,13 @@ export const api = {
     });
   },
 
+  async changeClientPassword(currentPassword: string, newPassword: string): Promise<void> {
+    await request<{ success: boolean }>('/api/auth/password', {
+      method: 'PATCH',
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+  },
+
   async loginWithGoogle(googleProfile: {
     email: string;
     name: string;

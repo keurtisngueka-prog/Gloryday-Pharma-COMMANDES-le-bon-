@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   Layers, 
   Sparkles, 
@@ -19,7 +19,12 @@ import {
   PlusCircle,
   UserCheck,
   Briefcase,
-  Database
+  Database,
+  Bell,
+  MapPin,
+  Moon,
+  Sun,
+  UserRound
 } from 'lucide-react';
 import { User, AppRole } from '../types';
 
@@ -36,6 +41,11 @@ interface AppSidebarProps {
   onLogoClick?: () => void;
   onSwitchRole?: (role: AppRole) => void;
   onOpenDraftsModal?: () => void;
+  onOpenClientProfile?: () => void;
+  onOpenNotifications?: () => void;
+  onToggleTheme?: () => void;
+  isDarkTheme?: boolean;
+  unreadNotificationCount?: number;
   draftsCount?: number;
 }
 
@@ -49,14 +59,27 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   onLogout,
   onOpenAuth,
   onOpenCreateProduct,
-  onLogoClick
+  onLogoClick,
+  onOpenClientProfile,
+  onOpenNotifications,
+  onToggleTheme,
+  isDarkTheme = false,
+  unreadNotificationCount = 0
 }) => {
   const role: AppRole = currentUser?.role || 'client';
+  const drawerContentRef = useRef<HTMLDivElement>(null);
   const hasPermission = (permission: string) => role === 'Super-Admin' || Boolean(currentUser?.permissions?.includes(permission as any));
+
+  useEffect(() => {
+    if (isOpen) drawerContentRef.current?.scrollTo({ top: 0 });
+  }, [isOpen]);
 
   const handleNav = (tab: string) => {
     setActiveTab(tab);
     onClose();
+    window.requestAnimationFrame(() => {
+      document.scrollingElement?.scrollTo({ top: 0, behavior: 'smooth' });
+    });
   };
 
   return (
@@ -75,7 +98,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="overflow-y-auto flex-1">
+        <div ref={drawerContentRef} className="overflow-y-auto flex-1">
           {/* 1. Header with Brand & Close Button */}
           <div className="p-4 px-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
             <div 
@@ -136,101 +159,84 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
             </div>
           </div>
 
-          {/* 3. Main Client Navigation */}
-          <div className="p-4 space-y-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 block mb-1">
-              Navigation Client
-            </span>
-
-            <button
-              type="button"
-              onClick={() => handleNav('catalog')}
-              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'catalog'
-                  ? 'bg-[#eef3ff] text-[#0d44e8] font-bold'
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <Layers className="w-4 h-4 text-[#0d44e8]" />
-                <span>Catalogue médical</span>
-              </div>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleNav('bulk-order')}
-              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'bulk-order'
-                  ? 'bg-[#eef3ff] text-[#0d44e8] font-bold'
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <span className="w-4 h-4 text-center font-bold text-[#0d44e8] leading-none">⚡</span>
-                <span>Saisie Rapide (Bulk Order)</span>
-              </div>
-              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-blue-100 text-[#0d44e8]">
-                Bloc & Majors
+          {/* 3. Client drawer: profile, preferences, notifications, help */}
+          {role === 'client' ? (
+            <div className="p-4 space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 block mb-1">
+                Mon espace
               </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleNav('packs')}
-              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'packs'
-                  ? 'bg-[#eef3ff] text-[#0d44e8] font-bold'
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <Sparkles className="w-4 h-4 text-amber-500" />
-                <span>Packs Promotionnels</span>
-              </div>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleNav('cart')}
-              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'cart'
-                  ? 'bg-[#eef3ff] text-[#0d44e8] font-bold'
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <ShoppingBag className="w-4 h-4 text-[#0d44e8]" />
-                <span>Mon Panier</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                {cartCount > 0 && (
-                  <span className="px-2 py-0.5 rounded-full bg-[#0d44e8] text-white text-[10px] font-black">
-                    {cartCount}
-                  </span>
-                )}
-                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              </div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleNav('dashboard')}
-              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                activeTab === 'dashboard'
-                  ? 'bg-[#eef3ff] text-[#0d44e8] font-bold'
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <FileText className="w-4 h-4 text-[#0d44e8]" />
-                <span>Mes Commandes & Suivi Direct</span>
-              </div>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-            </button>
-          </div>
+              {currentUser ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { onClose(); onOpenClientProfile?.(); }}
+                    className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2.5"><UserRound className="w-4 h-4 text-[#0d44e8]" />Profil et coordonnées</span>
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { onClose(); onOpenClientProfile?.(); }}
+                    className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2.5"><MapPin className="w-4 h-4 text-[#0d44e8]" />Adresse de livraison</span>
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { onClose(); onOpenNotifications?.(); }}
+                    className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2.5"><Bell className="w-4 h-4 text-[#0d44e8]" />Notifications et messages</span>
+                    {unreadNotificationCount > 0 && <span className="min-w-5 rounded-full bg-rose-600 px-1.5 py-0.5 text-center text-[10px] font-bold text-white">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onToggleTheme}
+                    aria-pressed={isDarkTheme}
+                    className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2.5">{isDarkTheme ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-[#0d44e8]" />}{isDarkTheme ? 'Passer au thème clair' : 'Activer le thème sombre'}</span>
+                    <span className={`relative h-5 w-9 rounded-full transition-colors ${isDarkTheme ? 'bg-[#0d44e8]' : 'bg-slate-300'}`} aria-hidden="true"><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${isDarkTheme ? 'translate-x-4' : 'translate-x-0.5'}`} /></span>
+                  </button>
+                  <a
+                    href="https://wa.me/24177003004"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                  >
+                    <span className="flex items-center gap-2.5"><MessageCircle className="w-4 h-4 text-emerald-600" />Aide et contact</span>
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                  </a>
+                </>
+              ) : (
+                <button type="button" onClick={() => { onOpenAuth(); onClose(); }} className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer">
+                  <span className="flex items-center gap-2.5"><UserCheck className="w-4 h-4 text-[#0d44e8]" />Se connecter pour ouvrir Mon espace</span>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="p-4 space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 block mb-1">Navigation Client</span>
+              <button type="button" onClick={() => handleNav('catalog')} className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${activeTab === 'catalog' ? 'bg-[#eef3ff] text-[#0d44e8] font-bold' : 'text-slate-700 hover:bg-slate-50'}`}>
+                <span className="flex items-center gap-2.5"><Layers className="w-4 h-4 text-[#0d44e8]" />Catalogue médical</span><ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+              <button type="button" onClick={() => handleNav('bulk-order')} className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${activeTab === 'bulk-order' ? 'bg-[#eef3ff] text-[#0d44e8] font-bold' : 'text-slate-700 hover:bg-slate-50'}`}>
+                <span className="flex items-center gap-2.5"><span className="w-4 text-center font-bold text-[#0d44e8]">⚡</span>Saisie rapide</span><span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-100 text-[#0d44e8]">Bloc</span>
+              </button>
+              <button type="button" onClick={() => handleNav('packs')} className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${activeTab === 'packs' ? 'bg-[#eef3ff] text-[#0d44e8] font-bold' : 'text-slate-700 hover:bg-slate-50'}`}>
+                <span className="flex items-center gap-2.5"><Sparkles className="w-4 h-4 text-amber-500" />Packs promotionnels</span><ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+              <button type="button" onClick={() => handleNav('cart')} className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${activeTab === 'cart' ? 'bg-[#eef3ff] text-[#0d44e8] font-bold' : 'text-slate-700 hover:bg-slate-50'}`}>
+                <span className="flex items-center gap-2.5"><ShoppingBag className="w-4 h-4 text-[#0d44e8]" />Mon panier {cartCount > 0 ? `(${cartCount})` : ''}</span><ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+              <button type="button" onClick={() => handleNav('dashboard')} className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${activeTab === 'dashboard' ? 'bg-[#eef3ff] text-[#0d44e8] font-bold' : 'text-slate-700 hover:bg-slate-50'}`}>
+                <span className="flex items-center gap-2.5"><FileText className="w-4 h-4 text-[#0d44e8]" />Mes commandes et suivi</span><ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+            </div>
+          )}
 
           {/* 4. Professional Back-Office Modules (STRICTLY HIDDEN FROM CLIENTS - ONLY VISIBLE WHEN AUTHENTICATED STAFF) */}
           {currentUser && role !== 'client' && (

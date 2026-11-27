@@ -33,6 +33,7 @@ interface StockLotsModuleProps {
   canManageBatches?: boolean;
   actorName?: string;
   actorRole?: string;
+  initialSection?: 'overview' | 'movements';
 }
 
 export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
@@ -45,7 +46,8 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
   canViewStockCosts = false,
   canManageBatches = false,
   actorName = 'Gestionnaire Catalogue',
-  actorRole = 'Super-Admin'
+  actorRole = 'Super-Admin',
+  initialSection = 'overview'
 }) => {
   const [statusFilter, setStatusFilter] = useState<'all' | 'rupture' | 'disponible' | 'sur-commande' | 'sous-seuil'>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('Toutes');
@@ -99,6 +101,13 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
   };
 
   useEffect(() => { void loadBatches(); void loadMovements(undefined, 0, false); }, []);
+  useEffect(() => {
+    if (initialSection !== 'movements') return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById('stock-movement-journal')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [initialSection]);
 
   const categories = ['Toutes', ...Array.from(new Set(products.map(p => p.category)))];
 
@@ -718,7 +727,7 @@ export const StockLotsModule: React.FC<StockLotsModuleProps> = ({
         )}
       </section>
 
-      <section className="overflow-hidden rounded-3xl border border-slate-200/90 bg-white shadow-2xs">
+      <section id="stock-movement-journal" className="scroll-mt-20 overflow-hidden rounded-3xl border border-slate-200/90 bg-white shadow-2xs">
         <header className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/60 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div>
             <h3 className="flex items-center gap-2 text-sm font-black text-slate-900">

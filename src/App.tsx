@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import './clientTheme.css';
 import { 
   Search, 
   X, 
@@ -155,6 +156,30 @@ export default function App() {
   // Current User
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const authGeneration = useRef(0);
+  const [isClientProfileModalOpen, setIsClientProfileModalOpen] = useState(false);
+  const [clientHomeRequestVersion, setClientHomeRequestVersion] = useState(0);
+  const [isDarkTheme, setIsDarkTheme] = useState(() => {
+    try { return localStorage.getItem('gloryday_theme_preference') === 'dark'; }
+    catch { return false; }
+  });
+  const [isBrandIntroVisible, setIsBrandIntroVisible] = useState(() => {
+    try { return !sessionStorage.getItem('gloryday_brand_intro_seen'); }
+    catch { return false; }
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.glorydayTheme = isDarkTheme ? 'dark' : 'light';
+    try { localStorage.setItem('gloryday_theme_preference', isDarkTheme ? 'dark' : 'light'); }
+    catch { /* Theme remains available for this session if storage is blocked. */ }
+  }, [isDarkTheme]);
+
+  useEffect(() => {
+    if (!isBrandIntroVisible) return;
+    try { sessionStorage.setItem('gloryday_brand_intro_seen', '1'); }
+    catch { /* The intro remains brief even when session storage is unavailable. */ }
+    const timeoutId = window.setTimeout(() => setIsBrandIntroVisible(false), 720);
+    return () => window.clearTimeout(timeoutId);
+  }, [isBrandIntroVisible]);
 
   // Global Product Creation Modal State
   const [isGlobalProductModalOpen, setIsGlobalProductModalOpen] = useState(false);
@@ -1083,7 +1108,7 @@ export default function App() {
   }, [products, searchQuery, selectedSpecialty, selectedCategory, selectedSubcategory, onlySelected, onlyPromotions, priceRange, sortBy, cartItems]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-white text-slate-900 font-['Plus_Jakarta_Sans',sans-serif]">
+    <div className="gloryday-app min-h-screen flex flex-col bg-white text-slate-900 font-['Plus_Jakarta_Sans',sans-serif]">
       {/* Lateral Menu / Drawer */}
       <AppSidebar
         isOpen={isSidebarOpen}
@@ -1096,8 +1121,30 @@ export default function App() {
         onOpenAuth={() => setIsAuthModalOpen(true)}
         onOpenCreateProduct={() => setIsGlobalProductModalOpen(true)}
         onOpenDraftsModal={() => setIsDraftsModalOpen(true)}
+        onOpenClientProfile={() => {
+          setActiveTab('dashboard');
+          setIsClientProfileModalOpen(true);
+          setIsSidebarOpen(false);
+        }}
+        onOpenNotifications={() => {
+          setIsNotificationModalOpen(true);
+          setIsSidebarOpen(false);
+        }}
+        onToggleTheme={() => setIsDarkTheme(theme => !theme)}
+        isDarkTheme={isDarkTheme}
+        unreadNotificationCount={notifications.filter(notification => !notification.read).length}
         draftsCount={draftsCount}
       />
+
+      {isBrandIntroVisible && (
+        <div className="gloryday-brand-intro fixed inset-0 z-[300] pointer-events-none grid place-items-center bg-white" role="status" aria-label="Ouverture de Gloryday Pharma">
+          <div className="gloryday-brand-intro-content flex flex-col items-center px-6 text-center">
+            <img src="/gloryday-emblem.png" alt="Logo Gloryday Pharma" className="gloryday-brand-intro-logo h-24 w-28 object-contain" />
+            <p className="mt-3 text-xl font-extrabold tracking-[0.12em] text-slate-900">GLORYDAY PHARMA</p>
+            <p className="mt-1 text-sm text-slate-600">Votre fournisseur de matériel médical au Gabon.</p>
+          </div>
+        </div>
+      )}
 
       {/* PWA In-App Install Prompt Banner */}
       <PWAInstallBanner />
@@ -1196,6 +1243,12 @@ export default function App() {
               <ClientDashboard
                 orders={orders}
                 currentUser={currentUser}
+                notifications={notifications}
+                onOpenNotifications={() => setIsNotificationModalOpen(true)}
+                onOpenClientMenu={() => setIsSidebarOpen(true)}
+                profileModalOpen={isClientProfileModalOpen}
+                onProfileModalOpenChange={setIsClientProfileModalOpen}
+                homeRequestVersion={clientHomeRequestVersion}
                 onReorder={handleReorder}
                 onOpenAuth={() => setIsAuthModalOpen(true)}
                 onRefreshOrders={async () => {
@@ -1623,6 +1676,12 @@ export default function App() {
         setActiveTab={setActiveTab}
         cartCount={cartCount}
         onOpenSidebar={() => setIsSidebarOpen(true)}
+        isClientSpace={!currentUser || currentUser.role === 'client'}
+        unreadNotificationCount={notifications.filter(notification => !notification.read).length}
+        onSelectClientSpace={() => {
+          setActiveTab('dashboard');
+          setClientHomeRequestVersion(version => version + 1);
+        }}
         draftsCount={draftsCount}
       />
 

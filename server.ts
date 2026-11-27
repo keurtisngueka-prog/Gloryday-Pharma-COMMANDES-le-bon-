@@ -2805,6 +2805,38 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     res.json({ user: cleanUser(updatedUser) });
   }));
 
+  app.patch('/api/auth/password', asyncHandler(async (req, res) => {
+    const currentUser = (req as AuthenticatedRequest).authenticatedUser;
+    if (!currentUser || currentUser.role !== 'client') {
+      res.status(401).json({ error: 'Connexion client requise.' });
+      return;
+    }
+    const account = store.accounts.find(item => item.user.id === currentUser.id);
+    if (!account) {
+      res.status(404).json({ error: 'Compte client introuvable.' });
+      return;
+    }
+
+    const currentPassword = String(req.body?.currentPassword || '');
+    const newPassword = String(req.body?.newPassword || '');
+    if (currentPassword.length < 8 || currentPassword.length > 85 || newPassword.length < 8 || newPassword.length > 85) {
+      res.status(400).json({ error: 'Les mots de passe doivent contenir entre 8 et 85 caractères.' });
+      return;
+    }
+    if (!await verifyPassword(currentPassword, account.passwordHash || 'scrypt$00112233445566778899aabbccddeeff$00')) {
+      res.status(400).json({ error: 'Le mot de passe actuel est incorrect.' });
+      return;
+    }
+    if (currentPassword === newPassword) {
+      res.status(400).json({ error: 'Choisissez un nouveau mot de passe différent de l’actuel.' });
+      return;
+    }
+
+    account.passwordHash = await hashPassword(newPassword);
+    await saveStore(store, persistence);
+    res.json({ success: true });
+  }));
+
   app.post('/api/auth/login', asyncHandler(async (req, res) => {
     const cleanPhone = normalizePhone(String(req.body?.phone || ''));
     const cleanPass = String(req.body?.password || '');

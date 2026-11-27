@@ -27,9 +27,11 @@ import {
   ListFilter,
   CalendarDays,
   CalendarClock,
-  UserRound
+  UserRound,
+  Bell,
+  ArrowRight
 } from 'lucide-react';
-import { Order, OrderStatus, OrderTimelineEvent, User, MobilePaymentDetails, ClientRemainderChoice } from '../types';
+import { AppNotification, Order, OrderStatus, OrderTimelineEvent, User, MobilePaymentDetails, ClientRemainderChoice } from '../types';
 import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
 import { getOrderBillingTotal, getOrderDeliveredQuantity, getOrderRemainingQuantity } from '../utils/orderFulfillment';
 import { downloadInvoiceProjectPdf, generateInternalPurchaseOrderPdf } from '../utils/pdfGenerator';
@@ -53,6 +55,12 @@ interface ClientDashboardProps {
   onViewOrderPdf: (order: Order) => void;
   onTrackDelivery?: (order: Order) => void;
   onProfileUpdated?: (user: User) => void;
+  notifications?: AppNotification[];
+  onOpenNotifications?: () => void;
+  onOpenClientMenu?: () => void;
+  profileModalOpen?: boolean;
+  onProfileModalOpenChange?: (isOpen: boolean) => void;
+  homeRequestVersion?: number;
 }
 
 interface ResolvedOrderSchedule {
@@ -268,7 +276,13 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   onRefreshOrders,
   onViewOrderPdf,
   onTrackDelivery,
-  onProfileUpdated
+  onProfileUpdated,
+  notifications = [],
+  onOpenNotifications,
+  onOpenClientMenu,
+  profileModalOpen,
+  onProfileModalOpenChange,
+  homeRequestVersion = 0
 }) => {
   const [selectedPaymentOrder, setSelectedPaymentOrder] = useState<Order | null>(null);
   const [conversationOrder, setConversationOrder] = useState<Order | null>(null);
@@ -286,7 +300,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const lastOrdersRefreshAt = useRef(Date.now());
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_progress' | 'delivered' | 'unpaid'>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'payments' | 'invoices'>('calendar');
+  const [viewMode, setViewMode] = useState<'overview' | 'list' | 'calendar' | 'payments' | 'invoices'>('overview');
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [invoiceDownloadError, setInvoiceDownloadError] = useState('');
   const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
@@ -368,6 +382,32 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const openOrderConversation = (order: Order, intent: 'message' | 'modification' = 'message') => {
     setConversationIntent(intent);
     setConversationOrder(order);
+  };
+
+  useEffect(() => {
+    setViewMode('overview');
+    window.requestAnimationFrame(() => document.scrollingElement?.scrollTo({ top: 0, behavior: 'smooth' }));
+  }, [homeRequestVersion]);
+
+  const openProfileModal = () => {
+    setIsProfileModalOpen(true);
+    onProfileModalOpenChange?.(true);
+  };
+
+  const closeProfileModal = () => {
+    setIsProfileModalOpen(false);
+    onProfileModalOpenChange?.(false);
+  };
+
+  const isClientProfileOpen = profileModalOpen ?? isProfileModalOpen;
+
+  const selectClientView = (view: 'overview' | 'list' | 'calendar' | 'payments' | 'invoices') => {
+    setStatusFilter('all');
+    setViewMode(view);
+    window.requestAnimationFrame(() => {
+      const targetId = view === 'overview' ? 'client-dashboard-root' : 'client-orders-and-deliveries';
+      document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   };
 
   useEffect(() => {
@@ -540,6 +580,13 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const activeDeliveryOrder = activeDeliveryOrders.find(order => order.id === selectedActiveDeliveryId)
     || activeDeliveryOrders[0]
     || null;
+  const homeOrder = [...orders]
+    .filter(order => order.status !== 'Annulée')
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] || null;
+  const unreadNotificationCount = notifications.filter(notification => !notification.read).length;
+  const latestUnreadNotification = [...notifications]
+    .filter(notification => !notification.read)
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0] || null;
 
   const deliverySteps = [
     { key: 'preparation', label: '1. Colisage & Validation', desc: 'En préparation au dépôt' },
@@ -623,9 +670,106 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   }, [calendarMonth, filteredSchedules]);
 
   return (
-    <div className="client-dashboard-enter max-w-5xl mx-auto pb-24 space-y-6 px-2 sm:px-0">
+    <div id="client-dashboard-root" className="client-dashboard-enter max-w-5xl mx-auto pb-24 space-y-6 px-2 sm:px-0">
+      {viewMode === 'overview' ? (
+        <div className="mx-auto max-w-3xl space-y-5">
+          <section className="rounded-3xl border border-emerald-100 bg-white p-5 shadow-sm sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-emerald-800">Espace client</p>
+                <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
+                  Bonjour{currentUser?.contactName ? `, ${currentUser.contactName.trim().split(/\s+/)[0]}` : ''}
+                </h1>
+                <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-600">Votre activité avec Gloryday, vos commandes et vos documents réunis au même endroit.</p>
+                {currentUser?.facilityName && <p className="mt-2 text-xs font-semibold text-slate-500">{currentUser.facilityName}</p>}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button type="button" onClick={onOpenNotifications} aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} non lues` : ''}`} className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50">
+                  <Bell className="h-5 w-5" />
+                  {unreadNotificationCount > 0 && <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-rose-600 px-1.5 py-0.5 text-center text-[10px] font-black text-white">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}
+                </button>
+                {currentUser && <button type="button" onClick={onOpenClientMenu} aria-label="Ouvrir mon profil et mes préférences" className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl bg-[#f6e6ae] text-amber-950 transition hover:brightness-95">
+                  {currentUser.avatarUrl ? <img src={currentUser.avatarUrl} alt="" className="h-full w-full object-cover" /> : <UserRound className="h-5 w-5" />}
+                </button>}
+              </div>
+            </div>
+          </section>
+
+          {!currentUser ? (
+            <section className="rounded-3xl border border-emerald-100 bg-emerald-50/60 p-5 sm:p-6">
+              <h2 className="text-base font-extrabold text-slate-900">Connectez-vous pour retrouver votre suivi</h2>
+              <p className="mt-1 text-sm leading-relaxed text-slate-600">Vos commandes, factures, échanges et coordonnées seront accessibles dans cet espace.</p>
+              <button type="button" onClick={onOpenAuth} className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#176645] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#125238]">
+                <UserRound className="h-4 w-4" /> Se connecter ou créer un compte
+              </button>
+            </section>
+          ) : (
+            <>
+              {currentUser.isDemoAccount && <div role="status" className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-xs leading-relaxed text-violet-900"><strong className="block text-sm">Compte de démonstration</strong>Les commandes de démonstration ne modifient pas le stock réel.</div>}
+              {ordersRefreshError && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-900"><span>{ordersRefreshError}</span><button type="button" onClick={() => void refreshOrders()} disabled={isRefreshingOrders} className="rounded-lg border border-rose-300 bg-white px-3 py-1.5 font-bold disabled:opacity-60">Réessayer</button></div>}
+
+              {homeOrder ? (
+                <section className="rounded-3xl border border-slate-200 bg-[#f4f6f3] p-5 sm:p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-extrabold uppercase tracking-wide text-emerald-800">Commande à suivre</p>
+                      <h2 className="mt-1 text-lg font-black text-slate-950">Commande {homeOrder.reference}</h2>
+                      <p className="mt-1 text-xs leading-relaxed text-slate-600">{homeOrder.items.length} article(s) · {homeOrder.estimatedTotal.toLocaleString('fr-FR')} FCFA</p>
+                    </div>
+                    <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-900">{homeOrder.status}</span>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => selectClientView('list')} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-white px-3.5 text-sm font-bold text-emerald-900 shadow-sm ring-1 ring-slate-200 transition hover:bg-emerald-50">Voir le détail <ArrowRight className="h-4 w-4" /></button>
+                    {onTrackDelivery && <button type="button" onClick={() => onTrackDelivery(homeOrder)} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-[#176645] px-3.5 text-sm font-bold text-white transition hover:bg-[#125238]"><Truck className="h-4 w-4" /> Suivi de livraison</button>}
+                    {currentUser.role === 'client' && <button type="button" onClick={() => openOrderConversation(homeOrder)} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3.5 text-sm font-bold text-emerald-900 transition hover:bg-emerald-50"><MessageCircle className="h-4 w-4" /> Discuter de cette commande</button>}
+                  </div>
+                </section>
+              ) : (
+                <section className="rounded-3xl border border-slate-200 bg-[#f4f6f3] p-5 sm:p-6">
+                  <h2 className="text-base font-extrabold text-slate-900">Aucune commande pour le moment</h2>
+                  <p className="mt-1 text-sm text-slate-600">Vos commandes et leur suivi apparaîtront ici après validation.</p>
+                </section>
+              )}
+
+              <section aria-labelledby="client-quick-access-title" className="space-y-3">
+                <h2 id="client-quick-access-title" className="text-sm font-black text-slate-900">Accès rapides</h2>
+                <div className="divide-y divide-slate-200 rounded-3xl border border-slate-200 bg-white px-4 sm:px-5">
+                  <button type="button" onClick={() => homeOrder && currentUser.role === 'client' ? openOrderConversation(homeOrder) : onOpenNotifications?.()} className="flex min-h-[76px] w-full items-center gap-3 py-3 text-left transition hover:bg-slate-50">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800"><MessageCircle className="h-5 w-5" /></span>
+                    <span className="min-w-0 flex-1"><strong className="block text-sm font-extrabold text-slate-900">Messages</strong><span className="mt-0.5 block text-xs text-slate-500">Échanger au sujet de votre dernière commande</span></span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+                  </button>
+                  <div className="flex min-h-[76px] items-center gap-3 py-3">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800"><FileText className="h-5 w-5" /></span>
+                    <span className="min-w-0 flex-1"><strong className="block text-sm font-extrabold text-slate-900">Factures & paiements</strong><span className="mt-0.5 block text-xs text-slate-500">{invoiceRecords.length} facture(s) · {totalOutstanding.toLocaleString('fr-FR')} FCFA restant(s)</span></span>
+                    <div className="flex shrink-0 gap-1.5">
+                      <button type="button" onClick={() => selectClientView('invoices')} className="rounded-lg px-2.5 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-50">Factures</button>
+                      <button type="button" onClick={() => selectClientView('payments')} className="rounded-lg px-2.5 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-50">Paiements</button>
+                    </div>
+                  </div>
+                  <button type="button" onClick={onOpenClientMenu} className="flex min-h-[76px] w-full items-center gap-3 py-3 text-left transition hover:bg-slate-50">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800"><UserRound className="h-5 w-5" /></span>
+                    <span className="min-w-0 flex-1"><strong className="block text-sm font-extrabold text-slate-900">Profil & préférences</strong><span className="mt-0.5 block text-xs text-slate-500">Coordonnées, adresse et apparence de l’application</span></span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+                  </button>
+                </div>
+              </section>
+
+              {latestUnreadNotification && <button type="button" onClick={onOpenNotifications} className="w-full rounded-2xl border border-amber-200 bg-[#fff9e9] p-4 text-left transition hover:bg-amber-50"><span className="text-[10px] font-extrabold uppercase tracking-wide text-amber-900">Nouvelle notification</span><span className="mt-1 block text-sm font-bold text-slate-900">{latestUnreadNotification.title || latestUnreadNotification.message}</span><span className="mt-1 block text-xs text-slate-600">Appuyez pour voir vos notifications.</span></button>}
+            </>
+          )}
+        </div>
+      ) : (
+        <>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="flex min-w-0 items-center gap-2">
+          <button type="button" onClick={() => selectClientView('overview')} className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-xl px-2.5 text-sm font-bold text-emerald-900 transition hover:bg-emerald-50"><ChevronLeft className="h-4 w-4" /> Mon espace</button>
+          <span className="truncate text-xs font-semibold text-slate-500">{viewMode === 'list' ? 'Commandes' : viewMode === 'calendar' ? 'Suivi & réception' : viewMode === 'invoices' ? 'Factures' : 'Paiements & reliquats'}</span>
+        </div>
+        {currentUser?.role === 'client' && <button type="button" onClick={() => void refreshOrders()} disabled={isRefreshingOrders} aria-label="Actualiser mes commandes" className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${isRefreshingOrders ? 'animate-spin' : ''}`} />{isRefreshingOrders ? 'Actualisation…' : 'Actualiser'}</button>}
+      </div>
       {/* 1. MODERN HEADER & PROFILE BANNER */}
-      <div className="bg-gradient-to-r from-slate-900 via-[#0f172a] to-slate-900 text-white p-5 sm:p-6 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
+      <div className="hidden bg-gradient-to-r from-slate-900 via-[#0f172a] to-slate-900 text-white p-5 sm:p-6 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
         <div className="dashboard-orb-float absolute top-0 right-0 w-80 h-80 bg-blue-600/15 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
@@ -695,7 +839,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
               </button>
             ) : (
               <>
-                <button type="button" onClick={() => setIsProfileModalOpen(true)} className="inline-flex items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-3.5 py-2 text-xs font-bold text-white hover:bg-white/20">
+                <button type="button" onClick={openProfileModal} className="inline-flex items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-3.5 py-2 text-xs font-bold text-white hover:bg-white/20">
                   <UserRound className="h-4 w-4" /> Mon profil
                 </button>
                 <a
@@ -727,6 +871,34 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         </div>
       </div>
 
+      <div className="!hidden client-dashboard-shortcuts sticky top-14 z-20 -mx-2 flex items-center gap-2 rounded-2xl border border-slate-200/90 bg-white/95 px-2 py-2 shadow-md backdrop-blur-md sm:top-24 sm:mx-0 sm:px-3">
+        {currentUser ? (
+          <button type="button" onClick={openProfileModal} className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl bg-slate-900 px-3 text-xs font-extrabold text-white transition-colors hover:bg-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+            <UserRound className="h-4 w-4" /> Mon profil
+          </button>
+        ) : (
+          <button type="button" onClick={onOpenAuth} className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl bg-[#0d44e8] px-3 text-xs font-extrabold text-white transition-colors hover:bg-blue-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+            <UserRound className="h-4 w-4" /> Connexion
+          </button>
+        )}
+        <nav aria-label="Accès rapides à mon espace" className="scrollbar-none min-w-0 flex-1 overflow-x-auto">
+          <div className="flex w-max items-center gap-1">
+            <button type="button" onClick={() => selectClientView('list')} aria-pressed={viewMode === 'list'} className={`inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-xl px-3 text-xs font-bold transition-colors ${viewMode === 'list' ? 'bg-blue-50 text-blue-800' : 'text-slate-600 hover:bg-slate-100'}`}>
+              <Package className="h-4 w-4" /> Commandes
+            </button>
+            <button type="button" onClick={() => selectClientView('calendar')} aria-pressed={viewMode === 'calendar'} className={`inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-xl px-3 text-xs font-bold transition-colors ${viewMode === 'calendar' ? 'bg-cyan-50 text-cyan-900' : 'text-slate-600 hover:bg-slate-100'}`}>
+              <CalendarClock className="h-4 w-4" /> Calendrier
+            </button>
+            <button type="button" onClick={() => selectClientView('invoices')} aria-pressed={viewMode === 'invoices'} className={`inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-xl px-3 text-xs font-bold transition-colors ${viewMode === 'invoices' ? 'bg-emerald-50 text-emerald-900' : 'text-slate-600 hover:bg-slate-100'}`}>
+              <FileText className="h-4 w-4" /> Factures
+            </button>
+            <button type="button" onClick={() => selectClientView('payments')} aria-pressed={viewMode === 'payments'} className={`inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-xl px-3 text-xs font-bold transition-colors ${viewMode === 'payments' ? 'bg-amber-50 text-amber-900' : 'text-slate-600 hover:bg-slate-100'}`}>
+              <CreditCard className="h-4 w-4" /> Paiements
+            </button>
+          </div>
+        </nav>
+      </div>
+
       {currentUser?.isDemoAccount && (
         <div role="status" className="flex items-start gap-3 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-950">
           <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-violet-700" />
@@ -746,13 +918,13 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         </div>
       )}
 
-      <section aria-labelledby="client-spaces-title" className="space-y-3">
+      <section aria-labelledby="client-spaces-title" className="!hidden space-y-3">
         <div>
           <h2 id="client-spaces-title" className="text-sm font-black text-slate-900">Vos espaces</h2>
           <p className="mt-1 text-xs leading-relaxed text-slate-600">Choisissez ce que vous voulez consulter : commandes, livraisons, factures ou paiements.</p>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <button type="button" onClick={() => setViewMode('list')} aria-pressed={viewMode === 'list'} className={`group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md ${viewMode === 'list' ? 'border-blue-300 bg-blue-50/70 ring-2 ring-blue-100' : 'border-slate-200 bg-white hover:border-blue-200'}`}>
+          <button type="button" onClick={() => selectClientView('list')} aria-pressed={viewMode === 'list'} className={`group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md ${viewMode === 'list' ? 'border-blue-300 bg-blue-50/70 ring-2 ring-blue-100' : 'border-slate-200 bg-white hover:border-blue-200'}`}>
             <div className="flex items-center justify-between gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-700"><Package className="h-5 w-5" /></span>
               <span className="text-xl font-black tabular-nums text-slate-900">{orders.length}</span>
@@ -761,7 +933,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             <span className="mt-1 block text-xs leading-relaxed text-slate-600">Voir les articles, les statuts et les échanges avec l’équipe.</span>
           </button>
 
-          <button type="button" onClick={() => setViewMode('calendar')} aria-pressed={viewMode === 'calendar'} className={`group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md ${viewMode === 'calendar' ? 'border-cyan-300 bg-cyan-50/70 ring-2 ring-cyan-100' : 'border-slate-200 bg-white hover:border-cyan-200'}`}>
+          <button type="button" onClick={() => selectClientView('calendar')} aria-pressed={viewMode === 'calendar'} className={`group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md ${viewMode === 'calendar' ? 'border-cyan-300 bg-cyan-50/70 ring-2 ring-cyan-100' : 'border-slate-200 bg-white hover:border-cyan-200'}`}>
             <div className="flex items-center justify-between gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-100 text-cyan-800"><CalendarClock className="h-5 w-5" /></span>
               <span className="text-xl font-black tabular-nums text-slate-900">{activeDeliveryOrders.length}</span>
@@ -770,7 +942,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             <span className="mt-1 block text-xs leading-relaxed text-slate-600">Consulter les livraisons prévues et enregistrer une réception.</span>
           </button>
 
-          <button type="button" onClick={() => { setStatusFilter('all'); setViewMode('invoices'); }} aria-pressed={viewMode === 'invoices'} className={`group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md ${viewMode === 'invoices' ? 'border-emerald-300 bg-emerald-50/70 ring-2 ring-emerald-100' : 'border-slate-200 bg-white hover:border-emerald-200'}`}>
+          <button type="button" onClick={() => selectClientView('invoices')} aria-pressed={viewMode === 'invoices'} className={`group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md ${viewMode === 'invoices' ? 'border-emerald-300 bg-emerald-50/70 ring-2 ring-emerald-100' : 'border-slate-200 bg-white hover:border-emerald-200'}`}>
             <div className="flex items-center justify-between gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-800"><FileText className="h-5 w-5" /></span>
               <span className="text-xl font-black tabular-nums text-slate-900">{invoiceRecords.length}</span>
@@ -779,7 +951,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             <span className="mt-1 block text-xs leading-relaxed text-slate-600">Retrouver les factures, les avoirs et leurs documents PDF.</span>
           </button>
 
-          <button type="button" onClick={() => { setStatusFilter('all'); setViewMode('payments'); }} aria-pressed={viewMode === 'payments'} className={`group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md ${viewMode === 'payments' ? 'border-amber-300 bg-amber-50/70 ring-2 ring-amber-100' : 'border-slate-200 bg-white hover:border-amber-200'}`}>
+          <button type="button" onClick={() => selectClientView('payments')} aria-pressed={viewMode === 'payments'} className={`group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md ${viewMode === 'payments' ? 'border-amber-300 bg-amber-50/70 ring-2 ring-amber-100' : 'border-slate-200 bg-white hover:border-amber-200'}`}>
             <div className="flex items-center justify-between gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-800"><CreditCard className="h-5 w-5" /></span>
               <span className="text-xl font-black tabular-nums text-slate-900">{paymentAndRemainderOrders.length}</span>
@@ -791,7 +963,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       </section>
 
       {/* 2. MODERN HEALTHCARE KPI METRICS */}
-      <div className="client-dashboard-kpis grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="!hidden client-dashboard-kpis grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-xs font-bold text-slate-600">Total Commandes</span>
@@ -816,7 +988,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           <div className="text-2xl font-black text-[#0d44e8] tabular-nums">{pendingOrders.length}</div>
           <button
             type="button"
-            onClick={() => setViewMode('calendar')}
+            onClick={() => selectClientView('calendar')}
             className="text-[11px] text-blue-700 hover:text-blue-900 mt-1 flex items-center gap-1 font-semibold cursor-pointer underline-offset-2 hover:underline"
           >
             <Calendar className="w-3.5 h-3.5" />
@@ -858,7 +1030,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       </div>
 
       {/* 3. SPOTLIGHT : DIRECT LIVE DELIVERY TRACKING (MODERN TRACKER) */}
-      {activeDeliveryOrder && activeDeliveryOrder.status !== 'Annulée' && (
+      {viewMode === 'calendar' && activeDeliveryOrder && activeDeliveryOrder.status !== 'Annulée' && (
         <div className="dashboard-card-interactive bg-white rounded-3xl border border-blue-200 shadow-md p-5 sm:p-6 relative overflow-hidden">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 pb-4 border-b border-slate-100">
             <div>
@@ -990,7 +1162,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       )}
 
       {/* 4. ORDERS & DELIVERY CALENDAR CONTAINER */}
-      <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
+      <div id="client-orders-and-deliveries" className="scroll-mt-32 bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden sm:scroll-mt-36">
         {/* Top bar with View Switcher (Calendrier / Liste) & Search */}
         <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
@@ -2137,6 +2309,8 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           </>
         )}
       </div>
+        </>
+      )}
 
       {/* 5. MOBILE PAYMENT MODAL FOR DIRECT SETTLEMENT */}
       {selectedPaymentOrder && (
@@ -2160,10 +2334,10 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           }}
         />
       )}
-      {isProfileModalOpen && currentUser && (
+      {isClientProfileOpen && currentUser && (
         <ClientProfileModal
           user={currentUser}
-          onClose={() => setIsProfileModalOpen(false)}
+          onClose={closeProfileModal}
           onProfileUpdated={onProfileUpdated}
         />
       )}
