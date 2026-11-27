@@ -6,15 +6,15 @@ export interface GabonLocality {
   neighborhoods?: string[];
 }
 
-// Neighborhood lists for the larger communes are compiled from Gabonese
-// Ministry of Interior electoral constituency documents (2023). Smaller
-// communes keep a manual fallback because no complete public neighborhood
-// directory was available for them.
+// Neighborhood lists for larger communes are compiled from Gabonese Ministry
+// of Interior (2023) and Official Journal electoral constituency documents
+// (2025). Smaller communes keep an "Autre quartier" option because a complete
+// public neighborhood directory was not available for every locality.
 export const GABON_LOCALITIES: GabonLocality[] = [
   { name: 'Libreville', province: 'Estuaire' },
   { name: 'Akanda', province: 'Estuaire' },
   { name: 'Owendo', province: 'Estuaire' },
-  { name: 'Ntoum', province: 'Estuaire', neighborhoods: ['Ntoum Centre', 'Okolassi', 'Nkok', 'Essassa', 'Bikélé', 'Autre quartier'] },
+  { name: 'Ntoum', province: 'Estuaire', neighborhoods: ['Okolassi', 'Mekonanam', 'Dzobermitang', 'Ntoum Centre', 'Nkan’n', 'Andock-Assi', 'Alarmitang', 'Rails', 'Matoto', 'Gnambour', 'Tchad', 'SONADECI', 'Assora', 'Dame-Oyem', 'Mveng-Ayong', 'Meyang', 'Mebba', 'Akamaguê', 'Nkok', 'Zone économique spéciale de Nkok', 'Essassa', 'Nzogmitang', 'Bissobinam', 'Nkoltang', 'Ayémé', 'Ayémé-Plaine', 'Ayémé-Maritime', 'Autre quartier'] },
   { name: 'Kango', province: 'Estuaire', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Cocobeach', province: 'Estuaire', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Ndzomoé', province: 'Estuaire', neighborhoods: ['Centre-ville', 'Autre quartier'] },
@@ -23,7 +23,7 @@ export const GABON_LOCALITIES: GabonLocality[] = [
   { name: 'Mounana', province: 'Haut-Ogooué', neighborhoods: ['Massango 1', 'Cité Cadre', 'Cité Ambie', 'Centre-ville', 'Ngangolo', 'Onkoua', 'Village Mounana', 'Autre quartier'] },
   { name: 'Léconi', province: 'Haut-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Okondja', province: 'Haut-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
-  { name: 'Akiéni', province: 'Haut-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
+  { name: 'Akiéni', province: 'Haut-Ogooué', neighborhoods: ['Obégué', 'Otou 2', 'Entsaga', 'Akaga', 'Kakoumbou', 'Evoula', 'Ndoua', 'Oyabi', 'Lenka', 'Obouo', 'Autre quartier'] },
   { name: 'Bongoville', province: 'Haut-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Bakoumba', province: 'Haut-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Ngouoni', province: 'Haut-Ogooué', neighborhoods: ['Centre-ville', 'Autre quartier'] },
@@ -46,7 +46,7 @@ export const GABON_LOCALITIES: GabonLocality[] = [
   { name: 'Moabi', province: 'Nyanga', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Ndindi', province: 'Nyanga', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Mabanda', province: 'Nyanga', neighborhoods: ['Centre-ville', 'Autre quartier'] },
-  { name: 'Makokou', province: 'Ogooué-Ivindo', neighborhoods: ['Mbolo-Edock', 'Mbolo 3', 'Mbolo 2', 'Etangangove 2', 'Mbolo 1', 'Zoatab 2', 'Epassendjé 1', 'Pont Liboumba', 'Bienvenue', 'Ebandangoye 1', 'Epassendjé 2', 'Mbeza', 'Iyoko Ngota', 'Central 2', 'Nzing-Meyong', 'Central 1', 'Essik', 'Allarmintang', 'Nzeng-Ayong', 'Ekowong', 'Haoussa', 'Andock', 'Zouma', 'Ngouabi', 'Mbouala', 'Envouang', 'Loa-Loa', 'Mayiga', 'Edoung Avion', 'Autre quartier'] },
+  { name: 'Makokou', province: 'Ogooué-Ivindo', neighborhoods: ['Mbolo-Edock', 'Mbolo 3', 'Mbolo 2', 'Mbolo 1', 'Zoatab 2', 'Epassendjé 1', 'Pont Liboumba', 'Bienvenue', 'Ebandangoye 1', 'Ebandangoye 2', 'Epassendjé 2', 'Mbeza', 'Iyoko Ngota', 'Central 2', 'Nzing-Meyong', 'Central 1', 'Essik', 'Allarmintang', 'Nzeng-Ayong', 'Ekowong', 'Haoussa', 'Andock', 'Zouma', 'Ngouabi', 'Mbouala', 'Envouang', 'Loa-Loa', 'Mayiga', 'Edoung Avion', 'Autre quartier'] },
   { name: 'Mékambo', province: 'Ogooué-Ivindo', neighborhoods: ['Centre-ville', 'Djibo', 'Mbelakembé', 'Corniche 1', 'Corniche 2', 'Mayéka', 'Edock', 'Vie chère', 'Vie dure', 'Paris Bouyon', 'Mbembézalé', 'Batouala', 'Autre quartier'] },
   { name: 'Booué', province: 'Ogooué-Ivindo', neighborhoods: ['Centre-ville', 'Autre quartier'] },
   { name: 'Ovan', province: 'Ogooué-Ivindo', neighborhoods: ['Centre-ville', 'Autre quartier'] },
