@@ -43,7 +43,18 @@ export const StaffMessagesModule: React.FC<StaffMessagesModuleProps> = ({ curren
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refresh(true);
+    };
+    const intervalId = window.setInterval(refreshWhenVisible, 15_000);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [refresh]);
 
   const filteredMessages = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase('fr');
@@ -108,7 +119,18 @@ export const StaffMessagesModule: React.FC<StaffMessagesModuleProps> = ({ curren
                 </div>
               </div>
               {message.orderReference && <p className="mt-2 inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-800">Commande {message.orderReference}</p>}
-              <p className="mt-3 whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-700">{message.content}</p>
+              {message.content && <p className="mt-3 whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-700">{message.content}</p>}
+              {message.attachments?.length ? (
+                <div className="mt-3 grid max-w-md grid-cols-2 gap-2">
+                  {message.attachments.map((attachment) => attachment.signedUrl ? (
+                    <a key={attachment.path} href={attachment.signedUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                      <img src={attachment.signedUrl} alt={attachment.originalName || 'Photo jointe par le client'} loading="lazy" className="aspect-square w-full object-cover" />
+                    </a>
+                  ) : (
+                    <p key={attachment.path} className="rounded-xl bg-slate-50 px-2 py-3 text-center text-[10px] text-slate-500">Photo indisponible</p>
+                  ))}
+                </div>
+              ) : null}
               {message.senderRole === 'client' && message.orderId && (
                 <button type="button" onClick={() => setReplyMessage(message)} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-700 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-blue-800">
                   <MessageCircle className="h-3.5 w-3.5" /> Répondre au client dans le fil

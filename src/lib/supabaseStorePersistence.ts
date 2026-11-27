@@ -499,6 +499,32 @@ export class SupabaseStorePersistence {
     };
   }
 
+  async createOrderMessageMediaUploadUrl(orderId: string, userId: string, contentType: string): Promise<{
+    path: string;
+    token: string;
+    signedUrl: string;
+  }> {
+    const extension = contentType === 'image/png' ? 'png' : contentType === 'image/webp' ? 'webp' : 'jpg';
+    const safeOrderId = orderId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120);
+    const safeUserId = userId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120);
+    const path = `orders/${safeOrderId}/${safeUserId}/${randomUUID()}.${extension}`;
+    const { data, error } = await this.client.storage
+      .from('order-message-media')
+      .createSignedUploadUrl(path);
+    assertNoError('création du lien privé d’envoi de photo', error);
+    if (!data) throw new Error('Supabase n’a pas fourni de lien privé pour cette photo.');
+    return { path, token: data.token, signedUrl: data.signedUrl };
+  }
+
+  async createOrderMessageMediaSignedUrl(path: string): Promise<string> {
+    const { data, error } = await this.client.storage
+      .from('order-message-media')
+      .createSignedUrl(path, 15 * 60);
+    assertNoError('création du lien temporaire de lecture de la photo', error);
+    if (!data?.signedUrl) throw new Error('Supabase n’a pas fourni de lien temporaire pour cette photo.');
+    return data.signedUrl;
+  }
+
   async hydrate(local: PersistentServerStore): Promise<PersistentServerStore> {
     const [productsResult, variantsResult, packsResult, ordersResult, itemsResult, usersResult, quotesResult, messagesResult, notificationsResult, expensesResult, collectionRemindersResult, staffAccountsResult, activityLogsResult, runtimeSettingsResult, clientRecordsResult] = await Promise.all([
       this.client.from('products').select('*').order('created_at', { ascending: true }),

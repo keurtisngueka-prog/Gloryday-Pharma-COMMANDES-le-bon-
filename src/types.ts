@@ -650,6 +650,14 @@ export interface MediaItem {
   tags?: string[];
 }
 
+export interface DirectMessageAttachment {
+  path: string;
+  originalName: string;
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  size: number;
+  signedUrl?: string;
+}
+
 export interface DirectMessage {
   id: string;
   senderId: string;
@@ -663,6 +671,7 @@ export interface DirectMessage {
   orderReference?: string;
   subject: string;
   content: string;
+  attachments?: DirectMessageAttachment[];
   channel: 'in_app' | 'whatsapp' | 'both';
   createdAt: string;
 }

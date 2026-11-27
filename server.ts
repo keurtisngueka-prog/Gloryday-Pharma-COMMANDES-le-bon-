@@ -3953,7 +3953,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
     res.json(store.quotes[idx]);
   }));
 
-  app.get('/api/messages', (_req, res) => {
+  app.get('/api/messages', asyncHandler(async (_req, res) => {
     const user = (_req as AuthenticatedRequest).authenticatedUser!;
     const assignedClientIds = user.role === 'Commercial'
       ? new Set(store.accounts.filter(a => a.user.assignedToCommercialId === user.id).map(a => a.user.id))
@@ -3965,10 +3965,61 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         : user.role === 'Commercial'
           ? store.messages.filter(m => m.senderId === user.id || m.recipientId === user.id || assignedClientIds.has(m.recipientId || '') || assignedClientIds.has(m.senderId))
           : store.messages;
+    const messagesWithSignedAttachments = await Promise.all(messages.map(async (message) => {
+      if (!persistence || !message.orderId || !message.attachments?.length) return message;
+      const safeOrderId = message.orderId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120);
+      const expectedPrefix = `orders/${safeOrderId}/`;
+      const attachments = await Promise.all(message.attachments.map(async (attachment) => {
+        if (!attachment.path.startsWith(expectedPrefix)) return { ...attachment, signedUrl: undefined };
+        try {
+          return { ...attachment, signedUrl: await persistence.createOrderMessageMediaSignedUrl(attachment.path) };
+        } catch {
+          return { ...attachment, signedUrl: undefined };
+        }
+      }));
+      return { ...message, attachments };
+    }));
     const canViewClientContacts = user.role === 'Super-Admin'
       || (user.permissions || []).some(permission => permission === 'clients_view' || permission === 'clients_manage');
-    res.json(canViewClientContacts ? messages : messages.map(({ recipientPhone: _recipientPhone, senderPhone: _senderPhone, ...message }) => message));
-  });
+    res.json(canViewClientContacts
+      ? messagesWithSignedAttachments
+      : messagesWithSignedAttachments.map(({ recipientPhone: _recipientPhone, senderPhone: _senderPhone, ...message }) => message));
+  }));
+
+  app.post('/api/messages/media-upload-url', asyncHandler(async (req, res) => {
+    if (!persistence) {
+      res.status(503).json({ error: 'L’envoi de photos nécessite le stockage sécurisé des conversations.' });
+      return;
+    }
+    const user = (req as AuthenticatedRequest).authenticatedUser!;
+    const orderId = typeof req.body?.orderId === 'string' ? req.body.orderId.trim().slice(0, 120) : '';
+    const linkedOrder = orderId ? store.orders.find((order) => order.id === orderId || order.reference === orderId) : undefined;
+    if (!linkedOrder) {
+      res.status(404).json({ error: 'La commande liée à cette conversation est introuvable.' });
+      return;
+    }
+    if (user.role === 'client' && linkedOrder.userId !== user.id) {
+      res.status(403).json({ error: 'Vous ne pouvez joindre des photos qu’à vos propres commandes.' });
+      return;
+    }
+    if (user.role === 'Commercial' && linkedOrder.assignedCommercialId !== user.id
+      && !store.accounts.some((account) => account.user.id === linkedOrder.userId && account.user.assignedToCommercialId === user.id)) {
+      res.status(403).json({ error: 'Cette commande ne fait pas partie de votre portefeuille.' });
+      return;
+    }
+    const contentType = String(req.body?.contentType || '').trim().toLowerCase();
+    const fileSize = Number(req.body?.fileSize);
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(contentType)) {
+      res.status(400).json({ error: 'Format non accepté. Choisissez une image JPEG, PNG ou WebP.' });
+      return;
+    }
+    if (!Number.isFinite(fileSize) || fileSize <= 0 || fileSize > 5 * 1024 * 1024) {
+      res.status(400).json({ error: 'Chaque image doit peser au maximum 5 Mo.' });
+      return;
+    }
+    const upload = await persistence.createOrderMessageMediaUploadUrl(linkedOrder.id, user.id, contentType);
+    res.status(201).json(upload);
+  }));
 
   app.post('/api/messages', asyncHandler(async (req, res) => {
     const user = (req as AuthenticatedRequest).authenticatedUser!;
@@ -4005,6 +4056,34 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       res.status(403).json({ error: 'Ce message ne peut être lié qu’au client de la commande.' });
       return;
     }
+    const rawAttachments = Array.isArray(req.body?.attachments) ? req.body.attachments : [];
+    if (rawAttachments.length > 3) {
+      res.status(400).json({ error: 'Vous pouvez joindre trois images au maximum par message.' });
+      return;
+    }
+    const safeOrderId = linkedOrder?.id.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120);
+    const expectedAttachmentPrefix = safeOrderId ? `orders/${safeOrderId}/` : '';
+    const attachmentMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+    const attachments = rawAttachments.map((raw: any) => {
+      const file = raw && typeof raw === 'object' ? raw : {};
+      const path = typeof file.path === 'string' ? file.path : '';
+      const originalName = typeof file.originalName === 'string'
+        ? file.originalName.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 120)
+        : '';
+      const mimeType = typeof file.mimeType === 'string' ? file.mimeType : '';
+      const size = Number(file.size);
+      const isGeneratedOrderPath = expectedAttachmentPrefix
+        && path.startsWith(expectedAttachmentPrefix)
+        && new RegExp(`^orders/${safeOrderId}/[A-Za-z0-9_-]{1,120}/[0-9a-f-]{36}\\.(?:jpg|png|webp)$`, 'i').test(path);
+      return isGeneratedOrderPath && originalName && attachmentMimeTypes.has(mimeType)
+        && Number.isFinite(size) && size > 0 && size <= 5 * 1024 * 1024
+        ? { path, originalName, mimeType, size }
+        : null;
+    });
+    if (attachments.some((attachment: any) => !attachment)) {
+      res.status(400).json({ error: 'Une photo jointe est invalide ou ne correspond pas à cette commande.' });
+      return;
+    }
     const msg: DirectMessage = {
       ...req.body,
       id: `msg-${randomUUID()}`,
@@ -4019,11 +4098,12 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
       orderReference: linkedOrder?.reference,
       subject: String(req.body?.subject || '').trim().slice(0, 160),
       content: String(req.body?.content || '').trim().slice(0, 5000),
+      attachments: attachments as DirectMessage['attachments'],
       channel: ['whatsapp', 'both'].includes(req.body?.channel) ? req.body.channel : 'in_app',
       createdAt: new Date().toISOString()
     };
-    if (!msg.subject || !msg.content) {
-      res.status(400).json({ error: 'Un objet et un message sont nécessaires.' });
+    if (!msg.subject || (!msg.content && !msg.attachments?.length)) {
+      res.status(400).json({ error: 'Ajoutez un message ou au moins une photo.' });
       return;
     }
     store.messages.unshift(msg);
@@ -4034,7 +4114,7 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         timestamp: msg.createdAt,
         type: 'admin_message',
         title: msg.subject,
-        message: msg.content,
+        message: msg.content || 'Une photo a été jointe à la commande.',
         targetRole: 'client',
         userId: recipientId,
         read: false,
@@ -4049,7 +4129,9 @@ export async function createServerApp(options: { serveFrontend?: boolean } = {})
         timestamp: msg.createdAt,
         type: 'admin_message',
         title: msg.orderReference ? `Message client · ${msg.orderReference}` : msg.subject,
-        message: `${msg.senderName} : ${msg.content}`,
+        message: msg.content
+          ? `${msg.senderName} : ${msg.content}`
+          : `${msg.senderName} a joint une photo à une commande.`,
         targetRole: 'Super-Admin',
         read: false,
         orderId: msg.orderId,

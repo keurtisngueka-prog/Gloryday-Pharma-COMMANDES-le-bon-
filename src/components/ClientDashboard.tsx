@@ -739,6 +739,50 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         </div>
       )}
 
+      <section aria-labelledby="client-spaces-title" className="space-y-3">
+        <div>
+          <h2 id="client-spaces-title" className="text-sm font-black text-slate-900">Vos espaces</h2>
+          <p className="mt-1 text-xs leading-relaxed text-slate-600">Choisissez ce que vous voulez consulter : commandes, livraisons, factures ou paiements.</p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <button type="button" onClick={() => setViewMode('list')} aria-pressed={viewMode === 'list'} className={`group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md ${viewMode === 'list' ? 'border-blue-300 bg-blue-50/70 ring-2 ring-blue-100' : 'border-slate-200 bg-white hover:border-blue-200'}`}>
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-700"><Package className="h-5 w-5" /></span>
+              <span className="text-xl font-black tabular-nums text-slate-900">{orders.length}</span>
+            </div>
+            <span className="mt-3 block text-sm font-extrabold text-slate-900">Commandes</span>
+            <span className="mt-1 block text-xs leading-relaxed text-slate-600">Voir les articles, les statuts et les échanges avec l’équipe.</span>
+          </button>
+
+          <button type="button" onClick={() => setViewMode('calendar')} aria-pressed={viewMode === 'calendar'} className={`group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md ${viewMode === 'calendar' ? 'border-cyan-300 bg-cyan-50/70 ring-2 ring-cyan-100' : 'border-slate-200 bg-white hover:border-cyan-200'}`}>
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-100 text-cyan-800"><CalendarClock className="h-5 w-5" /></span>
+              <span className="text-xl font-black tabular-nums text-slate-900">{activeDeliveryOrders.length}</span>
+            </div>
+            <span className="mt-3 block text-sm font-extrabold text-slate-900">Suivi & réception</span>
+            <span className="mt-1 block text-xs leading-relaxed text-slate-600">Consulter les livraisons prévues et enregistrer une réception.</span>
+          </button>
+
+          <button type="button" onClick={() => { setStatusFilter('all'); setViewMode('invoices'); }} aria-pressed={viewMode === 'invoices'} className={`group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md ${viewMode === 'invoices' ? 'border-emerald-300 bg-emerald-50/70 ring-2 ring-emerald-100' : 'border-slate-200 bg-white hover:border-emerald-200'}`}>
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-800"><FileText className="h-5 w-5" /></span>
+              <span className="text-xl font-black tabular-nums text-slate-900">{invoiceRecords.length}</span>
+            </div>
+            <span className="mt-3 block text-sm font-extrabold text-slate-900">Factures</span>
+            <span className="mt-1 block text-xs leading-relaxed text-slate-600">Retrouver les factures, les avoirs et leurs documents PDF.</span>
+          </button>
+
+          <button type="button" onClick={() => { setStatusFilter('all'); setViewMode('payments'); }} aria-pressed={viewMode === 'payments'} className={`group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md ${viewMode === 'payments' ? 'border-amber-300 bg-amber-50/70 ring-2 ring-amber-100' : 'border-slate-200 bg-white hover:border-amber-200'}`}>
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-800"><CreditCard className="h-5 w-5" /></span>
+              <span className="text-xl font-black tabular-nums text-slate-900">{paymentAndRemainderOrders.length}</span>
+            </div>
+            <span className="mt-3 block text-sm font-extrabold text-slate-900">Paiements & reliquats</span>
+            <span className="mt-1 block text-xs leading-relaxed text-slate-600">Voir les versements, les soldes restants et leurs échéances.</span>
+          </button>
+        </div>
+      </section>
+
       {/* 2. MODERN HEALTHCARE KPI METRICS */}
       <div className="client-dashboard-kpis grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
@@ -1421,7 +1465,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                           </div>
 
                           {/* Quick Action Buttons */}
-                          <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100">
+                          <div className="flex items-center gap-2.5 flex-wrap pt-2 border-t border-slate-100">
                             {order.status === 'À confirmer' && (
                               <button type="button" onClick={() => { setCancelOrderId(order.id); setCancelOrderReason(''); setCancelOrderError(''); setCancelOrderSucceeded(false); }} className="py-1.5 px-2.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100 text-xs font-bold whitespace-nowrap">
                                 Annuler ma commande
@@ -1451,7 +1495,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                               className="py-1.5 px-2.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 ml-auto"
                             >
                               <RotateCcw className="w-3.5 h-3.5" />
-                                <span>{order.status === 'Annulée' ? 'Modifier cette commande' : 'Recommander'}</span>
+                                <span>{order.status === 'Annulée' ? 'Reprendre et modifier' : 'Recommander'}</span>
                             </button>
                           </div>
                         </div>
@@ -1968,7 +2012,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                     </div>
 
                     {/* Actions buttons */}
-                    <div className="flex items-center gap-1.5 self-end lg:self-center flex-wrap">
+                    <div className="flex items-center gap-3 self-end lg:self-center flex-wrap">
                       {order.status === 'À confirmer' && (
                         <button type="button" onClick={() => { setCancelOrderId(order.id); setCancelOrderReason(''); setCancelOrderError(''); setCancelOrderSucceeded(false); }} className="py-1.5 px-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100 font-bold text-xs whitespace-nowrap">
                           Annuler ma commande
@@ -2002,8 +2046,8 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                         </button>
                       )}
 
-                      <button type="button" onClick={() => setConversationOrder(order)} className="py-1.5 px-3 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-bold text-xs flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0" title="Écrire à l’équipe au sujet de cette commande">
-                        <MessageCircle className="w-3.5 h-3.5" /><span>Message sur la commande</span>
+                      <button type="button" onClick={() => setConversationOrder(order)} className="py-1.5 px-3 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-bold text-xs flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 ml-2 sm:ml-3 sm:border-l-2 sm:border-l-indigo-200 sm:pl-4" title="Conversation privée avec l’équipe au sujet de cette commande; vous pourrez lire la réponse ici">
+                        <MessageCircle className="w-3.5 h-3.5" /><span>Échange sur la commande</span>
                       </button>
 
                       <button
@@ -2045,11 +2089,13 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => onReorder(order)}
-                        className="btn-shine py-1.5 px-3.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap shrink-0"
-                        title="Recharger ces articles dans le panier"
+                        className="btn-shine py-1.5 px-3.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap shrink-0 ml-auto sm:ml-3"
+                        title={order.status === 'Annulée'
+                          ? 'Reprendre cette commande dans le panier pour la modifier avant de la renvoyer'
+                          : 'Recharger ces articles dans le panier pour créer une nouvelle commande'}
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
-                        <span>{order.status === 'Annulée' ? 'Modifier cette commande' : 'Recommander'}</span>
+                        <span>{order.status === 'Annulée' ? 'Reprendre et modifier' : 'Recommander'}</span>
                       </button>
                     </div>
                   </div>
@@ -2097,7 +2143,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             <h2 id="client-cancel-order-title" className="text-base font-black text-slate-900">Annuler cette commande ?</h2>
             {cancelOrderSucceeded ? (
               <>
-                <p className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">La commande est annulée. Vous pouvez la reprendre avec « Modifier cette commande » pour corriger les articles avant de la renvoyer.</p>
+                <p className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">La commande est annulée. Appuyez sur « Reprendre et modifier » pour corriger les articles dans le panier avant de renvoyer une nouvelle demande.</p>
                 <button type="button" onClick={closeCancellationDialog} className="mt-4 w-full rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800">Fermer</button>
               </>
             ) : (

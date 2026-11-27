@@ -60,6 +60,18 @@ export const Navbar: React.FC<NavbarProps> = ({
     prevCountRef.current = cartCount;
   }, [cartCount]);
 
+  const handleBrandClick = () => {
+    if (onLogoClick) {
+      onLogoClick();
+    } else {
+      setActiveTab(role === 'Super-Admin' ? 'admin' : 'catalog');
+    }
+
+    window.requestAnimationFrame(() => {
+      document.scrollingElement?.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  };
+
   return (
     <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-2xs">
       {/* Desktop Micro Utility Top Bar */}
@@ -125,19 +137,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <div 
-              onClick={() => {
-                if (onLogoClick) {
-                  onLogoClick();
-                } else {
-                  if (role === 'Super-Admin') {
-                    setActiveTab('admin');
-                  } else {
-                    setActiveTab('catalog');
-                  }
+              onClick={handleBrandClick}
+              className="flex items-center gap-2 cursor-pointer select-none group"
+              title="GLORYDAY Pharma · Revenir à l’accueil et en haut de la page"
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  handleBrandClick();
                 }
               }}
-              className="flex items-center gap-2 cursor-pointer select-none group"
-              title="GLORYDAY Pharma · Clic pour réinitialiser le panier à 0 et revenir à l'accueil"
+              aria-label="Revenir à l’accueil et en haut de la page"
             >
               <img
                 src="/gloryday-emblem.png"

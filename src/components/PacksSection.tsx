@@ -4,6 +4,7 @@ import { Pack, Product } from '../types';
 import { formatProductNameWithVariant } from '../utils/productDisplay';
 import { getPackPricingSummary } from '../utils/packPricing';
 import { generateWhatsAppPackUrl } from '../utils/whatsapp';
+import './PacksSection.css';
 
 interface PacksSectionProps {
   packs: Pack[];
@@ -75,7 +76,8 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
       <div className="flex items-center justify-between mb-3 px-1">
         <div>
           <h2 className="text-base sm:text-lg font-extrabold text-[#161618] tracking-tight flex items-center gap-1.5">
-            <span>Packs promotionnels</span>
+            <Sparkles className="h-4 w-4 text-amber-600" aria-hidden="true" />
+            <span className="text-amber-900">Packs promotionnels</span>
           </h2>
           <p className="text-[11px] sm:text-xs text-[#6a6a6b]">
             Kits complets prêts à l'emploi à tarif préférentiel
@@ -85,15 +87,16 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
 
       {/* Horizontal Carousel on Mobile (snap-x), 3 columns on Desktop */}
       <div className="flex sm:grid sm:grid-cols-3 gap-3.5 overflow-x-auto pb-2 sm:pb-0 scrollbar-none snap-x snap-mandatory">
-        {packs.map((pack) => {
+        {packs.map((pack, index) => {
           const isAdded = addedPacks[pack.id];
           const pricing = getPackPricingSummary(pack, products);
           return (
             <div
               key={pack.id}
-              className={`min-w-[280px] sm:min-w-0 flex-1 snap-start bg-white rounded-2xl transition-all flex flex-col justify-between overflow-hidden shadow-2xs hover:shadow-md ${pricing.savings > 0 ? 'border-2 border-rose-300 hover:border-rose-400' : 'border border-slate-200/80 hover:border-slate-300'}`}
+              className="promo-pack-card min-w-[280px] sm:min-w-0 flex-1 snap-start border-2 border-amber-300 hover:border-amber-400 bg-white rounded-2xl transition-all flex flex-col justify-between overflow-hidden shadow-2xs hover:shadow-md"
               style={{
-                boxShadow: 'rgba(22, 22, 24, 0.04) 0px 4px 16px -4px, rgba(22, 22, 24, 0.04) 0px 0px 0px 1px'
+                boxShadow: 'rgba(22, 22, 24, 0.04) 0px 4px 16px -4px, rgba(22, 22, 24, 0.04) 0px 0px 0px 1px',
+                animationDelay: `${Math.min(index, 5) * 90}ms`,
               }}
             >
               {/* Media Container */}
@@ -104,13 +107,13 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
                 <img
                   src={pack.image}
                   alt={pack.title}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  className="promo-pack-image w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
                 
-                <div className={`absolute top-3 left-3 font-black text-[10px] px-2.5 py-1 rounded-full shadow-2xs flex items-center gap-1 ${pricing.savings > 0 ? 'bg-rose-600 text-white' : 'bg-white/95 text-[#267348]'}`}>
-                  <Sparkles className={`w-3 h-3 ${pricing.savings > 0 ? 'text-rose-100' : 'text-[#267348]'}`} />
-                  {pricing.savings > 0 ? 'OFFRE SPÉCIALE' : 'PACK PROMOTIONNEL'}
+                <div className="promo-pack-badge absolute top-3 left-3 flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-300 to-yellow-400 px-2.5 py-1 text-[10px] font-black text-amber-950 shadow-2xs">
+                  <Sparkles className="h-3 w-3 text-amber-900" />
+                  PACK PROMOTIONNEL
                 </div>
                 {pricing.discountPercent > 0 && (
                   <div className="absolute top-3 right-3 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-rose-600 text-white shadow-lg ring-2 ring-white/90">
@@ -249,8 +252,8 @@ export const PacksSection: React.FC<PacksSectionProps> = ({
             {/* Header */}
             <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0">
               <div>
-                <span className="text-[10px] font-black text-rose-700 uppercase tracking-wider block">
-                  Offre spéciale · pack promotionnel
+                <span className="text-[10px] font-black text-amber-800 uppercase tracking-wider block">
+                  Pack promotionnel
                 </span>
                 <h3 className="text-base font-bold text-[#161618] leading-tight">
                   {selectedPack.title}

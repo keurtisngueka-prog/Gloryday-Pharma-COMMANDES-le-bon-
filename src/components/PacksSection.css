@@ -1,0 +1,51 @@
+@keyframes promo-pack-enter {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes promo-pack-badge-glow {
+  0%,
+  100% {
+    box-shadow: 0 3px 10px rgb(146 64 14 / 18%);
+  }
+  50% {
+    box-shadow: 0 5px 16px rgb(146 64 14 / 32%);
+  }
+}
+
+.promo-pack-card {
+  animation: promo-pack-enter 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: transform 240ms ease, box-shadow 240ms ease, border-color 240ms ease;
+}
+
+.promo-pack-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 14px 28px rgb(120 53 15 / 12%);
+}
+
+.promo-pack-image {
+  transition: transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.promo-pack-badge {
+  animation: promo-pack-badge-glow 3.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .promo-pack-card,
+  .promo-pack-image,
+  .promo-pack-badge {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .promo-pack-card:hover {
+    transform: none;
+  }
+}

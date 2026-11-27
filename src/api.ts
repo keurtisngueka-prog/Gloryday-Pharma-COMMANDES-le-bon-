@@ -11,6 +11,7 @@ import {
   MediaItem, 
   CommercialQuote, 
   DirectMessage,
+  DirectMessageAttachment,
   ClientRecord,
   AppRole,
   DeliveryStage,
@@ -533,6 +534,44 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(msgData)
     });
+  },
+
+  async uploadOrderMessageAttachment(file: File, orderId: string): Promise<DirectMessageAttachment> {
+    const contentType = file.type;
+    const upload = await request<{ path: string; signedUrl: string }>('/api/messages/media-upload-url', {
+      method: 'POST',
+      body: JSON.stringify({ orderId, contentType, fileSize: file.size })
+    });
+    let response: Response;
+    try {
+      response = await fetch(upload.signedUrl, {
+        method: 'PUT',
+        headers: {
+          'cache-control': 'max-age=3600',
+          'content-type': contentType,
+          'x-upsert': 'false'
+        },
+        body: file
+      });
+    } catch (cause) {
+      const error = new Error('L’envoi de la photo a été interrompu. Vérifiez la connexion et réessayez.');
+      (error as Error & { cause?: unknown }).cause = cause;
+      throw error;
+    }
+    if (!response.ok) {
+      let detail = '';
+      try {
+        const data = await response.json();
+        detail = typeof data?.message === 'string' ? data.message : typeof data?.error === 'string' ? data.error : '';
+      } catch {}
+      throw new Error(detail || `L’envoi de la photo a échoué (erreur ${response.status}).`);
+    }
+    return {
+      path: upload.path,
+      originalName: file.name.slice(0, 120),
+      mimeType: contentType as DirectMessageAttachment['mimeType'],
+      size: file.size
+    };
   },
 
   async getDirectMessages(): Promise<DirectMessage[]> {
