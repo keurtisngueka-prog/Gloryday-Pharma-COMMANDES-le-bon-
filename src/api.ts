@@ -76,10 +76,6 @@ export function clearLocalDraftsAndCaches(): void {
   } catch {}
 }
 
-if (typeof window !== 'undefined') {
-  clearLocalDraftsAndCaches();
-}
-
 export function clearStoredSessionToken() {
   try {
     localStorage.removeItem('gloryday_session_token');

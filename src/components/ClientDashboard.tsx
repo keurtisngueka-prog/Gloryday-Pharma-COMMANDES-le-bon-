@@ -29,9 +29,11 @@ import {
   CalendarClock,
   UserRound,
   Bell,
-  ArrowRight
+  ArrowRight,
+  Send,
+  LoaderCircle
 } from 'lucide-react';
-import { Order, OrderStatus, OrderTimelineEvent, User, MobilePaymentDetails, ClientRemainderChoice } from '../types';
+import { Order, OrderStatus, OrderTimelineEvent, User, MobilePaymentDetails, ClientRemainderChoice, DirectMessage } from '../types';
 import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
 import { getOrderBillingTotal, getOrderDeliveredQuantity, getOrderRemainingQuantity } from '../utils/orderFulfillment';
 import { downloadInvoiceProjectPdf, generateInternalPurchaseOrderPdf } from '../utils/pdfGenerator';
@@ -43,7 +45,7 @@ import {
 import { api } from '../api';
 import { formatProductNameWithVariant } from '../utils/productDisplay';
 import { MobilePaymentModal } from './MobilePaymentModal';
-import { ClientProfileModal } from './ClientProfileModal';
+import { ClientProfileModal, type ClientProfileSection } from './ClientProfileModal';
 import { OrderConversationModal } from './OrderConversationModal';
 
 interface ClientDashboardProps {
@@ -59,6 +61,7 @@ interface ClientDashboardProps {
   onOpenClientMenu?: () => void;
   profileModalOpen?: boolean;
   onProfileModalOpenChange?: (isOpen: boolean) => void;
+  profileInitialSection?: ClientProfileSection;
   homeRequestVersion?: number;
 }
 
@@ -280,6 +283,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   onOpenClientMenu,
   profileModalOpen,
   onProfileModalOpenChange,
+  profileInitialSection = 'facility',
   homeRequestVersion = 0
 }) => {
   const [selectedPaymentOrder, setSelectedPaymentOrder] = useState<Order | null>(null);
@@ -298,7 +302,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const lastOrdersRefreshAt = useRef(Date.now());
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_progress' | 'delivered' | 'unpaid'>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'overview' | 'list' | 'calendar' | 'payments' | 'invoices'>('overview');
+  const [viewMode, setViewMode] = useState<'overview' | 'list' | 'calendar' | 'payments' | 'invoices' | 'messages'>('overview');
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [invoiceDownloadError, setInvoiceDownloadError] = useState('');
   const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
@@ -399,12 +403,11 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
 
   const isClientProfileOpen = profileModalOpen ?? isProfileModalOpen;
 
-  const selectClientView = (view: 'overview' | 'list' | 'calendar' | 'payments' | 'invoices') => {
+  const selectClientView = (view: 'overview' | 'list' | 'calendar' | 'payments' | 'invoices' | 'messages') => {
     setStatusFilter('all');
     setViewMode(view);
     window.requestAnimationFrame(() => {
-      const targetId = view === 'overview' ? 'client-dashboard-root' : 'client-orders-and-deliveries';
-      document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.getElementById('client-dashboard-root')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   };
 
@@ -726,11 +729,24 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
               <section aria-labelledby="client-quick-access-title" className="space-y-3">
                 <h2 id="client-quick-access-title" className="text-sm font-black text-slate-900">Accès rapides</h2>
                 <div className="divide-y divide-slate-200 rounded-3xl border border-slate-200 bg-white px-4 sm:px-5">
-                  <button type="button" onClick={() => homeOrder && currentUser.role === 'client' ? openOrderConversation(homeOrder) : onOpenNotifications?.()} className="flex min-h-[76px] w-full items-center gap-3 py-3 text-left transition hover:bg-slate-50">
-                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800"><MessageCircle className="h-5 w-5" /></span>
-                    <span className="min-w-0 flex-1"><strong className="block text-sm font-extrabold text-slate-900">Messages</strong><span className="mt-0.5 block text-xs text-slate-500">Échanger au sujet de votre dernière commande</span></span>
+                  {currentUser.role === 'client' ? (
+                    <button type="button" onClick={() => selectClientView('messages')} className="flex min-h-[76px] w-full items-center gap-3 py-3 text-left transition hover:bg-slate-50">
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800"><MessageCircle className="h-5 w-5" /></span>
+                      <span className="min-w-0 flex-1"><strong className="block text-sm font-extrabold text-slate-900">Messages</strong><span className="mt-0.5 block text-xs text-slate-500">Écrire à l’équipe, avec ou sans commande</span></span>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+                    </button>
+                  ) : (
+                    <button type="button" onClick={onOpenNotifications} className="flex min-h-[76px] w-full items-center gap-3 py-3 text-left transition hover:bg-slate-50">
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800"><Bell className="h-5 w-5" /></span>
+                      <span className="min-w-0 flex-1"><strong className="block text-sm font-extrabold text-slate-900">Notifications</strong><span className="mt-0.5 block text-xs text-slate-500">Voir les nouvelles et mises à jour de votre compte</span></span>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+                    </button>
+                  )}
+                  {currentUser.role === 'client' && <button type="button" onClick={onOpenNotifications} className="flex min-h-[68px] w-full items-center gap-3 py-3 text-left transition hover:bg-slate-50">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-amber-50 text-amber-800"><Bell className="h-4 w-4" /></span>
+                    <span className="min-w-0 flex-1"><strong className="block text-sm font-extrabold text-slate-900">Notifications</strong><span className="mt-0.5 block text-xs text-slate-500">Nouvelles, réponses et mises à jour du compte</span></span>
                     <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
-                  </button>
+                  </button>}
                   <div className="flex min-h-[76px] items-center gap-3 py-3">
                     <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800"><FileText className="h-5 w-5" /></span>
                     <span className="min-w-0 flex-1"><strong className="block text-sm font-extrabold text-slate-900">Factures & paiements</strong><span className="mt-0.5 block text-xs text-slate-500">{invoiceRecords.length} facture(s) · {totalOutstanding.toLocaleString('fr-FR')} FCFA restant(s)</span></span>
@@ -755,7 +771,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
         <div className="flex min-w-0 items-center gap-2">
           <button type="button" onClick={() => selectClientView('overview')} className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-xl px-2.5 text-sm font-bold text-emerald-900 transition hover:bg-emerald-50"><ChevronLeft className="h-4 w-4" /> Mon espace</button>
-          <span className="truncate text-xs font-semibold text-slate-500">{viewMode === 'list' ? 'Commandes' : viewMode === 'calendar' ? 'Suivi & réception' : viewMode === 'invoices' ? 'Factures' : 'Paiements & reliquats'}</span>
+          <span className="truncate text-xs font-semibold text-slate-500">{viewMode === 'list' ? 'Commandes' : viewMode === 'calendar' ? 'Suivi & réception' : viewMode === 'invoices' ? 'Factures' : viewMode === 'messages' ? 'Messages' : 'Paiements & reliquats'}</span>
         </div>
         {currentUser?.role === 'client' && <button type="button" onClick={() => void refreshOrders()} disabled={isRefreshingOrders} aria-label="Actualiser mes commandes" className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${isRefreshingOrders ? 'animate-spin' : ''}`} />{isRefreshingOrders ? 'Actualisation…' : 'Actualiser'}</button>}
       </div>
@@ -1158,7 +1174,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-              {viewMode === 'calendar' ? (
+              {viewMode === 'messages' ? (
+                <><MessageCircle className="w-5 h-5 text-emerald-700" /><span>Messages avec l’équipe Gloryday</span></>
+              ) : viewMode === 'calendar' ? (
                 <>
                   <CalendarDays className="w-5 h-5 text-[#0d44e8]" />
                   <span>Calendrier des livraisons prévues</span>
@@ -1181,7 +1199,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
               )}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              {viewMode === 'calendar'
+              {viewMode === 'messages'
+                ? 'Écrivez à l’équipe même si votre message ne concerne pas une commande précise.'
+                : viewMode === 'calendar'
                 ? 'Visualisez les dates et créneaux de livraison prévus pour vos commandes et ajustez vos réceptions.'
                 : viewMode === 'payments'
                   ? 'Retrouvez les montants à régler, leurs échéances et les articles restant à livrer au même endroit.'
@@ -1244,9 +1264,18 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 <FileText className="w-3.5 h-3.5" />
                 <span>Factures ({invoiceRecords.length})</span>
               </button>
+              {currentUser?.role === 'client' && <button
+                type="button"
+                onClick={() => { setStatusFilter('all'); setViewMode('messages'); }}
+                aria-pressed={viewMode === 'messages'}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${viewMode === 'messages' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                <span>Messages</span>
+              </button>}
             </div>
 
-            <div className="relative">
+            {viewMode !== 'messages' && <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="text"
@@ -1255,12 +1284,12 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-[#0d44e8] w-48 sm:w-56"
               />
-            </div>
+            </div>}
           </div>
         </div>
 
         {/* Filter tabs bar */}
-        {viewMode !== 'invoices' && <div className="px-4 py-2.5 bg-slate-50/70 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto text-xs">
+        {viewMode !== 'invoices' && viewMode !== 'messages' && <div className="px-4 py-2.5 bg-slate-50/70 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto text-xs">
           <button
             type="button"
             onClick={() => setStatusFilter('all')}
@@ -1303,7 +1332,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         </div>}
 
         {/* Feedback banner when delivery schedule is updated */}
-        {scheduleFeedback && (
+        {viewMode !== 'messages' && scheduleFeedback && (
           <div className={`px-4 py-2.5 text-xs font-medium flex items-center justify-between border-b ${
             scheduleFeedback.type === 'success'
               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
@@ -1321,7 +1350,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         )}
 
         {/* VIEW MODE 1: INTERACTIVE CALENDAR VIEW */}
-        {viewMode === 'calendar' ? (
+        {viewMode === 'messages' ? (
+          <ClientGeneralMessages currentUser={currentUser} />
+        ) : viewMode === 'calendar' ? (
           <div key="view-calendar" className="dashboard-tab-enter grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
             {/* Left 7 columns: Monthly Calendar Grid */}
             <div className="lg:col-span-7 p-4 sm:p-5 space-y-4">
@@ -2330,6 +2361,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           user={currentUser}
           onClose={closeProfileModal}
           onProfileUpdated={onProfileUpdated}
+          initialSection={profileInitialSection}
         />
       )}
       {conversationOrder && currentUser?.role === 'client' && (
@@ -2361,5 +2393,97 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         </div>
       )}
     </div>
+  );
+};
+
+const ClientGeneralMessages: React.FC<{ currentUser: User | null }> = ({ currentUser }) => {
+  const [messages, setMessages] = useState<DirectMessage[]>([]);
+  const [content, setContent] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+
+  const refresh = useCallback(async (quiet = false) => {
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
+    setError('');
+    try {
+      const allMessages = await api.getDirectMessages();
+      setMessages(allMessages.filter(message => !message.orderId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Les messages ne sont pas disponibles. Réessayez.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (currentUser?.role !== 'client') return;
+    void refresh();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refresh(true);
+    };
+    const intervalId = window.setInterval(refreshWhenVisible, 10_000);
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [currentUser?.id, currentUser?.role, refresh]);
+
+  const send = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const messageText = content.trim();
+    if (!currentUser || currentUser.role !== 'client' || !messageText || sending) return;
+    setSending(true);
+    setError('');
+    try {
+      await api.sendDirectMessage({
+        subject: `Message privé · ${currentUser.facilityName || 'Compte client'}`,
+        content: messageText,
+        channel: 'in_app',
+      });
+      setContent('');
+      await refresh(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Le message n’a pas pu être envoyé. Réessayez.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (!currentUser || currentUser.role !== 'client') {
+    return <div className="p-6 text-center text-sm text-slate-600">Connectez-vous à votre compte client pour écrire à l’équipe.</div>;
+  }
+
+  return (
+    <section aria-label="Conversation générale avec Gloryday" className="flex min-h-[420px] flex-col">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 px-4 py-3 sm:px-5">
+        <div><p className="text-xs font-extrabold text-slate-900">Équipe Gloryday</p><p className="mt-0.5 text-[10px] text-slate-500">Message général · actualisation automatique toutes les 10 secondes</p></div>
+        <button type="button" onClick={() => void refresh(true)} disabled={refreshing || loading} aria-label="Actualiser la conversation" className="rounded-xl p-2 text-slate-500 transition hover:bg-white disabled:opacity-50">{refreshing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}</button>
+      </div>
+      <div className="flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
+        {error && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">{error}</p>}
+        {loading ? <div className="flex items-center justify-center gap-2 py-12 text-sm font-semibold text-slate-500"><LoaderCircle className="h-4 w-4 animate-spin" />Chargement des messages…</div> : messages.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center"><MessageCircle className="mx-auto h-7 w-7 text-slate-300" /><p className="mt-2 text-sm font-bold text-slate-700">Aucun message pour l’instant</p><p className="mt-1 text-xs text-slate-500">Écrivez à l’équipe pour une question générale ou un renseignement.</p></div>
+        ) : messages.map(message => {
+          const ownMessage = message.senderId === currentUser.id;
+          const date = new Date(message.createdAt);
+          return <article key={message.id} className={`max-w-[92%] rounded-2xl px-3.5 py-3 ${ownMessage ? 'ml-auto bg-emerald-800 text-white' : 'mr-auto border border-slate-200 bg-slate-50 text-slate-900'}`}>
+            <div className="flex items-center justify-between gap-4 text-[10px] opacity-75"><strong>{ownMessage ? 'Vous' : 'Équipe Gloryday'}</strong><time dateTime={message.createdAt}>{Number.isNaN(date.getTime()) ? '' : date.toLocaleString('fr-FR', { timeZone: 'Africa/Libreville', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</time></div>
+            {message.content && <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed">{message.content}</p>}
+          </article>;
+        })}
+      </div>
+      <form onSubmit={send} className="border-t border-slate-100 bg-white p-3 sm:p-4">
+        <label htmlFor="client-general-message" className="sr-only">Votre message à l’équipe</label>
+        <textarea id="client-general-message" rows={2} maxLength={5000} value={content} onChange={event => setContent(event.target.value)} disabled={sending} placeholder="Écrivez votre question à l’équipe…" className="w-full resize-y rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-emerald-600 focus:ring-4 focus:ring-emerald-50 disabled:bg-slate-50" />
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] text-slate-500">Pour joindre une photo ou parler d’un article précis, ouvrez la conversation depuis la commande.</p><button type="submit" disabled={sending || !content.trim()} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-emerald-800 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:bg-slate-300">{sending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{sending ? 'Envoi…' : 'Envoyer'}</button></div>
+      </form>
+    </section>
   );
 };

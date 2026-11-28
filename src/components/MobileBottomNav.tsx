@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layers, Sparkles, ShoppingBag, FileText, Menu, CircleUserRound } from 'lucide-react';
+import { Layers, Sparkles, Zap, ShoppingBag, FileText, Menu, CircleUserRound } from 'lucide-react';
 
 interface MobileBottomNavProps {
   activeTab: string;
@@ -60,24 +60,24 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           </span>
         </button>
 
-        {/* Tab 2: Packs */}
+        {/* Tab 2: quick order for clients; packs remain reachable from the catalogue */}
         <button
           type="button"
-          onClick={() => setActiveTab('packs')}
+          onClick={() => setActiveTab(isClientSpace ? 'bulk-order' : 'packs')}
           className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${
-            activeTab === 'packs'
+            activeTab === (isClientSpace ? 'bulk-order' : 'packs')
               ? (isClientSpace ? 'text-[#176645] font-bold' : 'text-[#0d44e8] font-bold')
               : 'text-slate-500 hover:text-slate-900 font-medium'
           }`}
         >
           <div className="relative">
-            <Sparkles className="w-5 h-5 stroke-[2.2]" />
-            {activeTab === 'packs' && (
+            {isClientSpace ? <Zap className="w-5 h-5 stroke-[2.2]" /> : <Sparkles className="w-5 h-5 stroke-[2.2]" />}
+            {activeTab === (isClientSpace ? 'bulk-order' : 'packs') && (
               <span className={`absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${isClientSpace ? 'bg-[#176645]' : 'bg-[#0d44e8]'}`}></span>
             )}
           </div>
           <span className="text-[10px] tracking-tight mt-1 leading-none">
-            Packs
+            {isClientSpace ? 'Saisie rapide' : 'Packs'}
           </span>
         </button>
 

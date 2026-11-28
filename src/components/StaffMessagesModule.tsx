@@ -109,7 +109,7 @@ export const StaffMessagesModule: React.FC<StaffMessagesModuleProps> = ({ client
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') void refresh(true);
     };
-    const intervalId = window.setInterval(refreshWhenVisible, 15_000);
+    const intervalId = window.setInterval(refreshWhenVisible, 10_000);
     document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => {
       window.clearInterval(intervalId);
@@ -139,7 +139,7 @@ export const StaffMessagesModule: React.FC<StaffMessagesModuleProps> = ({ client
             <h2 className="mt-1 flex items-center gap-2 text-lg font-black text-slate-900">
               <Inbox className="h-5 w-5 text-emerald-700" /> Conversations clients
             </h2>
-            <p className="mt-1 max-w-2xl text-xs text-slate-500">Les échanges sont réunis par client et par commande. Les nouveaux messages sont recherchés automatiquement toutes les 15 secondes.</p>
+            <p className="mt-1 max-w-2xl text-xs text-slate-500">Les échanges sont réunis par client et par commande. Les nouveaux messages sont vérifiés automatiquement toutes les 10 secondes.</p>
           </div>
           <button type="button" onClick={() => void refresh(true)} disabled={refreshing || loading} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50">
             {refreshing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}

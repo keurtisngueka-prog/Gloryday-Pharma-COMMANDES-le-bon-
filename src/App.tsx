@@ -71,6 +71,36 @@ const ClientDashboard = React.lazy(() => import('./components/ClientDashboard').
 const AdminDashboard = React.lazy(() => import('./components/AdminDashboard').then(module => ({ default: module.AdminDashboard })));
 const CommercialQuotesModule = React.lazy(() => import('./components/CommercialQuotesModule').then(module => ({ default: module.CommercialQuotesModule })));
 
+function warmFirstCatalogImages(products: Product[]): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  const imageUrls = [...new Set(products.slice(0, 6).map(product => product.thumbnailUrl || product.image).filter((url): url is string => Boolean(url)))];
+  if (imageUrls.length === 0) return Promise.resolve();
+
+  return new Promise(resolve => {
+    let settled = 0;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      window.clearTimeout(timeoutId);
+      resolve();
+    };
+    const timeoutId = window.setTimeout(finish, 500);
+
+    for (const url of imageUrls) {
+      const image = new Image();
+      const onSettled = () => {
+        settled += 1;
+        if (settled >= imageUrls.length) finish();
+      };
+      image.onload = onSettled;
+      image.onerror = onSettled;
+      image.src = url;
+      if (image.complete) onSettled();
+    }
+  });
+}
+
 export type AppTab = 
   | 'catalog' 
   | 'bulk-order'
@@ -157,6 +187,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const authGeneration = useRef(0);
   const [isClientProfileModalOpen, setIsClientProfileModalOpen] = useState(false);
+  const [clientProfileInitialSection, setClientProfileInitialSection] = useState<'facility' | 'contacts' | 'address' | 'security'>('facility');
   const [clientHomeRequestVersion, setClientHomeRequestVersion] = useState(0);
   const [isDarkTheme, setIsDarkTheme] = useState(() => {
     try { return localStorage.getItem('gloryday_theme_preference') === 'dark'; }
@@ -166,6 +197,7 @@ export default function App() {
     try { return !sessionStorage.getItem('gloryday_brand_intro_seen'); }
     catch { return false; }
   });
+  const brandIntroStartedAt = useRef<number | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.glorydayTheme = isDarkTheme ? 'dark' : 'light';
@@ -175,11 +207,19 @@ export default function App() {
 
   useEffect(() => {
     if (!isBrandIntroVisible) return;
+    const startedAt = brandIntroStartedAt.current ?? Date.now();
+    brandIntroStartedAt.current = startedAt;
     try { sessionStorage.setItem('gloryday_brand_intro_seen', '1'); }
     catch { /* The intro remains brief even when session storage is unavailable. */ }
-    const timeoutId = window.setTimeout(() => setIsBrandIntroVisible(false), 720);
+    const elapsed = Date.now() - startedAt;
+    const minimumIntroMs = 720;
+    const maximumIntroMs = 2200;
+    const waitMs = isCatalogLoading
+      ? Math.max(0, maximumIntroMs - elapsed)
+      : Math.max(0, minimumIntroMs - elapsed);
+    const timeoutId = window.setTimeout(() => setIsBrandIntroVisible(false), waitMs);
     return () => window.clearTimeout(timeoutId);
-  }, [isBrandIntroVisible]);
+  }, [isBrandIntroVisible, isCatalogLoading]);
 
   // Global Product Creation Modal State
   const [isGlobalProductModalOpen, setIsGlobalProductModalOpen] = useState(false);
@@ -482,6 +522,10 @@ export default function App() {
       const catalog = await api.getProducts();
       if (expectedGeneration !== authGeneration.current) return;
       setProducts(catalog);
+      // Product cards render behind the intro as soon as the list arrives.
+      // Warm only the first visible thumbnails and cap the wait so a slow image
+      // host cannot hold the customer on the brand screen.
+      if (isBrandIntroVisible) await warmFirstCatalogImages(catalog);
     } catch (error) {
       if (expectedGeneration !== authGeneration.current) return;
       console.error('Chargement du catalogue impossible', error);
@@ -1121,7 +1165,8 @@ export default function App() {
         onOpenAuth={() => setIsAuthModalOpen(true)}
         onOpenCreateProduct={() => setIsGlobalProductModalOpen(true)}
         onOpenDraftsModal={() => setIsDraftsModalOpen(true)}
-        onOpenClientProfile={() => {
+        onOpenClientProfile={(section = 'facility') => {
+          setClientProfileInitialSection(section);
           setActiveTab('dashboard');
           setIsClientProfileModalOpen(true);
           setIsSidebarOpen(false);
@@ -1136,11 +1181,12 @@ export default function App() {
       />
 
       {isBrandIntroVisible && (
-        <div className="gloryday-brand-intro fixed inset-0 z-[300] pointer-events-none grid place-items-center bg-white" role="status" aria-label="Ouverture de Gloryday Pharma">
+        <div className="gloryday-brand-intro fixed inset-0 z-[300] grid place-items-center bg-white" role="status" aria-live="polite" aria-label="Ouverture de Gloryday Pharma">
           <div className="gloryday-brand-intro-content flex flex-col items-center px-6 text-center">
             <img src="/gloryday-logo-transparent.png" alt="Logo Gloryday" className="gloryday-brand-intro-logo h-52 w-52 object-contain" />
             <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.22em] text-slate-700">Pharma</p>
             <p className="mt-1 text-sm text-slate-600">Votre fournisseur de matériel médical au Gabon.</p>
+            {isCatalogLoading && <p className="mt-6 inline-flex items-center gap-2 text-xs font-semibold text-emerald-800"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-700" />Préparation du catalogue…</p>}
           </div>
         </div>
       )}
@@ -1244,7 +1290,11 @@ export default function App() {
                 onOpenNotifications={() => setIsNotificationModalOpen(true)}
                 onOpenClientMenu={() => setIsSidebarOpen(true)}
                 profileModalOpen={isClientProfileModalOpen}
-                onProfileModalOpenChange={setIsClientProfileModalOpen}
+                profileInitialSection={clientProfileInitialSection}
+                onProfileModalOpenChange={(isOpen) => {
+                  setIsClientProfileModalOpen(isOpen);
+                  if (!isOpen) setClientProfileInitialSection('facility');
+                }}
                 homeRequestVersion={clientHomeRequestVersion}
                 onReorder={handleReorder}
                 onOpenAuth={() => setIsAuthModalOpen(true)}

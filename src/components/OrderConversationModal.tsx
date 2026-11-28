@@ -50,7 +50,7 @@ export const OrderConversationModal: React.FC<OrderConversationModalProps> = ({ 
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') void refresh(true);
     };
-    const intervalId = window.setInterval(refreshWhenVisible, 15_000);
+    const intervalId = window.setInterval(refreshWhenVisible, 10_000);
     document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => {
       window.clearInterval(intervalId);

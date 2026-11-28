@@ -42,7 +42,7 @@ interface AppSidebarProps {
   onLogoClick?: () => void;
   onSwitchRole?: (role: AppRole) => void;
   onOpenDraftsModal?: () => void;
-  onOpenClientProfile?: () => void;
+  onOpenClientProfile?: (section?: 'facility' | 'contacts' | 'address' | 'security') => void;
   onOpenNotifications?: () => void;
   onToggleTheme?: () => void;
   isDarkTheme?: boolean;
@@ -92,13 +92,28 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       )}
 
       {/* Lateral Drawer Container */}
-      <aside 
-        className={`fixed top-0 bottom-0 left-0 z-50 w-80 max-w-[85vw] bg-white text-slate-900 flex flex-col justify-between transition-transform duration-300 ease-in-out border-r border-slate-200 shadow-2xl ${
-          isOpen ? 'translate-x-0' : '-translate-x-full'
+      <aside
+        className={`fixed top-0 bottom-0 z-50 w-80 max-w-[85vw] bg-white text-slate-900 flex flex-col justify-between transition-transform duration-300 ease-in-out border-slate-200 shadow-2xl ${
+          role === 'client'
+            ? `right-0 border-l ${isOpen ? 'translate-x-0' : 'translate-x-full'}`
+            : `left-0 border-r ${isOpen ? 'translate-x-0' : '-translate-x-full'}`
         }`}
       >
         <div ref={drawerContentRef} className="overflow-y-auto flex-1">
           {/* 1. Header with Brand & Close Button */}
+          {role === 'client' && currentUser ? (
+            <div className="p-4 px-5 border-b border-slate-100 flex items-center justify-between bg-white">
+              <h2 className="text-base font-extrabold text-slate-900">Mon compte</h2>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Fermer Mon compte"
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
           <div className="p-4 px-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
             <div 
               onClick={() => {
@@ -135,67 +150,57 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               <X className="w-4 h-4" />
             </button>
           </div>
+          )}
 
           {/* 2. User & Facility Profile */}
           <div className="p-4 border-b border-slate-100">
             <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-[#eef3ff] text-[#0d44e8] flex items-center justify-center font-black text-base shrink-0 overflow-hidden border border-blue-100">
+              <div className={`w-10 h-10 ${role === 'client' ? 'rounded-full' : 'rounded-xl'} bg-emerald-50 text-emerald-800 flex items-center justify-center font-black text-base shrink-0 overflow-hidden border border-emerald-100`}>
                 {currentUser?.avatarUrl ? (
                   <img src={currentUser.avatarUrl} alt={currentUser.facilityName} className="w-full h-full object-cover" />
                 ) : currentUser ? currentUser.facilityName.charAt(0).toUpperCase() : 'V'}
               </div>
               <div className="min-w-0 flex-1">
                 <span className="font-bold text-xs text-slate-900 block truncate">
-                  {currentUser ? currentUser.facilityName : 'Mode Visiteur'}
+                  {currentUser ? (role === 'client' ? currentUser.contactName || currentUser.facilityName : currentUser.facilityName) : 'Mode Visiteur'}
                 </span>
                 <span className="text-[11px] text-[#6a6a6b] block truncate">
-                  {currentUser ? (currentUser.contactName || currentUser.facilityType || 'Client') : 'Consultation libre'}
+                  {currentUser ? (role === 'client' ? currentUser.facilityName : currentUser.contactName || currentUser.facilityType || 'Client') : 'Consultation libre'}
                 </span>
               </div>
-              <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[10px] font-bold text-slate-700 uppercase">
-                {role}
-              </span>
+              {role !== 'client' && <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[10px] font-bold text-slate-700 uppercase">{role}</span>}
             </div>
           </div>
 
           {/* 3. Client drawer: profile, preferences, notifications, help */}
           {role === 'client' ? (
             <div className="p-4 space-y-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 block mb-1">
-                Mon espace
-              </span>
-              <button
-                type="button"
-                onClick={() => handleNav('bulk-order')}
-                className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${activeTab === 'bulk-order' ? 'bg-emerald-50 text-emerald-800 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
-              >
-                <span className="flex items-center gap-2.5"><Zap className="w-4 h-4 text-emerald-700" />Saisie rapide</span>
-                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              </button>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 block mb-1">Mes informations</span>
               {currentUser ? (
                 <>
                   <button
                     type="button"
-                    onClick={() => { onClose(); onOpenClientProfile?.(); }}
+                    onClick={() => { onClose(); onOpenClientProfile?.('contacts'); }}
                     className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer"
                   >
-                    <span className="flex items-center gap-2.5"><UserRound className="w-4 h-4 text-[#0d44e8]" />Profil et coordonnées</span>
+                    <span className="flex items-center gap-2.5"><UserRound className="w-4 h-4 text-emerald-800" />Profil et coordonnées</span>
                     <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
                   <button
                     type="button"
-                    onClick={() => { onClose(); onOpenClientProfile?.(); }}
+                    onClick={() => { onClose(); onOpenClientProfile?.('address'); }}
                     className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer"
                   >
-                    <span className="flex items-center gap-2.5"><MapPin className="w-4 h-4 text-[#0d44e8]" />Adresse de livraison</span>
+                    <span className="flex items-center gap-2.5"><MapPin className="w-4 h-4 text-emerald-800" />Adresses de livraison</span>
                     <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 block pt-4 pb-1">Préférences</span>
                   <button
                     type="button"
                     onClick={() => { onClose(); onOpenNotifications?.(); }}
                     className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer"
                   >
-                    <span className="flex items-center gap-2.5"><Bell className="w-4 h-4 text-[#0d44e8]" />Notifications et messages</span>
+                    <span className="flex items-center gap-2.5"><Bell className="w-4 h-4 text-amber-600" />Notifications</span>
                     <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
                   <button
@@ -204,8 +209,12 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                     aria-pressed={isDarkTheme}
                     className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer"
                   >
-                    <span className="flex items-center gap-2.5">{isDarkTheme ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-[#0d44e8]" />}{isDarkTheme ? 'Passer au thème clair' : 'Activer le thème sombre'}</span>
-                    <span className={`relative h-5 w-9 rounded-full transition-colors ${isDarkTheme ? 'bg-[#0d44e8]' : 'bg-slate-300'}`} aria-hidden="true"><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${isDarkTheme ? 'translate-x-4' : 'translate-x-0.5'}`} /></span>
+                    <span className="flex items-center gap-2.5">{isDarkTheme ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-emerald-800" />}{isDarkTheme ? 'Apparence claire' : 'Apparence sombre'}</span>
+                    <span className={`relative h-5 w-9 rounded-full transition-colors ${isDarkTheme ? 'bg-emerald-800' : 'bg-slate-300'}`} aria-hidden="true"><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${isDarkTheme ? 'translate-x-4' : 'translate-x-0.5'}`} /></span>
+                  </button>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 block pt-4 pb-1">Compte et aide</span>
+                  <button type="button" onClick={() => { onClose(); onOpenClientProfile?.('security'); }} className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer">
+                    <span className="flex items-center gap-2.5"><ShieldCheck className="w-4 h-4 text-emerald-800" />Sécurité du compte</span><ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
                   <a
                     href="https://wa.me/24177003004"
