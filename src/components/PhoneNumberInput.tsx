@@ -216,6 +216,7 @@ type PhoneNumberInputProps = {
   autoComplete?: string;
   placeholder?: string;
   className?: string;
+  compactCountryCode?: boolean;
 };
 
 export const PhoneNumberInput: React.FC<PhoneNumberInputProps> = ({
@@ -226,6 +227,7 @@ export const PhoneNumberInput: React.FC<PhoneNumberInputProps> = ({
   autoComplete = 'tel',
   placeholder = '77 00 11 22',
   className = '',
+  compactCountryCode = false,
 }) => {
   const [countryIso, setCountryIso] = useState('GA');
   const country = useMemo(() => COUNTRIES.find((item) => item.iso === countryIso) || COUNTRIES[0], [countryIso]);
@@ -271,10 +273,12 @@ export const PhoneNumberInput: React.FC<PhoneNumberInputProps> = ({
         aria-label="Pays et indicatif téléphonique"
         value={country.iso}
         onChange={handleCountryChange}
-        className="max-w-[44%] rounded-l-xl border-0 border-r border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-700 outline-none"
+        className={compactCountryCode
+          ? 'min-w-[5.25rem] max-w-[5.25rem] rounded-l-xl border-0 border-r-0 bg-transparent pl-4 pr-1 text-sm font-semibold text-slate-700 outline-none'
+          : 'max-w-[44%] rounded-l-xl border-0 border-r border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-700 outline-none'}
       >
         {COUNTRIES.map((item) => (
-          <option key={item.iso} value={item.iso}>{item.name} (+{item.dialCode})</option>
+          <option key={item.iso} value={item.iso}>{compactCountryCode ? `+${item.dialCode}` : `${item.name} (+${item.dialCode})`}</option>
         ))}
       </select>
       <input
@@ -286,7 +290,7 @@ export const PhoneNumberInput: React.FC<PhoneNumberInputProps> = ({
         placeholder={placeholder}
         value={displayValue}
         onChange={handleNumberChange}
-        className="min-w-0 flex-1 rounded-r-xl border-0 bg-transparent px-3 py-2 text-xs outline-none"
+        className={`min-w-0 flex-1 rounded-r-xl border-0 bg-transparent px-3 outline-none ${compactCountryCode ? 'py-3 text-sm' : 'py-2 text-xs'}`}
       />
     </div>
   );

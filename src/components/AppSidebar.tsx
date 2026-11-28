@@ -93,10 +93,8 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
 
       {/* Lateral Drawer Container */}
       <aside
-        className={`fixed top-0 bottom-0 z-50 w-80 max-w-[85vw] bg-white text-slate-900 flex flex-col justify-between transition-transform duration-300 ease-in-out border-slate-200 shadow-2xl ${
-          role === 'client'
-            ? `right-0 border-l ${isOpen ? 'translate-x-0' : 'translate-x-full'}`
-            : `left-0 border-r ${isOpen ? 'translate-x-0' : '-translate-x-full'}`
+        className={`fixed top-0 bottom-0 left-0 z-50 w-80 max-w-[85vw] bg-white text-slate-900 flex flex-col justify-between transition-transform duration-300 ease-in-out border-r border-slate-200 shadow-2xl ${
+          isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         <div ref={drawerContentRef} className="overflow-y-auto flex-1">

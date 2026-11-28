@@ -113,15 +113,43 @@ export type AppTab =
   | 'admin-catalog' 
   | 'admin-orders'
   | 'admin-staff'
-  | 'admin-deploy';
+  | 'admin-deploy'
+  | 'admin-messages'
+  | 'admin-packs'
+  | 'admin-lots'
+  | 'admin-movements'
+  | 'admin-clients'
+  | 'admin-stats-achats'
+  | 'admin-receivables'
+  | 'admin-finance'
+  | 'admin-logs'
+  | 'admin-audit'
+  | 'admin-settings';
 
-export const ADMIN_TABS: AppTab[] = [
-  'admin',
-  'admin-orders',
-  'admin-catalog',
-  'admin-staff',
-  'admin-deploy'
-];
+const ADMIN_SUBTAB_ROUTES = {
+  kpi: 'admin',
+  orders: 'admin-orders',
+  messages: 'admin-messages',
+  stock: 'admin-catalog',
+  packs: 'admin-packs',
+  lots: 'admin-lots',
+  movements: 'admin-movements',
+  clients: 'admin-clients',
+  'stats-achats': 'admin-stats-achats',
+  receivables: 'admin-receivables',
+  finance: 'admin-finance',
+  logs: 'admin-logs',
+  audit: 'admin-audit',
+  settings: 'admin-settings',
+  staff: 'admin-staff',
+  'export-deploy': 'admin-deploy',
+} as const;
+
+const ADMIN_ROUTE_SUBTABS = Object.fromEntries(
+  Object.entries(ADMIN_SUBTAB_ROUTES).map(([subtab, route]) => [route, subtab]),
+) as Partial<Record<AppTab, keyof typeof ADMIN_SUBTAB_ROUTES>>;
+
+export const ADMIN_TABS: AppTab[] = Object.values(ADMIN_SUBTAB_ROUTES) as AppTab[];
 
 const canReadStaffOrders = (user: User) => user.role === 'client' || [
   'orders_view', 'orders_confirm', 'orders_cancel', 'orders_status_manage', 'orders_finance_view', 'orders_finance_manage',
@@ -161,9 +189,10 @@ const getTabFromHash = (): AppTab => {
     'admin-catalog', 
     'admin-orders', 
     'admin-staff',
-    'admin-deploy'
+  'admin-deploy',
+  'admin-messages'
   ];
-  if (validTabs.includes(raw as AppTab)) {
+  if (validTabs.includes(raw as AppTab) || ADMIN_TABS.includes(raw as AppTab)) {
     return raw as AppTab;
   }
   return 'catalog';
@@ -212,8 +241,8 @@ export default function App() {
     try { sessionStorage.setItem('gloryday_brand_intro_seen', '1'); }
     catch { /* The intro remains brief even when session storage is unavailable. */ }
     const elapsed = Date.now() - startedAt;
-    const minimumIntroMs = 720;
-    const maximumIntroMs = 2200;
+    const minimumIntroMs = 4200;
+    const maximumIntroMs = 5000;
     const waitMs = isCatalogLoading
       ? Math.max(0, maximumIntroMs - elapsed)
       : Math.max(0, minimumIntroMs - elapsed);
@@ -292,7 +321,7 @@ export default function App() {
 
   // Modals & Flows
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authInitialMode, setAuthInitialMode] = useState<'guest_choice' | 'login' | 'register' | 'admin' | 'google_complete'>('guest_choice');
+  const [authInitialMode, setAuthInitialMode] = useState<'guest_choice' | 'login' | 'register' | 'admin' | 'google_complete'>('login');
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [isDraftsModalOpen, setIsDraftsModalOpen] = useState(false);
   const [draftsCount, setDraftsCount] = useState<number>(() => {
@@ -1151,8 +1180,10 @@ export default function App() {
     return result;
   }, [products, searchQuery, selectedSpecialty, selectedCategory, selectedSubcategory, onlySelected, onlyPromotions, priceRange, sortBy, cartItems]);
 
+  const isAdminWorkspace = Boolean(currentUser && currentUser.role !== 'client' && ADMIN_TABS.includes(activeTab));
+
   return (
-    <div className="gloryday-app min-h-screen flex flex-col bg-white text-slate-900 font-['Plus_Jakarta_Sans',sans-serif]">
+    <div className={`gloryday-app min-h-screen flex flex-col bg-white text-slate-900 font-['Plus_Jakarta_Sans',sans-serif] ${isAdminWorkspace ? 'admin-workspace-app' : ''}`}>
       {/* Lateral Menu / Drawer */}
       <AppSidebar
         isOpen={isSidebarOpen}
@@ -1195,7 +1226,7 @@ export default function App() {
       <PWAInstallBanner />
 
       {/* Top Navbar */}
-      <Navbar
+      {!isAdminWorkspace && <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         cartCount={cartCount}
@@ -1207,11 +1238,11 @@ export default function App() {
         onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
         onOpenDraftsModal={() => setIsDraftsModalOpen(true)}
         draftsCount={draftsCount}
-      />
+      />}
 
       {/* Main Content Area */}
       <React.Suspense fallback={<div className="mx-auto w-full max-w-7xl px-3 py-12 text-center text-sm font-bold text-slate-500">Chargement de la page…</div>}>
-      <main className={`flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 pt-4 sm:pt-6 ${activeTab === 'cart' ? 'pb-40 md:pb-12' : 'pb-24 md:pb-12'}`}>
+      <main className={`flex-1 ${isAdminWorkspace ? 'w-full max-w-none px-0 pt-0 pb-20 md:pb-0' : `max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 pt-4 sm:pt-6 ${activeTab === 'cart' ? 'pb-40 md:pb-12' : 'pb-24 md:pb-12'}`}`}>
         {/* VIEW 1: ORDER CONFIRMATION VIEW */}
         {confirmedOrder ? (
           <OrderConfirmationView
@@ -1370,6 +1401,11 @@ export default function App() {
                     onUpdatePayment={handleAdminUpdatePayment}
                     onVerifyMobilePayment={handleAdminVerifyMobilePayment}
                     onOrderCreated={handleAdminOrderCreated}
+                    onOpenNotifications={() => setIsNotificationModalOpen(true)}
+                    onOpenAccountMenu={() => setIsSidebarOpen(true)}
+                    onToggleTheme={() => setIsDarkTheme(theme => !theme)}
+                    isDarkTheme={isDarkTheme}
+                    onActiveSectionChange={(section) => setActiveTab(ADMIN_SUBTAB_ROUTES[section])}
                     onCreatePack={handleAdminCreatePack}
                     onUpdatePack={handleAdminUpdatePack}
                     onDeletePack={handleAdminDeletePack}
@@ -1387,17 +1423,7 @@ export default function App() {
                       }
                       if (canReadStaffOrders(currentUser)) api.getOrders().then(setOrders).catch(() => {});
                     }}
-                    defaultSubTab={
-                      activeTab === 'admin-catalog'
-                        ? 'stock'
-                        : activeTab === 'admin-orders'
-                          ? 'orders'
-                          : activeTab === 'admin-deploy'
-                            ? 'export-deploy'
-                          : activeTab === 'admin-staff'
-                            ? 'staff'
-                            : 'kpi'
-                    }
+                    defaultSubTab={ADMIN_ROUTE_SUBTABS[activeTab] || 'kpi'}
                     notifications={notifications}
                     onViewOrderPdf={handleViewOrderPdf}
                     onOpenFinanceModal={(order: Order) => setActiveFinanceOrder(order)}
@@ -1724,6 +1750,7 @@ export default function App() {
         cartCount={cartCount}
         onOpenSidebar={() => setIsSidebarOpen(true)}
         isClientSpace={!currentUser || currentUser.role === 'client'}
+        isAdminSpace={isAdminWorkspace}
         onSelectClientSpace={() => {
           setActiveTab('dashboard');
           setClientHomeRequestVersion(version => version + 1);
@@ -1738,7 +1765,7 @@ export default function App() {
         initialMode={authInitialMode}
         onClose={() => {
           setIsAuthModalOpen(false);
-          setAuthInitialMode('guest_choice');
+          setAuthInitialMode('login');
         }}
         onSuccess={handleAuthSuccess}
       />}

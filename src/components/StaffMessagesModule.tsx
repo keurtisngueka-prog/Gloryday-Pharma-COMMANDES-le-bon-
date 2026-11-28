@@ -7,6 +7,9 @@ import { DirectMessagingModal } from './DirectMessagingModal';
 interface StaffMessagesModuleProps {
   clients: any[];
   canSend: boolean;
+  compact?: boolean;
+  initialConversationId?: string;
+  onOpenAll?: (conversationId?: string) => void;
 }
 
 interface ClientConversation {
@@ -77,13 +80,19 @@ function groupMessages(messages: DirectMessage[], clients: any[]): ClientConvers
   }).sort((left, right) => right.latest.createdAt.localeCompare(left.latest.createdAt));
 }
 
-export const StaffMessagesModule: React.FC<StaffMessagesModuleProps> = ({ clients, canSend }) => {
+export const StaffMessagesModule: React.FC<StaffMessagesModuleProps> = ({
+  clients,
+  canSend,
+  compact = false,
+  initialConversationId,
+  onOpenAll,
+}) => {
   const [messages, setMessages] = useState<DirectMessage[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(initialConversationId || null);
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
   const [replyConversation, setReplyConversation] = useState<ClientConversation | null>(null);
   const [newMessageTarget, setNewMessageTarget] = useState<any | null>(null);
@@ -130,6 +139,42 @@ export const StaffMessagesModule: React.FC<StaffMessagesModuleProps> = ({ client
   }, [clients, messages, query]);
 
   const activeConversation = conversations.find(conversation => conversation.id === selectedConversationId) || conversations[0] || null;
+
+  useEffect(() => {
+    if (initialConversationId) setSelectedConversationId(initialConversationId);
+  }, [initialConversationId]);
+
+  if (compact) {
+    return (
+      <div className="staff-messages-compact">
+        {loading ? (
+          <div className="admin-workspace-inline-loading"><LoaderCircle className="h-4 w-4 animate-spin" />Chargement des conversations…</div>
+        ) : error ? (
+          <div className="staff-messages-compact-empty" role="status">Les conversations ne sont pas disponibles pour le moment.</div>
+        ) : conversations.length === 0 ? (
+          <div className="staff-messages-compact-empty">Aucune conversation récente. Les messages des clients apparaîtront ici.</div>
+        ) : (
+          conversations.slice(0, 3).map(conversation => (
+            <button
+              key={conversation.id}
+              type="button"
+              className="staff-messages-compact-row"
+              onClick={() => onOpenAll?.(conversation.id)}
+            >
+              <span className="staff-messages-compact-avatar" aria-hidden="true">{conversation.facilityName.slice(0, 2).toLocaleUpperCase('fr')}</span>
+              <span className="staff-messages-compact-body">
+                <strong>{conversation.facilityName}</strong>
+                <small>{conversation.orderReference ? `Commande ${conversation.orderReference} · ` : ''}{conversation.latest.content || 'Photo jointe'}</small>
+              </span>
+              <time dateTime={conversation.latest.createdAt}>{formatMessageDate(conversation.latest.createdAt).replace(/^.* à /, '')}</time>
+              {conversation.latest.senderRole === 'client' && <span className="staff-messages-compact-unread" aria-label="Dernier message envoyé par le client" />}
+            </button>
+          ))
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
       <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">

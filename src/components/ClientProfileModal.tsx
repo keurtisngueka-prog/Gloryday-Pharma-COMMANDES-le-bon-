@@ -180,18 +180,14 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
   const activeSectionLabel = PROFILE_SECTIONS.find(section => section.id === activeSection)?.label || 'Établissement';
 
   return (
-    <div
-      className="fixed inset-0 z-[120] flex items-end justify-center overflow-y-auto bg-slate-950/65 p-0 backdrop-blur-sm sm:items-center sm:p-4"
-      role="presentation"
-      onMouseDown={(event) => { if (event.target === event.currentTarget && !isSaving) onClose(); }}
-    >
+    <div className="fixed inset-0 z-[120] overflow-y-auto bg-white" role="presentation">
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="client-profile-title"
-        className="flex max-h-[94dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:rounded-3xl"
+        className="mx-auto flex min-h-[100dvh] w-full max-w-3xl flex-col overflow-hidden bg-white"
       >
-        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-100 bg-white px-5 py-4 sm:px-6">
+        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-100 bg-white px-5 pb-4 pt-[calc(env(safe-area-inset-top)+1rem)] sm:px-8">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-800">Espace client</p>
             <h2 id="client-profile-title" className="mt-1 text-xl font-black text-slate-900">Profil & coordonnées</h2>
@@ -202,7 +198,7 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
           </button>
         </header>
 
-        <nav aria-label="Rubriques du profil" role="tablist" className="grid shrink-0 grid-cols-2 gap-2 border-b border-slate-100 bg-slate-50/70 p-3 sm:grid-cols-4 sm:px-5">
+        <nav aria-label="Rubriques du profil" role="tablist" className="grid shrink-0 grid-cols-2 gap-1.5 border-b border-slate-100 bg-white p-3 sm:grid-cols-4 sm:px-8">
           {PROFILE_SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -221,7 +217,7 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
         </nav>
 
         <form onSubmit={handleSave} className="flex min-h-0 flex-1 flex-col">
-          <div id="client-profile-panel" role="tabpanel" aria-labelledby={`client-profile-tab-${activeSection}`} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6">
+          <div id="client-profile-panel" role="tabpanel" aria-labelledby={`client-profile-tab-${activeSection}`} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-8 sm:py-7">
             {activeSection === 'facility' && (
               <div className="space-y-5">
                 <div className="flex items-center gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4">
@@ -311,7 +307,7 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({ user, on
             {successMessage && <p role="status" className="mt-5 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm font-semibold text-emerald-800"><CheckCircle2 className="h-4 w-4 shrink-0" />{successMessage}</p>}
           </div>
 
-          <footer className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 p-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <footer className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:flex-row sm:items-center sm:justify-between sm:px-8">
             <p className="hidden text-xs text-slate-500 sm:block"><UserRound className="mr-1 inline h-3.5 w-3.5" />Modifiez une rubrique à la fois.</p>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button type="button" onClick={onClose} disabled={isSaving || isChangingPassword} className="min-h-11 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Fermer</button>

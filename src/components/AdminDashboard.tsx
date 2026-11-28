@@ -49,6 +49,7 @@ import { AdminPacksModule } from './AdminPacksModule';
 import { ClientPurchasesStatsModule } from './ClientPurchasesStatsModule';
 import { ClientPurchaseHistoryView } from './ClientPurchaseHistoryView';
 import { userHasPermission } from '../permissions';
+import { AdminWorkspaceOverview, AdminWorkspaceTopbar } from './AdminWorkspaceChrome';
 const DataExportModule = React.lazy(() => import('./DataExportModule').then(module => ({ default: module.DataExportModule })));
 const FinanceModule = React.lazy(() => import('./FinanceModule').then(module => ({ default: module.FinanceModule })));
 const ReceivablesModule = React.lazy(() => import('./ReceivablesModule').then(module => ({ default: module.ReceivablesModule })));
@@ -87,6 +88,11 @@ interface AdminDashboardProps {
   clients: any[];
   currentUser: User;
   notifications?: AppNotification[];
+  onOpenNotifications?: () => void;
+  onOpenAccountMenu?: () => void;
+  onToggleTheme?: () => void;
+  isDarkTheme?: boolean;
+  onActiveSectionChange?: (section: AdminSubTab) => void;
   onUpdateStatus: (orderId: string, status: OrderStatus, reason?: string) => Promise<void>;
   onUpdatePayment: (orderId: string, isPaid: boolean) => Promise<void>;
   onVerifyMobilePayment: (orderId: string, approved: boolean) => Promise<void>;
@@ -113,6 +119,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   clients,
   currentUser,
   notifications = [],
+  onOpenNotifications,
+  onOpenAccountMenu,
+  onToggleTheme,
+  isDarkTheme = false,
+  onActiveSectionChange,
   onUpdateStatus,
   onUpdatePayment,
   onVerifyMobilePayment,
@@ -201,16 +212,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   ];
 
   const [activeTab, setActiveTab] = useState<AdminSubTab>(defaultSubTab);
+  const [focusedMessageConversationId, setFocusedMessageConversationId] = useState<string | undefined>();
   const selectAdminTab = (tab: AdminSubTab) => {
     setActiveTab(tab);
+    onActiveSectionChange?.(tab);
     window.requestAnimationFrame(() => {
       document.getElementById('admin-dashboard-main')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   };
   const [isCreateOrderModalOpen, setIsCreateOrderModalOpen] = useState(false);
+  const [createOrderInitialDocument, setCreateOrderInitialDocument] = useState<'bon' | 'facture'>('bon');
   const [discountModalOrder, setDiscountModalOrder] = useState<Order | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | 'to_confirm' | 'confirmed' | 'preparation' | 'delivered' | 'cancelled'>('all');
+  const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | 'to_confirm' | 'confirmed' | 'preparation' | 'delivered' | 'cancelled' | 'payment_review'>('all');
   const [financialFilter, setFinancialFilter] = useState<'all' | 'outstanding' | 'overdue'>('all');
   const [stockSearchQuery, setStockSearchQuery] = useState('');
   const [cancelModalOrder, setCancelModalOrder] = useState<Order | null>(null);
@@ -252,6 +266,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [lastSavedStockId, setLastSavedStockId] = useState<string | null>(null);
   const [excelImportPreview, setExcelImportPreview] = useState<CatalogImportPreviewResult | null>(null);
   const [excelImportFeedback, setExcelImportFeedback] = useState<string | null>(null);
+
+  const openCreateOrderModal = (document: 'bon' | 'facture') => {
+    setCreateOrderInitialDocument(document);
+    setOrderStatusFilter('all');
+    setFinancialFilter('all');
+    selectAdminTab('orders');
+    setIsCreateOrderModalOpen(true);
+  };
 
   const handleExcelFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -391,6 +413,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Filtered orders with search and status chips
   const filteredOrders = orders.filter(o => {
     // Status filter
+    if (orderStatusFilter === 'payment_review' && o.mobilePayment?.status !== 'submitted') return false;
     if (orderStatusFilter === 'to_confirm' && o.status !== 'À confirmer') return false;
     if (orderStatusFilter === 'confirmed' && o.status !== 'Confirmée') return false;
     if (orderStatusFilter === 'preparation' && o.status !== 'En préparation') return false;
@@ -412,6 +435,61 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (!stockSearchQuery.trim()) return true;
     return matchesProductSearch(p, stockSearchQuery);
   });
+
+  const submitWorkspaceSearch = () => {
+    const query = searchQuery.trim();
+    if (!query) return;
+    const normalized = query.toLocaleLowerCase('fr');
+    const orderMatch = orders.some(order => [order.reference, order.customer.facilityName, order.customer.phone, order.customer.secondaryPhone]
+      .some(value => String(value || '').toLocaleLowerCase('fr').includes(normalized)));
+    if (orderMatch && canViewOrders) {
+      setOrderStatusFilter('all');
+      selectAdminTab('orders');
+      return;
+    }
+    const clientMatch = clients.some(client => [client.facilityName, client.contactName, client.phone, client.loginPhone]
+      .some(value => String(value || '').toLocaleLowerCase('fr').includes(normalized)));
+    if (clientMatch && canViewClients) {
+      setClientDirectorySearch(query);
+      setClientsModuleView('directory');
+      selectAdminTab('clients');
+      return;
+    }
+    if (canViewOrders) {
+      setOrderStatusFilter('all');
+      selectAdminTab('orders');
+    } else if (canViewClients) {
+      setClientDirectorySearch(query);
+      setClientsModuleView('directory');
+      selectAdminTab('clients');
+    }
+  };
+
+  const openOrderList = (order?: Order) => {
+    setSearchQuery(order?.reference || '');
+    setOrderStatusFilter('all');
+    setFinancialFilter('all');
+    selectAdminTab('orders');
+  };
+
+  const openOrdersToConfirm = () => {
+    setSearchQuery('');
+    setFinancialFilter('all');
+    setOrderStatusFilter('to_confirm');
+    selectAdminTab('orders');
+  };
+
+  const openPaymentReview = () => {
+    setSearchQuery('');
+    setFinancialFilter('all');
+    setOrderStatusFilter('payment_review');
+    selectAdminTab('orders');
+  };
+
+  const openMessages = (conversationId?: string) => {
+    setFocusedMessageConversationId(conversationId);
+    selectAdminTab('messages');
+  };
 
   const handleConfirmCancel = async () => {
     if (!cancelModalOrder || !cancellationReason.trim() || isCancellingOrder) return;
@@ -456,7 +534,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, new Map<string, { name: string; count: number }>()).entries()).map(([key, load]) => ({ key, ...load }));
 
   return (
-    <div className="admin-dashboard-enter admin-dashboard-shell max-w-7xl mx-auto pb-24 px-3 sm:px-0">
+    <div className="admin-dashboard-enter admin-dashboard-shell admin-workspace-shell">
       {creditTermsFeedback && (
         <div role="status" aria-live="polite" className="fixed right-4 top-20 z-[70] flex max-w-md items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900 shadow-xl">
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
@@ -464,91 +542,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <button type="button" onClick={() => setCreditTermsFeedback('')} className="ml-1 rounded-lg px-2 py-1 text-xs font-bold text-emerald-800 hover:bg-emerald-100">Fermer</button>
         </div>
       )}
-      {/* 1. TOP COMMAND CENTER BANNER */}
-      <div className="admin-dashboard-header bg-gradient-to-r from-slate-950 via-[#0f172a] to-slate-950 text-white rounded-3xl p-5 sm:p-6 shadow-xl border border-slate-800 relative overflow-hidden">
-        {/* Subtle decorative glow */}
-        <div className="dashboard-orb-float absolute top-0 right-0 w-96 h-96 bg-blue-600/15 rounded-full blur-3xl pointer-events-none -mr-24 -mt-24"></div>
-
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#0d44e8] to-indigo-700 flex items-center justify-center text-white shrink-0 shadow-md pulse-ring-blue">
-              <ShieldCheck className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-base sm:text-lg font-black tracking-tight">Portail Direction & Logistique</h1>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-white/20 text-white border border-white/30">
-                  {role}
-                </span>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-200 border border-amber-400/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
-                  WhatsApp manuel · envoi automatique non connecté
-                </span>
-              </div>
-              <p className="text-xs text-slate-300 mt-1">
-                Session active : <strong>{currentUser.contactName || currentUser.facilityName}</strong> · Supervision des flux médicaux au Gabon
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 self-start md:self-center flex-wrap">
-            {hasPerm('messages_view') && (
-              <button
-                type="button"
-                onClick={() => selectAdminTab('messages')}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-100 bg-white px-3.5 py-2 text-xs font-bold text-emerald-900 shadow-sm transition hover:bg-emerald-50"
-              >
-                <MessageCircle className="h-4 w-4 text-emerald-700" />
-                <span>Conversations clients</span>
-              </button>
-            )}
-            {canManageCatalog && (
-              <button
-                type="button"
-                onClick={() => { setEditingProduct(null); setIsProductModalOpen(true); }}
-                className="btn-shine py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Nouveau Produit</span>
-              </button>
-            )}
-            {canManageCampaigns && (
-              <button
-                type="button"
-                onClick={() => setIsAnnouncementModalOpen(true)}
-                className="py-2 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
-                title="Créer une annonce dans l’application pour les clients"
-              >
-                <Megaphone className="w-4 h-4" />
-                <span>Campagne clients</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                setIsRefreshingData(true);
-                onRefresh();
-                setTimeout(() => setIsRefreshingData(false), 650);
-              }}
-              className="py-2 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-xs flex items-center gap-1.5 cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingData ? 'animate-spin text-blue-300' : ''}`} />
-              <span>Actualiser Données</span>
-            </button>
-          </div>
-        </div>
-      </div>
+      <AdminWorkspaceTopbar
+        user={currentUser}
+        searchValue={searchQuery}
+        unreadCount={notifications.filter(notification => !notification.read).length}
+        isDarkTheme={isDarkTheme}
+        onSearchChange={setSearchQuery}
+        onSearchSubmit={submitWorkspaceSearch}
+        onOpenNotifications={onOpenNotifications || (() => {})}
+        onOpenAccountMenu={onOpenAccountMenu || (() => {})}
+        onToggleTheme={onToggleTheme || (() => {})}
+        onRefresh={() => {
+          setIsRefreshingData(true);
+          onRefresh();
+          window.setTimeout(() => setIsRefreshingData(false), 650);
+        }}
+        refreshing={isRefreshingData}
+        canCreateCampaign={canManageCampaigns}
+        onCreateCampaign={() => setIsAnnouncementModalOpen(true)}
+      />
 
       {/* 2. SUB-TABS NAVIGATION WITH DYNAMIC BADGES */}
-      <div className="admin-dashboard-layout">
-      <nav aria-label="Sections du tableau de bord" tabIndex={0} className="admin-dashboard-nav flex gap-1.5 overflow-x-auto text-xs font-bold lg:flex-col lg:overflow-x-visible">
-        {hasPerm('messages_view') && <span className="admin-dashboard-nav-group-label">Relation client</span>}
+      <div className="admin-dashboard-layout admin-workspace-layout">
+      <nav aria-label="Sections du tableau de bord" tabIndex={0} className="admin-dashboard-nav admin-workspace-nav flex gap-1.5 overflow-x-auto text-xs font-bold lg:flex-col lg:overflow-x-visible">
+        <div className="admin-workspace-brand" aria-label="Gloryday Pharma Gabon">
+          <img src="/gloryday-emblem-transparent.png" alt="" />
+          <span><strong>GLORYDAY</strong><small>PHARMA · GABON</small></span>
+        </div>
+        {hasPerm('messages_view') && <span className="admin-dashboard-nav-group-label admin-nav-group-relation">Ventes & relation client</span>}
         {hasPerm('messages_view') && (
           <button
             type="button"
             aria-current={activeTab === 'messages' ? 'page' : undefined}
             onClick={() => selectAdminTab('messages')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-messages py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'messages' ? 'bg-emerald-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -556,12 +583,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>Conversations avec les clients</span>
           </button>
         )}
-        {hasPerm('stats_view') && <span className="admin-dashboard-nav-group-label">Vue générale</span>}
+        {hasPerm('stats_view') && <span className="admin-dashboard-nav-group-label admin-nav-group-overview">Pilotage</span>}
         {hasPerm('stats_view') && (
           <button
             type="button"
             onClick={() => selectAdminTab('kpi')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-overview py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'kpi' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -573,7 +600,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <button
             type="button"
             onClick={() => selectAdminTab('orders')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-orders py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'orders' ? 'bg-[#0d44e8] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -589,13 +616,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             )}
           </button>
         )}
-        {canViewClients && <span className="admin-dashboard-nav-group-label">Clients</span>}
         {canViewClients && (
           <button
             type="button"
             aria-current={activeTab === 'clients' ? 'page' : undefined}
             onClick={() => selectAdminTab('clients')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-clients py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'clients' ? 'bg-purple-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -603,12 +629,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>Clients & structures ({clients.length})</span>
           </button>
         )}
-        {(canManagePacks || isGestionnaire || canViewStock) && <span className="admin-dashboard-nav-group-label">Catalogue & logistique</span>}
+        {(canManagePacks || isGestionnaire || canViewStock) && <span className="admin-dashboard-nav-group-label admin-nav-group-catalog">Catalogue & stock</span>}
         {canManagePacks && (
           <button
             type="button"
             onClick={() => selectAdminTab('packs')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-packs py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'packs' ? 'bg-indigo-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -625,7 +651,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <button
             type="button"
             onClick={() => selectAdminTab('stock')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-stock py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'stock' ? 'bg-emerald-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -642,7 +668,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <button
             type="button"
             onClick={() => selectAdminTab('lots')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-lots py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'lots' ? 'bg-amber-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -661,7 +687,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <button
             type="button"
             onClick={() => selectAdminTab('movements')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-movements py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'movements' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -669,12 +695,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>Journal des mouvements</span>
           </button>
         )}
-        {(hasPerm('stats_view') || canManageReceivables || canViewFinance) && <span className="admin-dashboard-nav-group-label">Finances & historique</span>}
+        {(hasPerm('stats_view') || canManageReceivables || canViewFinance) && <span className="admin-dashboard-nav-group-label admin-nav-group-finance">Gestion</span>}
         {hasPerm('stats_view') && (
           <button
             type="button"
             onClick={() => selectAdminTab('stats-achats')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-stats py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'stats-achats' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -686,32 +712,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <button
             type="button"
             onClick={() => selectAdminTab('receivables')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-receivables py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'receivables' ? 'bg-rose-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             <CreditCard className="w-3.5 h-3.5" />
-            <span>Créances & Recouvrement</span>
+            <span>Factures & paiements</span>
           </button>
         )}
         {canViewFinance && (
           <button
             type="button"
             onClick={() => selectAdminTab('finance')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-finance py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'finance' ? 'bg-emerald-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             <Receipt className="w-3.5 h-3.5" />
-            <span>Finances & Dépenses</span>
+            <span>Dépenses</span>
           </button>
         )}
-        {(canViewAudit || canManageSettings || isSuperAdmin) && <span className="admin-dashboard-nav-group-label">Administration</span>}
+        {(canViewAudit || canManageSettings || isSuperAdmin) && <span className="admin-dashboard-nav-group-label admin-nav-group-admin">Administration</span>}
         {canViewAudit && (
           <button
             type="button"
             onClick={() => selectAdminTab('logs')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-logs py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'logs' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -724,7 +750,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <button
             type="button"
             onClick={() => selectAdminTab('audit')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-audit py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'audit' ? 'bg-indigo-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -736,31 +762,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <button
             type="button"
             onClick={() => selectAdminTab('staff')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-staff py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'staff' ? 'bg-purple-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             <Users className="w-3.5 h-3.5" />
-            <span>Comptes employés</span>
+            <span>Équipe & permissions</span>
           </button>
         )}
         {canManageSettings && (
           <button
             type="button"
             onClick={() => selectAdminTab('settings')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-settings py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'settings' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             <Settings className="w-3.5 h-3.5" />
-            <span>Paramètres Système</span>
+            <span>Paramètres</span>
           </button>
         )}
         {isSuperAdmin && (
           <button
             type="button"
             onClick={() => selectAdminTab('export-deploy')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            className={`admin-nav-export py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
               activeTab === 'export-deploy' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -770,7 +796,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )}
       </nav>
 
-      <main id="admin-dashboard-main" className="admin-dashboard-main min-w-0 space-y-5 scroll-mt-32 sm:scroll-mt-36">
+      <main id="admin-dashboard-main" className="admin-dashboard-main admin-workspace-main min-w-0 space-y-5 scroll-mt-32 sm:scroll-mt-36">
       {availableSubTabs.length === 0 && !canManageCampaigns && (
         <div role="status" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           Aucun accès opérationnel n’est attribué à ce compte. Demandez au Super Admin de régler vos droits.
@@ -778,8 +804,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* 3. TAB 1: EXECUTIVE KPIS */}
-      {activeTab === 'kpi' && hasPerm('stats_view') && stats && (
+      {activeTab === 'kpi' && hasPerm('stats_view') && (
         <div key="tab-kpi" className="dashboard-tab-enter space-y-5">
+          <AdminWorkspaceOverview
+            orders={orders}
+            clients={clients}
+            notifications={notifications}
+            canCreateOrder={hasPerm('orders_create_for_client')}
+            canCreateInvoice={canManageFinance}
+            canSeePayments={canVerifyMobilePayments}
+            canSeeMessages={hasPerm('messages_view')}
+            canReplyToMessages={hasPerm('messages_send')}
+            onOpenQuickEntry={() => openCreateOrderModal('bon')}
+            onCreateOrder={() => openCreateOrderModal('facture')}
+            onOpenOrders={openOrderList}
+            onOpenOrdersToConfirm={openOrdersToConfirm}
+            onOpenPayments={openPaymentReview}
+            onOpenMessages={openMessages}
+          />
+          {stats && <details className="admin-workspace-metrics">
+            <summary>Indicateurs détaillés et évolution des ventes</summary>
+            <div className="space-y-5 pt-4">
           <div className="admin-dashboard-section-heading">
             <div>
               <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#0d44e8]">Pilotage</p>
@@ -966,6 +1011,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </button>
           </div>}
+            </div>
+          </details>}
         </div>
       )}
 
@@ -1013,6 +1060,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             >
               Toutes ({orders.length})
             </button>
+            {canVerifyMobilePayments && (
+              <button
+                type="button"
+                onClick={() => setOrderStatusFilter('payment_review')}
+                aria-pressed={orderStatusFilter === 'payment_review'}
+                className={`rounded-xl px-3 py-1 font-bold transition-colors ${orderStatusFilter === 'payment_review' ? 'bg-amber-700 text-white' : 'border border-amber-200 bg-white text-amber-800 hover:bg-amber-50'}`}
+              >
+                Paiements à vérifier ({orders.filter(order => order.mobilePayment?.status === 'submitted').length})
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setOrderStatusFilter('to_confirm')}
@@ -1402,6 +1459,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               products={products}
               canManageInvoices={canManageFinance}
               canOfferDiscount
+              initialDocumentChoice={createOrderInitialDocument}
               onClose={() => setIsCreateOrderModalOpen(false)}
               onOrderCreated={(order) => {
                 // New staff-created orders start as "À confirmer". Clear any
@@ -1816,7 +1874,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {activeTab === 'messages' && hasPerm('messages_view') && (
         <React.Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Chargement des messages…</div>}>
-          <StaffMessagesModule clients={clients} canSend={hasPerm('messages_send')} />
+          <StaffMessagesModule clients={clients} canSend={hasPerm('messages_send')} initialConversationId={focusedMessageConversationId} />
         </React.Suspense>
       )}
 

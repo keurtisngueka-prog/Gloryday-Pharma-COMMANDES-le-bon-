@@ -402,8 +402,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
+  const isLoginScreen = mode === 'login';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-200">
+    <div className={isLoginScreen
+      ? 'fixed inset-0 z-50 flex min-h-[100dvh] items-stretch justify-center bg-slate-100 p-0 sm:items-center sm:p-6 animate-in fade-in duration-200'
+      : 'fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-200'}>
       <div
         ref={dialogRef}
         role="dialog"
@@ -411,36 +415,65 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         aria-labelledby="auth-modal-title"
         aria-describedby="auth-modal-description"
         onKeyDown={handleDialogKeyDown}
-        className="w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden relative max-h-[90vh] flex flex-col"
+        className={isLoginScreen
+          ? 'relative flex min-h-[100dvh] w-full max-w-[30rem] flex-col overflow-hidden bg-white sm:min-h-[38rem] sm:max-h-[calc(100dvh-3rem)] sm:rounded-[2rem] sm:border sm:border-slate-200 sm:shadow-xl'
+          : 'w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden relative max-h-[90vh] flex flex-col'}
       >
-        {/* Top Header */}
-        <div className="bg-[#0f0f12] text-white p-5 relative shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Fermer la fenêtre de connexion"
-            className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
-          <div className="flex items-center gap-3 pr-8">
-            <img
-              src="/gloryday-logo-transparent.png"
-              alt="Logo Gloryday Pharma"
-              className="h-16 w-16 shrink-0 rounded-xl bg-white object-contain p-1"
-              decoding="async"
-            />
-            <div className="min-w-0">
-              <h2 id="auth-modal-title" className="text-base sm:text-lg font-bold tracking-tight">Gloryday Pharma Gabon</h2>
-              <p id="auth-modal-description" className="text-xs text-slate-400 mt-0.5">
-                Commandes médicales pour cliniques, hôpitaux & officines
+        {isLoginScreen ? (
+          <header className="relative shrink-0 px-6 pb-2 pt-[calc(env(safe-area-inset-top)+1.25rem)] sm:px-10 sm:pt-8">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Fermer la connexion et revenir au catalogue"
+              className="absolute right-5 top-[calc(env(safe-area-inset-top)+1rem)] flex h-10 w-10 items-center justify-center rounded-full bg-[#f6f4ea] text-slate-700 transition hover:bg-[#efe8c9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#176645]"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+            <div className="mx-auto flex max-w-sm flex-col items-center px-2 pt-3 text-center">
+              <img
+                src="/gloryday-logo-transparent.png"
+                alt="Logo Gloryday"
+                className="h-36 w-36 object-contain sm:h-40 sm:w-40"
+                decoding="async"
+              />
+              <span className="-mt-1 text-[11px] font-black uppercase tracking-[0.24em] text-[#176645]">Pharma</span>
+              <h2 id="auth-modal-title" className="mt-7 text-2xl font-extrabold tracking-tight text-slate-950 sm:text-[1.75rem]">Bienvenue chez vous</h2>
+              <p id="auth-modal-description" className="mt-2 max-w-xs text-sm leading-relaxed text-slate-600">
+                Votre partenaire en matériel médical au Gabon.
               </p>
             </div>
+          </header>
+        ) : (
+          <div className="bg-[#0f0f12] text-white p-5 relative shrink-0">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Fermer la fenêtre de connexion"
+              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-3 pr-8">
+              <img
+                src="/gloryday-logo-transparent.png"
+                alt="Logo Gloryday Pharma"
+                className="h-16 w-16 shrink-0 rounded-xl bg-white object-contain p-1"
+                decoding="async"
+              />
+              <div className="min-w-0">
+                <h2 id="auth-modal-title" className="text-base sm:text-lg font-bold tracking-tight">Gloryday Pharma Gabon</h2>
+                <p id="auth-modal-description" className="text-xs text-slate-400 mt-0.5">
+                  Commandes médicales pour cliniques, hôpitaux & officines
+                </p>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Content Body */}
-        <div className="p-5 overflow-y-auto flex-1">
+        <div className={isLoginScreen
+          ? 'min-h-0 flex-1 overflow-y-auto px-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] pt-4 sm:px-10'
+          : 'p-5 overflow-y-auto flex-1'}>
           {error && (
             <div role="alert" aria-live="assertive" className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -728,37 +761,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
           {/* LOGIN */}
           {mode === 'login' && (
-            <form onSubmit={handleLogin} className="space-y-3.5">
-              <button
-                type="button"
-                onClick={() => { setMode('guest_choice'); setShowCustomGoogleInput(true); setError(null); }}
-                disabled={loading}
-                className="hidden"
-              >
-                <GoogleIcon className="w-4 h-4 shrink-0" />
-                <span>Connexion directe avec Google</span>
-              </button>
-
-              <div className="relative py-1 flex items-center justify-center">
-                <span className="h-px bg-slate-200 w-full absolute"></span>
-                <span className="bg-white px-2 text-[10px] font-bold text-slate-400 relative uppercase">
-                  Ou avec vos identifiants
-                </span>
-              </div>
-
+            <div className="flex h-full min-h-[25rem] flex-col">
+            <form onSubmit={handleLogin} className="space-y-5">
               <div>
-                <label htmlFor="login-phone" className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                <label htmlFor="login-phone" className="mb-2 block text-sm font-semibold text-slate-900">
                   Téléphone de connexion
                 </label>
-                <PhoneNumberInput id="login-phone" required value={phone} onChange={setPhone} placeholder="77 00 30 04" />
+                <PhoneNumberInput id="login-phone" required value={phone} onChange={setPhone} placeholder="Votre numéro" className="auth-login-phone" compactCountryCode />
               </div>
 
               <div>
-                <label htmlFor="login-password" className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Mot de passe (8 caractères minimum)
+                <label htmlFor="login-password" className="mb-2 block text-sm font-semibold text-slate-900">
+                  Mot de passe
                 </label>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
                     id="login-password"
                     type={showPassword ? 'text' : 'password'}
@@ -769,26 +785,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full pl-9 pr-12 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#0d44e8]"
+                    className="min-h-[3.25rem] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#176645] focus:ring-4 focus:ring-emerald-50"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((visible) => !visible)}
                     aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
                     aria-pressed={showPassword}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0d44e8]"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#176645]"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
                   </button>
                 </div>
-                <p className="mt-1 text-[10px] text-slate-500" aria-live="polite">{password.length}/85 caractères · 8 minimum</p>
               </div>
 
               <div className="text-right">
                 <button
                   type="button"
                   onClick={() => { setMode('recover'); setError(null); setRecoverySubmitted(false); }}
-                  className="text-[#0d44e8] hover:underline font-semibold text-xs"
+                  className="text-sm font-semibold text-[#176645] hover:underline"
                 >
                   Mot de passe oublié ?
                 </button>
@@ -797,28 +812,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2.5 rounded-xl bg-[#0d44e8] hover:bg-[#0b3ac7] text-white font-bold text-xs shadow-md cursor-pointer"
+                className="min-h-[3.25rem] w-full rounded-2xl bg-[#176645] px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#145a3d] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-100 disabled:cursor-wait disabled:opacity-70"
               >
                 {loading ? 'Connexion...' : 'Se connecter'}
               </button>
+            </form>
 
-              <div className="flex items-center justify-between text-xs pt-1">
+              <p className="mt-6 text-center text-sm text-slate-600">
+                Vous découvrez Gloryday ?{' '}
                 <button
                   type="button"
                   onClick={() => { setMode('register'); setError(null); }}
-                  className="text-[#0d44e8] hover:underline font-bold"
+                  className="font-bold text-[#176645] hover:underline"
                 >
                   Créer un compte
                 </button>
-                <button
-                  type="button"
-                  onClick={() => { setMode('guest_choice'); setError(null); }}
-                  className="text-slate-500 hover:text-slate-700"
-                >
-                  Retour
-                </button>
-              </div>
-            </form>
+              </p>
+              <a href="https://wa.me/24177003004" target="_blank" rel="noreferrer" className="mt-auto block pt-9 text-center text-sm text-slate-500 underline-offset-4 hover:text-[#176645] hover:underline">
+                Besoin d’aide ? Nous sommes là pour vous.
+              </a>
+              <button
+                type="button"
+                onClick={() => { setMode('admin'); setError(null); }}
+                className="mx-auto mt-3 text-xs font-semibold text-slate-500 underline-offset-4 hover:text-[#176645] hover:underline"
+              >
+                Accès équipe Gloryday
+              </button>
+            </div>
           )}
 
           {/* PASSWORD RECOVERY REQUEST */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layers, Sparkles, Zap, ShoppingBag, FileText, Menu, CircleUserRound } from 'lucide-react';
+import { Layers, Sparkles, Zap, ShoppingBag, FileText, Menu, CircleUserRound, LayoutDashboard, MessageCircle } from 'lucide-react';
 
 interface MobileBottomNavProps {
   activeTab: string;
@@ -7,6 +7,7 @@ interface MobileBottomNavProps {
   cartCount: number;
   onOpenSidebar: () => void;
   isClientSpace?: boolean;
+  isAdminSpace?: boolean;
   onSelectClientSpace?: () => void;
   draftsCount?: number;
 }
@@ -17,6 +18,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   cartCount,
   onOpenSidebar,
   isClientSpace = false,
+  isAdminSpace = false,
   onSelectClientSpace,
   draftsCount
 }) => {
@@ -38,51 +40,61 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-[0_-4px_20px_rgba(22,22,24,0.06)]"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
-      <div className={`grid ${isClientSpace ? 'grid-cols-4' : 'grid-cols-5'} items-center h-16 max-w-md mx-auto px-1`}>
+      <div className={`grid ${isClientSpace || isAdminSpace ? 'grid-cols-4' : 'grid-cols-5'} items-center h-16 max-w-md mx-auto px-1`}>
         {/* Tab 1: Catalogue */}
         <button
           type="button"
-          onClick={() => setActiveTab('catalog')}
+          onClick={() => setActiveTab(isAdminSpace ? 'admin' : 'catalog')}
           className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${
-            activeTab === 'catalog'
+            (isAdminSpace ? activeTab === 'admin' : activeTab === 'catalog')
               ? (isClientSpace ? 'text-[#176645] font-bold' : 'text-[#0d44e8] font-bold')
               : 'text-slate-500 hover:text-slate-900 font-medium'
           }`}
         >
           <div className="relative">
-            <Layers className="w-5 h-5 stroke-[2.2]" />
-            {activeTab === 'catalog' && (
+            {isAdminSpace ? <LayoutDashboard className="w-5 h-5 stroke-[2.2]" /> : <Layers className="w-5 h-5 stroke-[2.2]" />}
+            {(isAdminSpace ? activeTab === 'admin' : activeTab === 'catalog') && (
               <span className={`absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${isClientSpace ? 'bg-[#176645]' : 'bg-[#0d44e8]'}`}></span>
             )}
           </div>
           <span className="text-[10px] tracking-tight mt-1 leading-none">
-            Catalogue
+            {isAdminSpace ? 'Vue' : 'Catalogue'}
           </span>
         </button>
 
         {/* Tab 2: quick order for clients; packs remain reachable from the catalogue */}
         <button
           type="button"
-          onClick={() => setActiveTab(isClientSpace ? 'bulk-order' : 'packs')}
+          onClick={() => setActiveTab(isClientSpace ? 'bulk-order' : isAdminSpace ? 'admin-orders' : 'packs')}
           className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${
-            activeTab === (isClientSpace ? 'bulk-order' : 'packs')
+            activeTab === (isClientSpace ? 'bulk-order' : isAdminSpace ? 'admin-orders' : 'packs')
               ? (isClientSpace ? 'text-[#176645] font-bold' : 'text-[#0d44e8] font-bold')
               : 'text-slate-500 hover:text-slate-900 font-medium'
           }`}
         >
           <div className="relative">
-            {isClientSpace ? <Zap className="w-5 h-5 stroke-[2.2]" /> : <Sparkles className="w-5 h-5 stroke-[2.2]" />}
-            {activeTab === (isClientSpace ? 'bulk-order' : 'packs') && (
+            {isClientSpace ? <Zap className="w-5 h-5 stroke-[2.2]" /> : isAdminSpace ? <FileText className="w-5 h-5 stroke-[2.2]" /> : <Sparkles className="w-5 h-5 stroke-[2.2]" />}
+            {activeTab === (isClientSpace ? 'bulk-order' : isAdminSpace ? 'admin-orders' : 'packs') && (
               <span className={`absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${isClientSpace ? 'bg-[#176645]' : 'bg-[#0d44e8]'}`}></span>
             )}
           </div>
           <span className="text-[10px] tracking-tight mt-1 leading-none">
-            {isClientSpace ? 'Saisie rapide' : 'Packs'}
+            {isClientSpace ? 'Saisie rapide' : isAdminSpace ? 'Commandes' : 'Packs'}
           </span>
         </button>
 
         {/* Tab 3: Panier */}
-        <button
+        {isAdminSpace ? (
+          <button
+            type="button"
+            onClick={() => setActiveTab('admin-messages')}
+            aria-current={activeTab === 'admin-messages' ? 'page' : undefined}
+            className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${activeTab === 'admin-messages' ? 'text-[#176645] font-bold' : 'text-slate-500 hover:text-slate-900 font-medium'}`}
+          >
+            <MessageCircle className="w-5 h-5 stroke-[2.2]" />
+            <span className="text-[10px] tracking-tight mt-1 leading-none">Messages</span>
+          </button>
+        ) : <button
           type="button"
           onClick={() => setActiveTab('cart')}
           className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-all duration-300 cursor-pointer relative ${
@@ -113,7 +125,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           <span className="text-[10px] tracking-tight mt-1 leading-none">
             Panier
           </span>
-        </button>
+        </button>}
 
         {isClientSpace ? (
           <button
@@ -133,6 +145,15 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               )}
             </div>
             <span className="text-[10px] tracking-tight mt-1 leading-none">Mon espace</span>
+          </button>
+        ) : isAdminSpace ? (
+          <button
+            type="button"
+            onClick={onOpenSidebar}
+            className="flex flex-col items-center justify-center h-full min-h-[44px] text-slate-500 hover:text-slate-900 font-medium transition-colors cursor-pointer relative"
+          >
+            <Menu className="w-5 h-5 stroke-[2.2]" />
+            <span className="text-[10px] tracking-tight mt-1 leading-none">Menu</span>
           </button>
         ) : (
           <>

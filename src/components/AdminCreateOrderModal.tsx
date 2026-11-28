@@ -13,6 +13,7 @@ interface AdminCreateOrderModalProps {
   products: Product[];
   canManageInvoices: boolean;
   canOfferDiscount: boolean;
+  initialDocumentChoice?: DocumentChoice;
   onClose: () => void;
   onOrderCreated: (order: Order) => void;
   onViewOrderPdf?: (order: Order) => void;
@@ -39,6 +40,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
   products,
   canManageInvoices,
   canOfferDiscount,
+  initialDocumentChoice = 'bon',
   onClose,
   onOrderCreated,
   onViewOrderPdf,
@@ -59,7 +61,7 @@ export const AdminCreateOrderModal: React.FC<AdminCreateOrderModalProps> = ({
   const [neighborhoodId, setNeighborhoodId] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'especes' | 'airtel_money' | 'moov_money' | 'virement' | 'cheque'>('virement');
-  const [documentChoice, setDocumentChoice] = useState<DocumentChoice>('bon');
+  const [documentChoice, setDocumentChoice] = useState<DocumentChoice>(initialDocumentChoice);
   const [includeStampOnInvoice, setIncludeStampOnInvoice] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
