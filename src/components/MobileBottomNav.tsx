@@ -8,7 +8,6 @@ interface MobileBottomNavProps {
   onOpenSidebar: () => void;
   isClientSpace?: boolean;
   onSelectClientSpace?: () => void;
-  unreadNotificationCount?: number;
   draftsCount?: number;
 }
 
@@ -19,7 +18,6 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   onOpenSidebar,
   isClientSpace = false,
   onSelectClientSpace,
-  unreadNotificationCount = 0,
   draftsCount
 }) => {
   const [isBumping, setIsBumping] = useState(false);
@@ -130,7 +128,6 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           >
             <div className="relative">
               <CircleUserRound className="w-5 h-5 stroke-[2.2]" />
-              {unreadNotificationCount > 0 && <span className="absolute -right-2 -top-1 min-w-4 rounded-full bg-rose-600 px-1 text-center text-[9px] font-black leading-4 text-white">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}
               {activeTab === 'dashboard' && (
                 <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#176645]"></span>
               )}

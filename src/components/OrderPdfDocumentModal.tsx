@@ -166,7 +166,7 @@ export const OrderPdfDocumentModal: React.FC<OrderPdfDocumentModalProps> = ({
             <div className={`${docMode === 'order' ? 'bg-[#0d44e8]' : 'bg-slate-800'} text-white px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2`}>
               <div className="flex items-center gap-3">
                 <img
-                  src="/gloryday-logo.png"
+                  src="/gloryday-logo-transparent.png"
                   alt="Logo Gloryday Pharma"
                   className="h-20 w-20 shrink-0 rounded-xl bg-white object-contain p-1"
                 />

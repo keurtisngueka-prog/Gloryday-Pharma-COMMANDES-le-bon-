@@ -24,7 +24,8 @@ import {
   MapPin,
   Moon,
   Sun,
-  UserRound
+  UserRound,
+  Zap
 } from 'lucide-react';
 import { User, AppRole } from '../types';
 
@@ -45,7 +46,6 @@ interface AppSidebarProps {
   onOpenNotifications?: () => void;
   onToggleTheme?: () => void;
   isDarkTheme?: boolean;
-  unreadNotificationCount?: number;
   draftsCount?: number;
 }
 
@@ -63,8 +63,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   onOpenClientProfile,
   onOpenNotifications,
   onToggleTheme,
-  isDarkTheme = false,
-  unreadNotificationCount = 0
+  isDarkTheme = false
 }) => {
   const role: AppRole = currentUser?.role || 'client';
   const drawerContentRef = useRef<HTMLDivElement>(null);
@@ -114,7 +113,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               title="GLORYDAY Pharma · Clic pour réinitialiser le panier à 0 et revenir à l'accueil"
             >
               <img
-                src="/gloryday-emblem.png"
+                src="/gloryday-emblem-transparent.png"
                 alt="Emblème Gloryday"
                 className="w-10 h-8 rounded-md object-contain shrink-0 group-hover:scale-105 transition-transform"
               />
@@ -165,6 +164,14 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 block mb-1">
                 Mon espace
               </span>
+              <button
+                type="button"
+                onClick={() => handleNav('bulk-order')}
+                className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${activeTab === 'bulk-order' ? 'bg-emerald-50 text-emerald-800 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
+              >
+                <span className="flex items-center gap-2.5"><Zap className="w-4 h-4 text-emerald-700" />Saisie rapide</span>
+                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              </button>
               {currentUser ? (
                 <>
                   <button
@@ -189,7 +196,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                     className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer"
                   >
                     <span className="flex items-center gap-2.5"><Bell className="w-4 h-4 text-[#0d44e8]" />Notifications et messages</span>
-                    {unreadNotificationCount > 0 && <span className="min-w-5 rounded-full bg-rose-600 px-1.5 py-0.5 text-center text-[10px] font-bold text-white">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                   </button>
                   <button
                     type="button"
@@ -224,7 +231,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 <span className="flex items-center gap-2.5"><Layers className="w-4 h-4 text-[#0d44e8]" />Catalogue médical</span><ChevronRight className="w-3.5 h-3.5 text-slate-400" />
               </button>
               <button type="button" onClick={() => handleNav('bulk-order')} className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${activeTab === 'bulk-order' ? 'bg-[#eef3ff] text-[#0d44e8] font-bold' : 'text-slate-700 hover:bg-slate-50'}`}>
-                <span className="flex items-center gap-2.5"><span className="w-4 text-center font-bold text-[#0d44e8]">⚡</span>Saisie rapide</span><span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-100 text-[#0d44e8]">Bloc</span>
+                <span className="flex items-center gap-2.5"><Zap className="w-4 h-4 text-[#0d44e8]" />Saisie rapide</span><ChevronRight className="w-3.5 h-3.5 text-slate-400" />
               </button>
               <button type="button" onClick={() => handleNav('packs')} className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${activeTab === 'packs' ? 'bg-[#eef3ff] text-[#0d44e8] font-bold' : 'text-slate-700 hover:bg-slate-50'}`}>
                 <span className="flex items-center gap-2.5"><Sparkles className="w-4 h-4 text-amber-500" />Packs promotionnels</span><ChevronRight className="w-3.5 h-3.5 text-slate-400" />

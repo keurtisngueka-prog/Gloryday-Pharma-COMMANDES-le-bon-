@@ -12,7 +12,7 @@ import {
   ShieldCheck,
   LogOut
 } from 'lucide-react';
-import { User as UserType, AppNotification } from '../types';
+import { User as UserType } from '../types';
 
 interface NavbarProps {
   activeTab: string;
@@ -22,7 +22,6 @@ interface NavbarProps {
   currentUser: UserType | null;
   onOpenAuth: () => void;
   onLogout: () => void;
-  notifications: AppNotification[];
   onOpenNotifications: () => void;
   onToggleSidebar: () => void;
   onLogoClick?: () => void;
@@ -38,12 +37,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
   onOpenAuth,
   onLogout,
-  notifications,
   onOpenNotifications,
   onToggleSidebar,
   onLogoClick
 }) => {
-  const unreadCount = notifications.filter(n => !n.read).length;
   const role = currentUser?.role || 'client';
 
   // Subtle Cart Animation on item addition
@@ -158,7 +155,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               aria-label="Revenir à l’accueil et en haut de la page"
             >
               <img
-                src="/gloryday-emblem.png"
+                src="/gloryday-emblem-transparent.png"
                 alt="Emblème Gloryday"
                 className="w-10 h-8 rounded-md object-contain shrink-0 group-hover:scale-105 transition-transform"
               />
@@ -292,9 +289,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Notifications"
             >
               <Bell className="w-4 h-4" />
-              {unreadCount > 0 && (
-                <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full ring-2 ring-white"></span>
-              )}
             </button>
 
             {/* Profile / Account */}

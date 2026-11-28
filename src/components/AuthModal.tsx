@@ -425,7 +425,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
           <div className="flex items-center gap-3 pr-8">
             <img
-              src="/gloryday-logo.png"
+              src="/gloryday-logo-transparent.png"
               alt="Logo Gloryday Pharma"
               className="h-16 w-16 shrink-0 rounded-xl bg-white object-contain p-1"
               decoding="async"

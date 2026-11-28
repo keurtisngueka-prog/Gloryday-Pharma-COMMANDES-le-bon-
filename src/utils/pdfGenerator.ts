@@ -49,7 +49,7 @@ function readBlobAsDataUrl(blob: Blob): Promise<string> {
 
 export async function loadBrandLogoDataUrl(): Promise<string | null> {
   try {
-    const response = await fetch('/gloryday-logo.png', { cache: 'force-cache' });
+    const response = await fetch('/gloryday-logo-transparent.png', { cache: 'force-cache' });
     if (!response.ok) return null;
     return await readBlobAsDataUrl(await response.blob());
   } catch {

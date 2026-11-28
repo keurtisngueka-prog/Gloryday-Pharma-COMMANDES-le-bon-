@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import './adminDashboardEnhancements.css';
 import { 
   ShieldCheck, 
   TrendingUp, 
@@ -491,7 +492,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2 self-start md:self-center flex-wrap">
-
+            {hasPerm('messages_view') && (
+              <button
+                type="button"
+                onClick={() => selectAdminTab('messages')}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-100 bg-white px-3.5 py-2 text-xs font-bold text-emerald-900 shadow-sm transition hover:bg-emerald-50"
+              >
+                <MessageCircle className="h-4 w-4 text-emerald-700" />
+                <span>Conversations clients</span>
+              </button>
+            )}
             {canManageCatalog && (
               <button
                 type="button"
@@ -532,6 +542,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* 2. SUB-TABS NAVIGATION WITH DYNAMIC BADGES */}
       <div className="admin-dashboard-layout">
       <nav aria-label="Sections du tableau de bord" tabIndex={0} className="admin-dashboard-nav flex gap-1.5 overflow-x-auto text-xs font-bold lg:flex-col lg:overflow-x-visible">
+        {hasPerm('messages_view') && <span className="admin-dashboard-nav-group-label">Relation client</span>}
+        {hasPerm('messages_view') && (
+          <button
+            type="button"
+            aria-current={activeTab === 'messages' ? 'page' : undefined}
+            onClick={() => selectAdminTab('messages')}
+            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'messages' ? 'bg-emerald-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <MessageCircle className="w-3.5 h-3.5" />
+            <span>Conversations avec les clients</span>
+          </button>
+        )}
+        {hasPerm('stats_view') && <span className="admin-dashboard-nav-group-label">Vue générale</span>}
         {hasPerm('stats_view') && (
           <button
             type="button"
@@ -564,6 +589,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             )}
           </button>
         )}
+        {canViewClients && <span className="admin-dashboard-nav-group-label">Clients</span>}
+        {canViewClients && (
+          <button
+            type="button"
+            aria-current={activeTab === 'clients' ? 'page' : undefined}
+            onClick={() => selectAdminTab('clients')}
+            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'clients' ? 'bg-purple-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Clients & structures ({clients.length})</span>
+          </button>
+        )}
+        {(canManagePacks || isGestionnaire || canViewStock) && <span className="admin-dashboard-nav-group-label">Catalogue & logistique</span>}
         {canManagePacks && (
           <button
             type="button"
@@ -629,6 +669,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>Journal des mouvements</span>
           </button>
         )}
+        {(hasPerm('stats_view') || canManageReceivables || canViewFinance) && <span className="admin-dashboard-nav-group-label">Finances & historique</span>}
         {hasPerm('stats_view') && (
           <button
             type="button"
@@ -665,30 +706,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>Finances & Dépenses</span>
           </button>
         )}
-        {canViewClients && (
-          <button
-            type="button"
-            onClick={() => selectAdminTab('clients')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
-              activeTab === 'clients' ? 'bg-purple-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>Clients & structures ({clients.length})</span>
-          </button>
-        )}
-        {hasPerm('messages_view') && (
-          <button
-            type="button"
-            onClick={() => selectAdminTab('messages')}
-            className={`py-2 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
-              activeTab === 'messages' ? 'bg-indigo-800 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <MessageCircle className="w-3.5 h-3.5" />
-            <span>Messages du site</span>
-          </button>
-        )}
+        {(canViewAudit || canManageSettings || isSuperAdmin) && <span className="admin-dashboard-nav-group-label">Administration</span>}
         {canViewAudit && (
           <button
             type="button"
@@ -1798,7 +1816,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {activeTab === 'messages' && hasPerm('messages_view') && (
         <React.Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Chargement des messages…</div>}>
-          <StaffMessagesModule currentUser={currentUser} />
+          <StaffMessagesModule clients={clients} canSend={hasPerm('messages_send')} />
         </React.Suspense>
       )}
 

@@ -1132,15 +1132,14 @@ export default function App() {
         }}
         onToggleTheme={() => setIsDarkTheme(theme => !theme)}
         isDarkTheme={isDarkTheme}
-        unreadNotificationCount={notifications.filter(notification => !notification.read).length}
         draftsCount={draftsCount}
       />
 
       {isBrandIntroVisible && (
         <div className="gloryday-brand-intro fixed inset-0 z-[300] pointer-events-none grid place-items-center bg-white" role="status" aria-label="Ouverture de Gloryday Pharma">
           <div className="gloryday-brand-intro-content flex flex-col items-center px-6 text-center">
-            <img src="/gloryday-emblem.png" alt="Logo Gloryday Pharma" className="gloryday-brand-intro-logo h-24 w-28 object-contain" />
-            <p className="mt-3 text-xl font-extrabold tracking-[0.12em] text-slate-900">GLORYDAY PHARMA</p>
+            <img src="/gloryday-logo-transparent.png" alt="Logo Gloryday" className="gloryday-brand-intro-logo h-52 w-52 object-contain" />
+            <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.22em] text-slate-700">Pharma</p>
             <p className="mt-1 text-sm text-slate-600">Votre fournisseur de matériel médical au Gabon.</p>
           </div>
         </div>
@@ -1158,7 +1157,6 @@ export default function App() {
         currentUser={currentUser}
         onOpenAuth={() => setIsAuthModalOpen(true)}
         onLogout={handleLogout}
-        notifications={notifications}
         onOpenNotifications={() => setIsNotificationModalOpen(true)}
         onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
         onOpenDraftsModal={() => setIsDraftsModalOpen(true)}
@@ -1243,7 +1241,6 @@ export default function App() {
               <ClientDashboard
                 orders={orders}
                 currentUser={currentUser}
-                notifications={notifications}
                 onOpenNotifications={() => setIsNotificationModalOpen(true)}
                 onOpenClientMenu={() => setIsSidebarOpen(true)}
                 profileModalOpen={isClientProfileModalOpen}
@@ -1677,7 +1674,6 @@ export default function App() {
         cartCount={cartCount}
         onOpenSidebar={() => setIsSidebarOpen(true)}
         isClientSpace={!currentUser || currentUser.role === 'client'}
-        unreadNotificationCount={notifications.filter(notification => !notification.read).length}
         onSelectClientSpace={() => {
           setActiveTab('dashboard');
           setClientHomeRequestVersion(version => version + 1);

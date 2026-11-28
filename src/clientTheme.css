@@ -25,6 +25,46 @@ html[data-gloryday-theme='dark'] .gloryday-app .bg-slate-200 {
   background-color: #1a2a21 !important;
 }
 
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='bg-emerald-50'], [class~='bg-emerald-100'], [class~='bg-emerald-50/30'],
+  [class~='bg-green-50'], [class~='bg-green-100']
+) {
+  background-color: #173326 !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='bg-blue-50'], [class~='bg-blue-100'], [class~='bg-blue-50/20'],
+  [class~='bg-cyan-50'], [class~='bg-cyan-100']
+) {
+  background-color: #192d3b !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='bg-indigo-50'], [class~='bg-indigo-100'],
+  [class~='bg-purple-50'], [class~='bg-purple-100'], [class~='bg-purple-50/30']
+) {
+  background-color: #29263c !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='bg-amber-50'], [class~='bg-amber-100'], [class~='bg-amber-50/30'],
+  [class~='bg-yellow-50'], [class~='bg-yellow-100']
+) {
+  background-color: #352d1b !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='bg-rose-50'], [class~='bg-rose-100'], [class~='bg-red-50'], [class~='bg-red-100'],
+  [class~='bg-pink-50'], [class~='bg-pink-100']
+) {
+  background-color: #382329 !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app [class~='bg-[#f4f6f3]'],
+html[data-gloryday-theme='dark'] .gloryday-app [class~='bg-[#fff9e9]'] {
+  background-color: #17251d !important;
+}
+
 html[data-gloryday-theme='dark'] .gloryday-app .text-slate-950,
 html[data-gloryday-theme='dark'] .gloryday-app .text-slate-900,
 html[data-gloryday-theme='dark'] .gloryday-app .text-slate-800,
@@ -38,6 +78,41 @@ html[data-gloryday-theme='dark'] .gloryday-app .text-slate-400 {
   color: #aebdb3 !important;
 }
 
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='text-emerald-700'], [class~='text-emerald-800'], [class~='text-emerald-900'],
+  [class~='text-green-700'], [class~='text-green-800'], [class~='text-green-900']
+) {
+  color: #a7e9bd !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='text-blue-700'], [class~='text-blue-800'], [class~='text-blue-900'],
+  [class~='text-cyan-700'], [class~='text-cyan-800'], [class~='text-cyan-900']
+) {
+  color: #acd7fb !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='text-indigo-700'], [class~='text-indigo-800'], [class~='text-indigo-900'],
+  [class~='text-purple-700'], [class~='text-purple-800'], [class~='text-purple-900']
+) {
+  color: #d0c3ff !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='text-amber-700'], [class~='text-amber-800'], [class~='text-amber-900'],
+  [class~='text-yellow-700'], [class~='text-yellow-800'], [class~='text-yellow-900']
+) {
+  color: #f3d58d !important;
+}
+
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='text-rose-700'], [class~='text-rose-800'], [class~='text-rose-900'],
+  [class~='text-red-700'], [class~='text-red-800'], [class~='text-red-900']
+) {
+  color: #ffb5c0 !important;
+}
+
 html[data-gloryday-theme='dark'] .gloryday-app .border-slate-50,
 html[data-gloryday-theme='dark'] .gloryday-app .border-slate-100,
 html[data-gloryday-theme='dark'] .gloryday-app .border-slate-200,
@@ -45,12 +120,40 @@ html[data-gloryday-theme='dark'] .gloryday-app .border-slate-300 {
   border-color: #2b3d32 !important;
 }
 
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='border-emerald-100'], [class~='border-emerald-200'], [class~='border-emerald-300'],
+  [class~='border-green-100'], [class~='border-green-200']
+) { border-color: #315340 !important; }
+
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='border-blue-100'], [class~='border-blue-200'], [class~='border-indigo-100'], [class~='border-indigo-200']
+) { border-color: #354b60 !important; }
+
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='border-amber-100'], [class~='border-amber-200'], [class~='border-yellow-100'], [class~='border-yellow-200']
+) { border-color: #5a4b2c !important; }
+
+html[data-gloryday-theme='dark'] .gloryday-app :is(
+  [class~='border-rose-100'], [class~='border-rose-200'], [class~='border-red-100'], [class~='border-red-200']
+) { border-color: #5c343d !important; }
+
+html[data-gloryday-theme='dark'] .gloryday-app [class~='hover:bg-slate-50']:hover,
+html[data-gloryday-theme='dark'] .gloryday-app [class~='hover:bg-slate-100']:hover,
+html[data-gloryday-theme='dark'] .gloryday-app [class~='hover:bg-white']:hover {
+  background-color: #22342a !important;
+}
+
 html[data-gloryday-theme='dark'] .gloryday-app input,
 html[data-gloryday-theme='dark'] .gloryday-app textarea,
 html[data-gloryday-theme='dark'] .gloryday-app select {
-  background-color: #101b15;
-  border-color: #34483b;
-  color: #e6eee9;
+  background-color: #101b15 !important;
+  border-color: #34483b !important;
+  color: #e6eee9 !important;
+}
+
+html[data-gloryday-theme='dark'] .admin-dashboard-nav-group-label {
+  border-top-color: #2b3d32;
+  color: #9aac9f;
 }
 
 html[data-gloryday-theme='dark'] .gloryday-app input::placeholder,

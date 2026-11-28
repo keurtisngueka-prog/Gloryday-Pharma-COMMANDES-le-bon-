@@ -31,7 +31,7 @@ import {
   Bell,
   ArrowRight
 } from 'lucide-react';
-import { AppNotification, Order, OrderStatus, OrderTimelineEvent, User, MobilePaymentDetails, ClientRemainderChoice } from '../types';
+import { Order, OrderStatus, OrderTimelineEvent, User, MobilePaymentDetails, ClientRemainderChoice } from '../types';
 import { formatCollectionDueDate, getOrderPaidAmount, getOrderRemainingBalance, isCollectionOverdue } from '../utils/orderFinance';
 import { getOrderBillingTotal, getOrderDeliveredQuantity, getOrderRemainingQuantity } from '../utils/orderFulfillment';
 import { downloadInvoiceProjectPdf, generateInternalPurchaseOrderPdf } from '../utils/pdfGenerator';
@@ -55,7 +55,6 @@ interface ClientDashboardProps {
   onViewOrderPdf: (order: Order) => void;
   onTrackDelivery?: (order: Order) => void;
   onProfileUpdated?: (user: User) => void;
-  notifications?: AppNotification[];
   onOpenNotifications?: () => void;
   onOpenClientMenu?: () => void;
   profileModalOpen?: boolean;
@@ -277,7 +276,6 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   onViewOrderPdf,
   onTrackDelivery,
   onProfileUpdated,
-  notifications = [],
   onOpenNotifications,
   onOpenClientMenu,
   profileModalOpen,
@@ -583,11 +581,6 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const homeOrder = [...orders]
     .filter(order => order.status !== 'Annulée')
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] || null;
-  const unreadNotificationCount = notifications.filter(notification => !notification.read).length;
-  const latestUnreadNotification = [...notifications]
-    .filter(notification => !notification.read)
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0] || null;
-
   const deliverySteps = [
     { key: 'preparation', label: '1. Colisage & Validation', desc: 'En préparation au dépôt' },
     { key: 'picked_up', label: '2. Pris en charge', desc: 'Coursier en départ' },
@@ -684,9 +677,8 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 {currentUser?.facilityName && <p className="mt-2 text-xs font-semibold text-slate-500">{currentUser.facilityName}</p>}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <button type="button" onClick={onOpenNotifications} aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} non lues` : ''}`} className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50">
+                <button type="button" onClick={onOpenNotifications} aria-label="Notifications" className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50">
                   <Bell className="h-5 w-5" />
-                  {unreadNotificationCount > 0 && <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-rose-600 px-1.5 py-0.5 text-center text-[10px] font-black text-white">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}
                 </button>
                 {currentUser && <button type="button" onClick={onOpenClientMenu} aria-label="Ouvrir mon profil et mes préférences" className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl bg-[#f6e6ae] text-amber-950 transition hover:brightness-95">
                   {currentUser.avatarUrl ? <img src={currentUser.avatarUrl} alt="" className="h-full w-full object-cover" /> : <UserRound className="h-5 w-5" />}
@@ -755,7 +747,6 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 </div>
               </section>
 
-              {latestUnreadNotification && <button type="button" onClick={onOpenNotifications} className="w-full rounded-2xl border border-amber-200 bg-[#fff9e9] p-4 text-left transition hover:bg-amber-50"><span className="text-[10px] font-extrabold uppercase tracking-wide text-amber-900">Nouvelle notification</span><span className="mt-1 block text-sm font-bold text-slate-900">{latestUnreadNotification.title || latestUnreadNotification.message}</span><span className="mt-1 block text-xs text-slate-600">Appuyez pour voir vos notifications.</span></button>}
             </>
           )}
         </div>
