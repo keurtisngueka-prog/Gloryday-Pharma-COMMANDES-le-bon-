@@ -180,7 +180,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 <>
                   <button
                     type="button"
-                    onClick={() => { onClose(); onOpenClientProfile?.('contacts'); }}
+                    onClick={() => { onClose(); onOpenClientProfile?.('facility'); }}
                     className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 cursor-pointer"
                   >
                     <span className="flex items-center gap-2.5"><UserRound className="w-4 h-4 text-emerald-800" />Profil et coordonnées</span>
